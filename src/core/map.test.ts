@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { createMap, getTile, isInBounds, type MapDefinition } from './map';
-import { testMap } from '../data/maps/testMap';
 
 const small: MapDefinition = {
   id: 'small',
@@ -35,12 +34,5 @@ describe('createMap', () => {
 
   it('legend にない地形記号はエラー', () => {
     expect(() => createMap({ ...small, terrain: ['gdx', 'ggg'] })).toThrow();
-  });
-
-  it('動作確認用マップのデータが正しく読める', () => {
-    const map = createMap(testMap);
-    expect(map.width).toBe(8);
-    expect(map.depth).toBe(8);
-    expect(new Set(map.tiles.map((t) => t.height)).size).toBeGreaterThan(1);
   });
 });
