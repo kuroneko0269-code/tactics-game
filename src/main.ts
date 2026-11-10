@@ -8,7 +8,8 @@ import { createStage } from './render/stage';
 import { createCameraRig } from './render/cameraRig';
 import { createMapView } from './render/mapView';
 import { createBattleView } from './render/battleView';
-import { onTapObject } from './render/picker';
+import { createPicker } from './render/picker';
+import { attachCameraInput } from './render/cameraInput';
 import { createBattleController } from './ui/battleController';
 import { createHud } from './ui/hud';
 import { TEXT } from './ui/text';
@@ -43,6 +44,7 @@ function main(): void {
     target: mapView.center,
     radius: mapView.radius,
     heightRange: mapView.heightRange,
+    halfExtent: { x: first.state.map.width / 2, z: first.state.map.depth / 2 },
   });
   stage.onResize((w, h) => rig.resize(w, h));
 
@@ -55,44 +57,69 @@ function main(): void {
   });
   view.sync(first.state);
 
-  const hud = createHud(hudEl, first.state.map.id, { onRotate: (d) => rig.rotate(d) });
+  const hud = createHud(hudEl, first.state.map.id, {
+    onRotate: (d) => rig.rotate(d),
+    onZoom: (steps) => rig.zoomStep(steps),
+    onCycleHeight: () => rig.cycleHeight(),
+    onResetView: () => rig.reset(),
+    initialHeight: rig.heightLevel,
+  });
   const labels = createUnitLabels(
     labelsEl,
     first.state.units.map((u) => ({ id: u.id, team: u.team, hp: u.hp, maxHp: u.stats.maxHp })),
   );
-  const controller = createBattleController(first, { view, hud, labels, newBattle });
+  // 手番のユニットなどが画面の外にいる時に、カメラを寄せる（足もとと頭上の両方が見えるように）
+  const focusTiles = (tiles: readonly { x: number; z: number }[]) =>
+    rig.focusOn(
+      tiles.flatMap((t) => {
+        const top = mapView.tileTop(t.x, t.z);
+        return [top, top.clone().add(new THREE.Vector3(0, 1.2, 0))];
+      }),
+    );
+  const controller = createBattleController(first, { view: { ...view, focusTiles }, hud, labels, newBattle });
 
-  onTapObject(
-    stage.renderer.domElement,
-    () => rig.camera,
-    () => view.pickTargets(),
-    (objects) => {
-      const coords = objects.map((o) => view.coordOf(o)).filter((c) => c !== undefined);
-      const direction = objects.map((o) => view.directionOf(o)).find((d) => d !== undefined);
-      controller.onTap(coords, direction);
-    },
-  );
+  const canvas = stage.renderer.domElement;
+  const pick = createPicker(canvas, () => rig.camera, () => view.pickTargets());
+  attachCameraInput(canvas, rig, (x, y) => {
+    const objects = pick(x, y);
+    const coords = objects.map((o) => view.coordOf(o)).filter((c) => c !== undefined);
+    const direction = objects.map((o) => view.directionOf(o)).find((d) => d !== undefined);
+    controller.onTap(coords, direction);
+  });
+  // iPhone の Safari で、2本指の操作がページ全体の拡大にならないようにする
+  document.addEventListener('gesturestart', (e) => e.preventDefault());
 
-  // キーボードでも回転できるように（Q / E キー、左右矢印キー）
+  // キーボードでも操作できるように（Q / E / 左右矢印キーで回転、+ / - で拡大・縮小）
   window.addEventListener('keydown', (e) => {
     if (e.key === 'q' || e.key === 'ArrowLeft') rig.rotate(-1);
     if (e.key === 'e' || e.key === 'ArrowRight') rig.rotate(1);
+    if (e.key === '+' || e.key === ';' || e.key === '=') rig.zoomStep(1);
+    if (e.key === '-') rig.zoomStep(-1);
   });
 
-  // 開発中だけ、自動テスト（ブラウザ操作の自動化）から状態と画面座標を読めるようにする
+  // 開発中だけ、自動プレイ（npm run autoplay）から状態と画面座標を読めるようにする。
+  // 開発中は URL に ?speed=4 と付けると、動きの表示を4倍速にできる（戦闘の結果は変わらない）
+  let speed = 1;
   if (import.meta.env.DEV) {
+    const speedParam = Number(new URLSearchParams(location.search).get('speed'));
+    if (speedParam > 0) speed = Math.min(speedParam, 20);
     (window as unknown as Record<string, unknown>).__tactics = {
       state: () => controller.state,
       mode: () => controller.mode,
       modeDetail: () => controller.modeDetail,
       tileScreen: (x: number, z: number) => view.tileScreenPosition(x, z),
+      tilePoints: (x: number, z: number) => view.tileScreenPoints(x, z),
+      unitScreen: (id: string) => view.unitScreenPosition(id),
+      arrowScreen: (dir: Parameters<typeof view.arrowScreenPosition>[0]) => view.arrowScreenPosition(dir),
+      pickAt: (x: number, y: number) => pick(x, y).map((o) => view.coordOf(o) ?? null),
+      camera: () => ({ zoom: rig.zoom, heightLevel: rig.heightLevel, quarter: rig.quarter, idle: rig.idle }),
     };
   }
 
   const timer = new THREE.Timer();
   stage.renderer.setAnimationLoop((time) => {
     timer.update(time);
-    const dt = Math.min(timer.getDelta(), 0.1);
+    const dt = Math.min(timer.getDelta(), 0.1) * speed;
     const elapsed = timer.getElapsed();
     rig.update(dt);
     mapView.update(elapsed);

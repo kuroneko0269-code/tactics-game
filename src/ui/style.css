@@ -365,7 +365,7 @@ body {
   top: 50%;
 }
 
-/* 下部: 回転ボタン・案内・行動ボタン */
+/* 下部: カメラの操作ボタン・案内・行動ボタン */
 .hud-bottom {
   display: flex;
   justify-content: space-between;
@@ -373,10 +373,41 @@ body {
   gap: 8px;
 }
 
-.rotate-buttons {
-  display: flex;
+/* カメラの操作ボタン。左下に 2列×3段でまとめ、マップの中央を隠さない */
+.camera-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, 48px);
+  grid-auto-rows: 48px;
   flex: none;
-  gap: 8px;
+  gap: 6px;
+}
+
+.camera-buttons .hud-button.small {
+  min-width: 48px;
+  min-height: 48px;
+  width: 48px;
+  height: 48px;
+  padding: 2px;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.camera-buttons .hud-button .icon {
+  font-size: 20px;
+}
+
+.camera-buttons .camera-height .icon {
+  font-size: 13px;
+  font-weight: bold;
+  line-height: 20px;
+}
+
+.camera-buttons .camera-height .label {
+  color: var(--accent);
+  opacity: 1;
 }
 
 .hud-button .label {
@@ -531,6 +562,14 @@ body {
 
   .unit-info .info-stats {
     display: none;
+  }
+
+  /* 縦が狭いので、カメラの操作ボタンは 3列×2段にして高さを抑える */
+  .camera-buttons {
+    grid-template-columns: none;
+    grid-template-rows: repeat(2, 48px);
+    grid-auto-flow: column;
+    grid-auto-columns: 48px;
   }
 }
 

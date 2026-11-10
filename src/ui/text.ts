@@ -67,7 +67,18 @@ export const TEXT = {
     retry: 'もう一度',
     rotateLeft: '左に回す',
     rotateRight: '右に回す',
+    zoomIn: '拡大',
+    zoomOut: '縮小',
+    resetView: '視点を戻す',
+    /** 「視点を戻す」ボタンの中に出す短い表記 */
+    resetViewShort: '戻す',
+    cameraHeight: 'カメラの高さ',
+    /** 「カメラの高さ」ボタンの中に出す短い表記 */
+    cameraHeightShort: '高さ',
   },
+
+  /** カメラの高さの段階（低い → 標準 → 高い） */
+  cameraHeights: ['低い', '標準', '高い'] as readonly string[],
 
   hints: {
     playerTurn: '青いマスをタップで移動',

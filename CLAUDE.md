@@ -65,7 +65,16 @@ npm test             # テストを1回実行（npm run test:watch で変更の�
 npm run build        # 公開用ファイルを dist/ に作る
 npm run preview      # ビルド結果を確認（http://localhost:4173/tactics-game/）
 npm run check        # lint・型チェック・テスト・ビルドをまとめて実行
+npm run autoplay     # 自動プレイ: 実際のブラウザで画面をタップして1戦を最後まで進め、core だけの計算と結果が一致するか確かめる
 ```
+
+自動プレイ（`scripts/autoplay.mjs`）について:
+- スマホ縦向き・横向きの画面サイズで、決まったシード値の1戦を進める（約3分）。味方の行動は敵と同じ AI で決め、画面のタップで入力する。
+- 途中でカメラ操作（ピンチ・ドラッグ・高さ・回転・視点を戻す）をし、その後も狙ったマスとユニットを正しくタップできるか、
+  ドラッグやピンチの終わりに何かが誤って選ばれないかを確かめる。
+- `npm run autoplay -- --viewports=portrait,landscape,pc --screenshots=フォルダ名` で PC の画面や画面写真も。
+  失敗した時の画面写真は `autoplay-output/` に残る（GitHub Actions では成果物 autoplay-failure）。
+- 画面の状態は、開発用サーバーの時だけ用意される `window.__tactics`（`src/main.ts`）から読む。公開ページには含まれない。
 
 ## 作業ルール
 
@@ -74,6 +83,8 @@ npm run check        # lint・型チェック・テスト・ビルドをまと�
 3. **core の変更にはテストを付ける。** テストは対象ファイルの隣に `*.test.ts` として置く。
 4. **仕様で迷ったら推測で進めず、PR の説明に質問として書く。**
 5. **画面に関わる変更は、実際にブラウザで開いて確かめる。** スマホ縦向き、スマホ横向き、PC の3通りで確認する。
+   - **画面か core を変えた時は、自動プレイ（`npm run autoplay`）を実行する。**
+   - **新しい操作や行動を追加したら、自動プレイにもその操作を追加する。**（`scripts/autoplay.mjs`）
 6. **報告と PR の説明には、確認したことと確認していないことを分けて書く。**
 7. **依頼された範囲だけを作る。** docs/GAME_DESIGN.md の「未確定のアイディア」は、依頼されるまで実装しない。
 8. **新しいライブラリを追加する時は、理由と公開ファイルの大きさへの影響を PR の説明に書く。**
@@ -86,6 +97,7 @@ npm run check        # lint・型チェック・テスト・ビルドをまと�
 
 ## CI / 公開
 
-- `.github/workflows/ci.yml`: PR ごとに lint・型チェック・テスト・ビルドを実行。
+- `.github/workflows/ci.yml`: PR ごとに lint・型チェック・テスト・ビルドと自動プレイを実行。
+  ジョブ名 `check` は main のルールで必須の検査に指定されているので、変えない。
 - `.github/workflows/deploy.yml`: main への変更ごとに同じ検査をしてから GitHub Pages に公開。
 - `vite.config.ts` の `base` は本番ビルド時に `/tactics-game/`。リポジトリ名を変えたらここも変える。

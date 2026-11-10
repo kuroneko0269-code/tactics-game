@@ -1,4 +1,5 @@
-# PR（変更の提案）が出るたびに、lint・型チェック・テスト・ビルドを自動実行する。
+# PR（変更の提案）が出るたびに、lint・型チェック・テスト・ビルドと、自動プレイ（実際のブラウザで1戦を進める確認）を自動実行する。
+# ジョブ名 check は main のルールで「必須の検査」に指定されているので、変えないこと。
 name: CI
 
 on:
@@ -15,6 +16,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -30,3 +32,14 @@ jobs:
         run: npm test
       - name: ビルド
         run: npm run build
+      - name: 自動プレイ用のブラウザ（Chromium）を用意
+        run: npx playwright install --with-deps --only-shell chromium
+      - name: 自動プレイ（スマホ縦向き・横向きで1戦を最後まで）
+        run: npm run autoplay
+      - name: 自動プレイが失敗した時の画面写真を保存
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autoplay-failure
+          path: autoplay-output/
+          if-no-files-found: ignore

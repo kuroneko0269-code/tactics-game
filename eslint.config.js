@@ -83,6 +83,11 @@ export default tseslint.config(
     files: ['*.js', '*.ts'],
     languageOptions: { globals: globals.node },
   },
+  // 自動プレイのスクリプト（Node.js で動き、一部の処理をブラウザの中で実行する）
+  {
+    files: ['scripts/**/*.mjs'],
+    languageOptions: { globals: { ...globals.node, ...globals.browser } },
+  },
   // core: ゲームロジック。描画・画面・ブラウザ・Math.random に依存しない。
   {
     files: ['src/core/**/*.ts'],
