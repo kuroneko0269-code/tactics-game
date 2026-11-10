@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { advanceToNextTurn, ctAfterTurn, predictTurnOrder } from './turnOrder';
-import { flat, makeState, testArcher, testRules, testWarrior } from './testSupport';
+import { ctAfterTurn, nextTimelineEntry, predictTimeline, predictTurnOrder } from './turnOrder';
+import type { BattleRules, UnitState } from './battleTypes';
+import { flat, makeState, testArcher, testFire, testMage, testRules, testWarrior, testWind } from './testSupport';
+
+/** 次の手番のユニットまで時計を進める（魔法の発動は無い前提） */
+function advanceToNextTurn(units: readonly UnitState[], rules: BattleRules) {
+  const { units: next, entry } = nextTimelineEntry(units, rules);
+  if (entry.kind !== 'turn') throw new Error('魔法の発動が先に来ました');
+  return { units: next, unitId: entry.unitId };
+}
 
 describe('行動順（CT 方式）', () => {
   it('素早さを足し続け、CT が 100 に達したユニットが行動する', () => {
@@ -68,5 +76,47 @@ describe('行動順（CT 方式）', () => {
     const done = { ...state, turn: { ...state.turn!, moved: true, acted: true } };
     expect(predictTurnOrder(done, 3)).toEqual(['slow', 'fast', 'slow']);
     expect(predictTurnOrder(state, 8)).toHaveLength(8);
+  });
+
+  it('詠唱中の魔法も同じ時計で進む。同じ時点なら、魔法の発動がユニットの手番より先', () => {
+    const state = makeState({
+      heights: flat(3, 3),
+      units: [
+        { id: 'm', team: 'player', job: testMage, x: 0, z: 0, ct: 0, charging: { spellId: 'wind', target: { kind: 'tile', x: 2, z: 2 }, progress: 50 } },
+        // 1 回進むと CT 100、風も 100 になる
+        { id: 'w', team: 'enemy', job: testWarrior, x: 2, z: 2, ct: 94 },
+      ],
+    });
+    const next = nextTimelineEntry(state.units, testRules);
+    expect(next.entry).toEqual({ kind: 'spell', casterId: 'm', spellId: testWind.id });
+    expect(next.units.find((u) => u.id === 'm')!.charging!.progress).toBe(100);
+    expect(next.units.find((u) => u.id === 'w')!.ct).toBe(100);
+  });
+
+  it('魔法どうしが同時なら、進み具合の大きい方が先', () => {
+    const state = makeState({
+      heights: flat(3, 3),
+      units: [
+        { id: 'a', team: 'player', job: testMage, x: 0, z: 0, charging: { spellId: 'fire', target: { kind: 'tile', x: 2, z: 2 }, progress: 75 } },
+        { id: 'b', team: 'enemy', job: testMage, x: 2, z: 2, charging: { spellId: 'wind', target: { kind: 'tile', x: 0, z: 0 }, progress: 55 } },
+      ],
+    });
+    // 1 回進むと a は 100、b は 105
+    expect(nextTimelineEntry(state.units, testRules).entry).toMatchObject({ casterId: 'b' });
+  });
+
+  it('予測: 詠唱中のユニットは、手番が来ても待機して詠唱を続けるものとして数える', () => {
+    const state = makeState({
+      heights: flat(3, 3),
+      units: [
+        { id: 'w', team: 'player', job: testWarrior, x: 0, z: 0, ct: 100 },
+        { id: 'm', team: 'enemy', job: testMage, x: 2, z: 2, ct: 90, charging: { spellId: testFire.id, target: { kind: 'tile', x: 0, z: 0 }, progress: 0 } },
+      ],
+    });
+    const timeline = predictTimeline(state, 5);
+    expect(timeline[0]).toEqual({ kind: 'turn', unitId: 'w' });
+    expect(timeline).toContainEqual({ kind: 'spell', casterId: 'm', spellId: 'fire' });
+    // 手番だけを取り出した予測には、魔法の発動は入らない
+    expect(predictTurnOrder(state, 5).every((id) => id === 'w' || id === 'm')).toBe(true);
   });
 });

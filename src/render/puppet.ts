@@ -19,10 +19,12 @@ export interface Puppet {
   setFlash(amount: number): void;
   /** 透明度。1 で不透明 */
   setOpacity(opacity: number): void;
+  /** 指定した色での光り方（魔法の演出用）。amount が 0 で通常 */
+  setGlow(color: THREE.Color, amount: number): void;
   update(elapsedSeconds: number): void;
 }
 
-export type WeaponKind = 'sword' | 'bow';
+export type WeaponKind = 'sword' | 'bow' | 'staff';
 
 export interface PuppetLook {
   readonly body: number;
@@ -88,6 +90,10 @@ export function createPuppet(look: PuppetLook): Puppet {
   if (look.weapon === 'sword') {
     // 兜のような角ばった帽子
     part(new THREE.BoxGeometry(0.3, 0.1, 0.3), accentMat, 0, 0.86, 0);
+  } else if (look.weapon === 'staff') {
+    // つばのある、先の高いとんがり帽子
+    part(new THREE.CylinderGeometry(0.22, 0.22, 0.03, 8), accentMat, 0, 0.85, 0);
+    part(new THREE.ConeGeometry(0.13, 0.3, 6), accentMat, 0, 1.0, 0);
   } else {
     // 尖ったフード
     part(new THREE.ConeGeometry(0.16, 0.22, 6), accentMat, 0, 0.92, 0);
@@ -100,6 +106,10 @@ export function createPuppet(look: PuppetLook): Puppet {
   if (look.weapon === 'sword') {
     const blade = part(new THREE.BoxGeometry(0.05, 0.42, 0.03), mat(STEEL), 0, -0.3, 0.06, rightArm);
     blade.rotation.x = Math.PI / 2.4;
+  } else if (look.weapon === 'staff') {
+    // 杖。先に小さな玉
+    const staff = part(new THREE.CylinderGeometry(0.018, 0.018, 0.62, 5), mat(WOOD), 0, -0.05, 0.06, rightArm);
+    part(new THREE.IcosahedronGeometry(0.05, 0), accentMat, 0, 0.33, 0, staff);
   } else {
     const bow = part(
       new THREE.TorusGeometry(0.2, 0.018, 4, 12, Math.PI),
@@ -132,6 +142,9 @@ export function createPuppet(look: PuppetLook): Puppet {
     },
     setOpacity(opacity) {
       for (const m of materials) m.opacity = opacity;
+    },
+    setGlow(color, amount) {
+      for (const m of materials) m.emissive.setRGB(color.r * amount * 0.8, color.g * amount * 0.8, color.b * amount * 0.8);
     },
     update(elapsed) {
       // 待機中の呼吸のような小さな動き

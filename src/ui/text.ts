@@ -3,7 +3,7 @@
  * 文言はここ以外に書かない（将来の翻訳と表記の統一のため）。
  * core は文言を作らず、出来事や状態（例: 地形 'grass'、向き 'back'）だけを返す。それを文言に変えるのがここの役割。
  */
-import type { Team } from '../core/battleTypes';
+import type { SpellElement, Team } from '../core/battleTypes';
 import type { RelativeSide } from '../core/geometry';
 import type { Terrain } from '../core/map';
 
@@ -25,13 +25,38 @@ export const TEXT = {
   jobs: {
     warrior: '戦士',
     archer: '弓使い',
+    mage: '魔術師',
+    healer: '癒し手',
   } as Readonly<Record<string, string>>,
 
   /** 行動順の欄に出す、ジョブの1文字の略 */
   jobShort: {
     warrior: '戦',
     archer: '弓',
+    mage: '魔',
+    healer: '癒',
   } as Readonly<Record<string, string>>,
+
+  /** 魔法の名前。id で引く */
+  spells: {
+    fire: '炎',
+    wind: '風',
+    heal: '癒し',
+  } as Readonly<Record<string, string>>,
+
+  /** 行動順の欄に出す、魔法の1文字の略 */
+  spellShort: {
+    fire: '炎',
+    wind: '風',
+    heal: '癒',
+  } as Readonly<Record<string, string>>,
+
+  /** 属性の名前 */
+  elements: {
+    fire: '炎',
+    wind: '風',
+    holy: '聖',
+  } satisfies Record<SpellElement, string>,
 
   teams: {
     player: '味方',
@@ -42,12 +67,14 @@ export const TEXT = {
   unitNames: {
     'p-warrior-1': '戦士A',
     'p-warrior-2': '戦士B',
-    'p-archer-1': '弓使いA',
-    'p-archer-2': '弓使いB',
+    'p-archer-1': '弓使い',
+    'p-mage-1': '魔術師',
+    'p-healer-1': '癒し手',
     'e-warrior-1': '敵の戦士A',
     'e-warrior-2': '敵の戦士B',
-    'e-archer-1': '敵の弓使いA',
-    'e-archer-2': '敵の弓使いB',
+    'e-archer-1': '敵の弓使い',
+    'e-mage-1': '敵の魔術師',
+    'e-healer-1': '敵の癒し手',
   } as Readonly<Record<string, string>>,
 
   /** 攻撃対象から見た、攻撃側の位置 */
@@ -59,6 +86,11 @@ export const TEXT = {
 
   buttons: {
     attack: '攻撃',
+    magic: '魔法',
+    targetUnit: 'ユニットを狙う',
+    targetTile: 'マスを狙う',
+    interrupt: '詠唱をやめる',
+    keepCasting: 'やめない',
     wait: '待機',
     undoMove: '移動を戻す',
     back: '戻る',
@@ -87,7 +119,35 @@ export const TEXT = {
     noTarget: '攻撃できる相手がいません',
     chooseFacing: '矢印かマスをタップして向きを選び「決定」',
     enemyTurn: '敵の手番',
+    chooseSpell: (mp: number, maxMp: number) => `使う魔法を選ぶ（残り MP ${mp} / ${maxMp}）`,
+    chooseSpellTarget: '紫のマスから、狙う場所をタップ',
+    chooseTargetKind: 'ユニットを追いかけて狙うか、そのマスに撃つかを選ぶ',
+    targetKindHelp: 'ユニット: 動いても追いかける ／ マス: 動かれると外れる',
+    charging: (spell: string) => `「${spell}」を詠唱中。「待機」で詠唱を続ける`,
+    confirmInterrupt: (spell: string) => `「${spell}」の詠唱を中断しますか？ MP は戻りません`,
   },
+
+  spellPreview: {
+    title: (spell: string) => `「${spell}」の予測`,
+    damage: 'ダメージ',
+    heal: '回復',
+    /** 発動が行動順の何番目か（今の手番を 1 番目として数える） */
+    timing: (n: number) => `発動: 行動順の ${n} 番目`,
+    targetUnit: (name: string) => `狙い: ${name}（動いても追いかける）`,
+    targetTile: '狙い: このマス（動かれると外れる）',
+    nobody: '今のままでは誰もいません',
+    note: '今のまま誰も動かなかった場合',
+    allyWarning: (n: number) => `⚠ 味方 ${n} 体を巻き込みます`,
+    enemyHealWarning: (n: number) => `⚠ 敵 ${n} 体も回復します`,
+    mp: (cost: number, mp: number) => `MP ${cost} 消費（残り ${mp - cost}）`,
+  },
+
+  /** 行動順の欄の、魔法の発動の説明 */
+  spellTiming: (caster: string, spell: string) => `${caster}の「${spell}」が発動`,
+  /** 詠唱中のユニットの説明 */
+  chargingInfo: (spell: string) => `詠唱中: ${spell}`,
+  fizzled: '不発',
+  interrupted: '中断',
 
   preview: {
     title: '攻撃の予測',
@@ -95,6 +155,8 @@ export const TEXT = {
     damage: 'ダメージ',
     height: '高低差',
     direction: '向き',
+    /** 相手が詠唱中で、受けるダメージが増える時 */
+    charging: (percent: number) => `詠唱中のため ×${percent / 100}`,
     /** 高低差の補正（%）の表示。0 なら「なし」 */
     heightPercent: (percent: number) => (percent === 0 ? 'なし' : `${percent > 0 ? '+' : ''}${percent}%`),
   },
@@ -103,7 +165,9 @@ export const TEXT = {
   miss: 'ミス',
   turnOrder: '行動順',
   turnNumber: (n: number) => `${n}手番目`,
+  mp: 'MP',
   stats: {
+    magic: '魔力',
     attack: '攻撃',
     move: '移動',
     jump: 'ジャンプ',

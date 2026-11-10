@@ -11,4 +11,5 @@ export const battleRules: BattleRules = {
   heightDamagePercentPerStep: 5,
   heightDamagePercentCap: 20,
   minimumDamage: 1,
+  chargingDamagePercent: 125,
 };

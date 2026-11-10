@@ -6,6 +6,11 @@
 //
 // - 味方の行動は、敵と同じ AI（src/core/ai.ts）で決め、それを画面のタップで入力する。
 //   そのため、core だけで AI 同士を戦わせた結果（runAutoBattle）と、最終状態が完全に一致するはず。
+// - 魔法は、メニューから選んで射程のマスやユニットをタップし、「ユニットを狙う」「マスを狙う」を選んで確定する。
+//   味方が最初にユニットを狙う魔法を使う時だけ、わざと「マスを狙う」に変える（両方の操作を確かめるため。
+//   core だけの計算でも同じ動かし方をするので、結果は一致するはず）。
+// - 1戦の後、詠唱中に自分の手番が来た場面を用意して、詠唱の中断（確認で「やめない」→ もう一度 →「詠唱をやめる」）を確かめる。
+//   AI 同士の対戦では、詠唱中に自分の手番が来ることがほとんどないため。
 // - 途中で、拡大・縮小（ピンチ・ボタン・ホイール）、視点の移動（ドラッグ）、カメラの高さ、回転、視点を戻す、を行う。
 //   それらの操作の後でも、狙ったマスやユニットを正しくタップできることを確かめる。
 //   また、ドラッグやピンチの終わりに、マスやユニットが誤って選ばれないことも確かめる。
@@ -36,7 +41,7 @@ const HEADED = args.headed === 'true';
 /** 失敗した時の画面写真の置き場所 */
 const FAILURE_DIR = 'autoplay-output';
 /** 1つの画面サイズで1戦にかけてよい時間の上限 */
-const BATTLE_TIMEOUT_MS = Number(args.timeout ?? 6 * 60 * 1000);
+const BATTLE_TIMEOUT_MS = Number(args.timeout ?? 12 * 60 * 1000);
 
 const VIEWPORT_OPTIONS = {
   portrait: { label: 'スマホ縦向き', ...devices['iPhone 13'] },
@@ -59,14 +64,31 @@ async function main() {
     battle: await server.ssrLoadModule('/src/core/battle.ts'),
     ai: await server.ssrLoadModule('/src/core/ai.ts'),
   };
+  core.movement = await server.ssrLoadModule('/src/core/movement.ts');
   const data = {
     battle: (await server.ssrLoadModule('/src/data/battles/firstBattle.ts')).firstBattle,
     jobs: (await server.ssrLoadModule('/src/data/jobs.ts')).jobs,
+    spells: (await server.ssrLoadModule('/src/data/spells.ts')).spells,
     rules: (await server.ssrLoadModule('/src/data/battleRules.ts')).battleRules,
+    ai: (await server.ssrLoadModule('/src/data/aiConfig.ts')).aiConfig,
+    text: (await server.ssrLoadModule('/src/ui/text.ts')).TEXT,
   };
-  const startState = core.battle.startBattle(data.battle, data.jobs, data.rules, SEED).state;
-  const expected = core.ai.runAutoBattle(startState, 1000).state;
-  console.log(`シード値 ${SEED}: core だけの計算では ${expected.winner === 'player' ? '勝利' : '敗北'}（${expected.turnNumber}手番）`);
+  core.data = data;
+  const startState = core.battle.startBattle(data.battle, data.jobs, data.rules, SEED, data.spells).state;
+  // core だけで、画面と同じ動かし方（playerPolicy）で決着まで進める
+  const policy = playerPolicy(core);
+  let expected = startState;
+  let expectedCasts = 0;
+  while (expected.turn && expected.turnNumber <= 1000) {
+    const unit = expected.units.find((u) => u.id === expected.turn.unitId);
+    const action = unit.team === 'player' ? policy(expected) : core.ai.decideNextAction(expected, data.ai);
+    if (action.type === 'cast' && unit.team === 'player') expectedCasts++;
+    expected = core.battle.applyAction(expected, action).state;
+  }
+  console.log(
+    `シード値 ${SEED}: core だけの計算では ${expected.winner === 'player' ? '勝利' : '敗北'}（${expected.turnNumber}手番、味方の魔法 ${expectedCasts}回）`,
+  );
+  check(expectedCasts > 0, `シード値 ${SEED} では味方が魔法を使いません。別のシード値を選んでください`);
 
   const browser = await chromium.launch({
     headless: !HEADED,
@@ -90,7 +112,9 @@ async function main() {
     const label = VIEWPORT_OPTIONS[r.name]?.label ?? r.name;
     if (r.ok) {
       console.log(
-        `✔ ${label}: ${r.winner === 'player' ? '勝利' : '敗北'}（${r.turns}手番、味方の手番 ${r.playerTurns}、カメラ操作 ${r.cameraOps}回、タップ ${r.taps}回、${r.seconds}秒）`,
+        `✔ ${label}: ${r.winner === 'player' ? '勝利' : '敗北'}（${r.turns}手番、味方の手番 ${r.playerTurns}、` +
+          `魔法の指定 ${r.casts}回（ユニット狙い ${r.unitCasts}・マス狙い ${r.tileCasts}）、詠唱の中断 ${r.interrupts}回、` +
+          `カメラ操作 ${r.cameraOps}回、タップ ${r.taps}回、${r.seconds}秒）`,
       );
     } else {
       failed = true;
@@ -133,7 +157,21 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
   const log = (msg) => console.log(`[${label}] ${msg}`);
   const started = Date.now();
   const deadline = started + BATTLE_TIMEOUT_MS;
-  const stats = { taps: 0, cameraOps: 0, playerTurns: 0 };
+  const stats = { taps: 0, cameraOps: 0, playerTurns: 0, casts: 0, unitCasts: 0, tileCasts: 0, interrupts: 0 };
+  const policy = playerPolicy(core);
+  const { text } = core.data;
+  const INPUT_MODES = [
+    'main',
+    'targeting',
+    'confirm',
+    'spellMenu',
+    'spellTarget',
+    'spellTargetKind',
+    'spellConfirm',
+    'confirmInterrupt',
+    'facing',
+    'ended',
+  ];
 
   await page.addInitScript(`window.__clearOfButtons = ${clearOfButtons.toString()}`);
   await page.goto(`${baseUrl}?seed=${SEED}&speed=${SPEED}`);
@@ -157,10 +195,14 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
   };
   /** 入力を待つ状態（または決着）になり、カメラも止まるまで待つ */
   const waitForInput = () =>
-    waitFor('入力待ち', () => {
-      const t = window.__tactics;
-      return ['main', 'targeting', 'confirm', 'facing', 'ended'].includes(t.mode()) && t.camera().idle;
-    });
+    waitFor(
+      '入力待ち',
+      (modes) => {
+        const t = window.__tactics;
+        return modes.includes(t.mode()) && t.camera().idle;
+      },
+      INPUT_MODES,
+    );
   const waitCameraIdle = () => waitFor('カメラが止まる', () => window.__tactics.camera().idle);
   /** 状態と操作のモードの写し（「何も変わっていない」ことを確かめるため） */
   const snapshot = async () => JSON.stringify([await getState(), await getMode()]);
@@ -255,10 +297,21 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
       ([x, z, unitId]) => {
         const t = window.__tactics;
         const points = [...(unitId ? [t.unitScreen(unitId)] : []), ...t.tilePoints(x, z)];
+        // 隣のマスとの境目ぎりぎりの点は避ける（周り 2px でも同じマスが一番手前に写っている点だけを使う）
+        const firstAt = (px, py) => t.pickAt(px, py).find((c) => c !== null);
+        const offsets = [
+          [0, 0],
+          [2, 0],
+          [-2, 0],
+          [0, 2],
+          [0, -2],
+        ];
         return points.find((p) => {
           if (!window.__clearOfButtons([p.x, p.y])) return false;
-          const first = t.pickAt(p.x, p.y).find((c) => c !== null);
-          return first !== undefined && first.x === x && first.z === z;
+          return offsets.every(([dx, dy]) => {
+            const first = firstAt(p.x + dx, p.y + dy);
+            return first !== undefined && first.x === x && first.z === z;
+          });
         });
       },
       [x, z, unitId],
@@ -291,6 +344,53 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
     await tapAt(p);
   };
 
+  // ---- 魔法の指定 ----
+  /** メニューから魔法を選び、狙い先をタップして（必要ならユニットかマスかを選んで）確定する */
+  const castSpell = async (action, unit) => {
+    const spellLabel = text.spells[action.spellId];
+    await pressButton('魔法');
+    await waitFor('使う魔法を選ぶ', () => window.__tactics.mode() === 'spellMenu');
+    // MP が足りない魔法のボタンは押せないこと
+    for (const sp of unit.spells) {
+      const disabled = await page.getByRole('button', { name: text.spells[sp.id], exact: true }).isDisabled();
+      check(disabled === unit.mp < sp.mpCost, `魔法「${text.spells[sp.id]}」のボタンの押せる・押せないが MP と合いません`);
+    }
+    await pressButton(spellLabel);
+    await waitFor('狙う場所を選ぶ', () => window.__tactics.mode() === 'spellTarget');
+    const state = await getState();
+    const center =
+      action.target.kind === 'tile' ? action.target : state.units.find((u) => u.id === action.target.unitId);
+    const there = state.units.find((u) => u.hp > 0 && u.x === center.x && u.z === center.z);
+    if (there) {
+      await tapUnit(there.id);
+      const chosen = await getMode();
+      check(
+        chosen.kind === 'spellTargetKind' && chosen.unitId === there.id,
+        `ユニット ${there.id} のマスをタップしたのに、選ばれたのは ${JSON.stringify(chosen)}`,
+      );
+      await pressButton(action.target.kind === 'unit' ? 'ユニットを狙う' : 'マスを狙う');
+    } else {
+      await tapTile(center.x, center.z);
+    }
+    const chosen = await getMode();
+    check(
+      chosen.kind === 'spellConfirm' && JSON.stringify(chosen.target) === JSON.stringify(action.target),
+      `魔法の狙い先が違います（期待 ${JSON.stringify(action.target)} / 画面 ${JSON.stringify(chosen)}）`,
+    );
+    check(await page.locator('.preview').isVisible(), '魔法の予測が表示されていません');
+    const title = await page.locator('.preview-title').textContent();
+    check(title.includes(spellLabel), `魔法の予測の題が違います（${title}）`);
+    if (stats.casts === 0) await screenshot('cast-preview');
+    stats.casts++;
+    if (action.target.kind === 'unit') stats.unitCasts++;
+    else stats.tileCasts++;
+    await pressButton('確定');
+    await waitFor('魔法の指定の後', () => !['busy', 'spellConfirm'].includes(window.__tactics.mode()));
+    const after = (await getState()).units.find((u) => u.id === unit.id);
+    check(after.charging?.spellId === action.spellId, '魔法を指定したのに、詠唱中になっていません');
+    if (stats.casts === 1) await screenshot('cast-charging');
+  };
+
   // ---- カメラの操作（味方の手番ごとに順番に1つずつ） ----
   const tileProbe = () => T(() => window.__tactics.tileScreen(0, 0));
   const cameraOps = [
@@ -312,7 +412,12 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
       return 'ドラッグで視点を移動';
     },
     async function heightHigh() {
-      await pressCameraButton('camera-height');
+      // 「高い」になるまで押す（ボタンは 低い → 標準 → 高い → 低い と切り替わる）
+      for (let i = 0; i < 3 && (await getCamera()).heightLevel !== 2; i++) {
+        const before = (await getCamera()).heightLevel;
+        await pressCameraButton('camera-height');
+        check((await getCamera()).heightLevel === (before + 1) % 3, 'カメラの高さが次の段階になりませんでした');
+      }
       await waitCameraIdle();
       check((await getCamera()).heightLevel === 2, 'カメラの高さが「高い」になりませんでした');
       return 'カメラの高さ: 高い';
@@ -328,7 +433,7 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
       return '「－」で縮小 + 右に回す';
     },
     async function heightLowAndPinchOut() {
-      await pressCameraButton('camera-height');
+      for (let i = 0; i < 3 && (await getCamera()).heightLevel !== 0; i++) await pressCameraButton('camera-height');
       const before = await getCamera();
       if (touch) await pinch(0.6, center, 160);
       else await page.mouse.move(center.x, center.y).then(() => page.mouse.wheel(0, 200));
@@ -342,11 +447,15 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
       await pressCameraButton('camera-zoom-in');
       await pressCameraButton('camera-zoom-in');
       await waitCameraIdle();
+      const before = await getCamera();
       await pressCameraButton('camera-reset');
       await waitCameraIdle();
       const cam = await getCamera();
-      check(cam.heightLevel === 1, '「視点を戻す」で高さが標準に戻りませんでした');
-      return '「＋」2回 + 視点を戻す';
+      // 「視点を戻す」は拡大率と位置だけを戻し、回転とカメラの高さは変えない
+      check(Math.abs(cam.zoom - initialCamera.zoom) < 1e-6, `「視点を戻す」で拡大率が最初に戻りませんでした（${cam.zoom}）`);
+      check(cam.heightLevel === before.heightLevel, '「視点を戻す」でカメラの高さが変わりました');
+      check(cam.quarter === before.quarter, '「視点を戻す」で回転の向きが変わりました');
+      return '「＋」2回 + 視点を戻す（高さと回転はそのまま）';
     },
   ];
 
@@ -358,6 +467,7 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
 
   // ---- 1戦を進める ----
   await waitForInput();
+  const initialCamera = await getCamera();
   await screenshot('00-start');
   let lastTurn = -1;
   for (;;) {
@@ -387,10 +497,27 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
       state = await getState();
     }
 
-    const action = core.ai.decideNextAction(state);
+    const action = policy(state);
     if (action.type === 'move') {
       check(mode.kind === 'main', `移動の前のモードが main ではありません（${mode.kind}）`);
-      await tapTile(action.x, action.z);
+      const tapPoint = await aimAt(action.x, action.z, undefined, `マス (${action.x}, ${action.z})`);
+      const picked = await T(([x, y]) => window.__tactics.pickAt(x, y), [tapPoint.x, tapPoint.y]);
+      await tapAt(tapPoint);
+      await page
+        .waitForFunction(
+          ([id, x, z]) => {
+            const u = window.__tactics.state().units.find((u) => u.id === id);
+            return u.x !== x || u.z !== z;
+          },
+          [unit.id, unit.x, unit.z],
+          { timeout: 3000, polling: 20 },
+        )
+        .catch(() => {});
+      const nowUnit = (await getState()).units.find((u) => u.id === unit.id);
+      check(
+        nowUnit.x === action.x && nowUnit.z === action.z,
+        `移動先が違います: 狙い (${action.x}, ${action.z}) / 実際 (${nowUnit.x}, ${nowUnit.z}) / タップ ${JSON.stringify(tapPoint)} / 判定 ${JSON.stringify(picked)} / モード ${JSON.stringify(await getMode())} / 手番 ${JSON.stringify((await getState()).turn)} / タップの記録 ${JSON.stringify(await T(() => window.__tactics.tapLog()))} / 要素 ${await T(([x, y]) => document.elementFromPoint(x, y)?.outerHTML.slice(0, 120), [tapPoint.x, tapPoint.y])}`,
+      );
       await waitFor(
         `${unit.id} が (${action.x}, ${action.z}) へ移動`,
         ([id, x, z]) => {
@@ -410,6 +537,9 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
       );
       await pressButton('確定');
       await waitFor('攻撃の後', () => window.__tactics.mode() !== 'busy' && window.__tactics.mode() !== 'confirm');
+    } else if (action.type === 'cast') {
+      check(mode.kind === 'main', `魔法の前のモードが main ではありません（${mode.kind}）`);
+      await castSpell(action, unit);
     } else if (action.type === 'endTurn') {
       if (mode.kind === 'main') await pressButton('待機');
       await waitFor('向きを選ぶ', () => window.__tactics.mode() === 'facing');
@@ -438,9 +568,56 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
   const resultText = await page.locator('.result-title').textContent();
   check(resultText === (final.winner === 'player' ? '勝利' : '敗北'), `決着の表示が違います（${resultText}）`);
 
+  check(stats.casts > 0, '味方の魔法を一度も指定していません');
+  check(stats.unitCasts > 0 && stats.tileCasts > 0, `ユニット狙いとマス狙いの両方を確かめられませんでした（${stats.unitCasts} / ${stats.tileCasts}）`);
+
   // 「もう一度」で新しい戦闘が始まること
   await pressButton('もう一度');
   await waitFor('新しい戦闘', () => window.__tactics.state().turnNumber <= 2 && window.__tactics.state().winner === null);
+  check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
+
+  // ---- 詠唱の中断 ----
+  // 詠唱中の味方の魔術師に手番が来た場面を用意して、移動しようとすると確認が出ること、
+  // 「やめない」で何も変わらないこと、「詠唱をやめる」で中断されて移動することを確かめる
+  await waitForInput();
+  const drill = interruptDrill(core);
+  await page.evaluate((r) => window.__tactics.load(r), drill.start);
+  await waitFor('詠唱中の手番', (id) => window.__tactics.mode() === 'main' && window.__tactics.state().turn?.unitId === id, drill.unitId);
+  await waitForInput();
+  await screenshot('interrupt-0-charging');
+  const beforeTap = await snapshot();
+  await tapTile(drill.move.x, drill.move.z);
+  check((await getMode()).kind === 'confirmInterrupt', '詠唱中に移動しようとしたのに、中断の確認が出ません');
+  await screenshot('interrupt-1-confirm');
+  await pressButton('やめない');
+  check((await getMode()).kind === 'main', '「やめない」で元の操作に戻りません');
+  const afterCancel = JSON.parse(await snapshot());
+  check(JSON.stringify(afterCancel[0]) === JSON.stringify(JSON.parse(beforeTap)[0]), '「やめない」なのに状態が変わりました');
+  await tapTile(drill.move.x, drill.move.z);
+  check((await getMode()).kind === 'confirmInterrupt', '2回目の移動で中断の確認が出ません');
+  await pressButton('詠唱をやめる');
+  await waitFor(
+    '中断して移動',
+    ([id, x, z]) => {
+      const u = window.__tactics.state().units.find((u) => u.id === id);
+      return u.x === x && u.z === z && window.__tactics.mode() === 'main';
+    },
+    [drill.unitId, drill.move.x, drill.move.z],
+  );
+  const interruptedUnit = (await getState()).units.find((u) => u.id === drill.unitId);
+  check(interruptedUnit.charging === null, '中断したのに、詠唱が続いています');
+  check(interruptedUnit.mp === drill.mp, `中断で MP が変わりました（${drill.mp} → ${interruptedUnit.mp}）`);
+  stats.interrupts++;
+  await pressButton('待機');
+  await waitFor('向きを選ぶ', () => window.__tactics.mode() === 'facing');
+  const facing = (await getMode()).facing;
+  await pressButton('決定');
+  await waitFor('次の手番へ', () => window.__tactics.state().turnNumber > 1);
+  // 直後に敵の手番が来ると HP は変わりうるので、位置・向き・MP・詠唱だけを比べる
+  const drillExpected = drill.finish(facing).units.find((u) => u.id === drill.unitId);
+  const drillActual = (await getState()).units.find((u) => u.id === drill.unitId);
+  const pick = (u) => JSON.stringify([u.x, u.z, u.facing, u.mp, u.charging, u.ct === 0 ? 0 : 'later']);
+  check(pick(drillActual) === pick(drillExpected), `詠唱の中断の後の状態が core の計算と違います（${pick(drillActual)} / ${pick(drillExpected)}）`);
   check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
 
   await context.close();
@@ -449,6 +626,55 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
     turns: final.turnNumber,
     ...stats,
     seconds: Math.round((Date.now() - started) / 1000),
+  };
+}
+
+/**
+ * 味方の動かし方。敵と同じ AI で決めるが、味方が最初にユニットを狙う魔法を使う時だけ、
+ * そのユニットの今いるマスを狙う（マス狙い）に変える。画面の操作と core だけの計算で同じものを使う。
+ */
+function playerPolicy(core) {
+  let changed = false;
+  return (state) => {
+    const action = core.ai.decideNextAction(state, core.data.ai);
+    if (changed || action.type !== 'cast' || action.target.kind !== 'unit') return action;
+    changed = true;
+    const target = state.units.find((u) => u.id === action.target.unitId);
+    return { ...action, target: { kind: 'tile', x: target.x, z: target.z } };
+  };
+}
+
+/**
+ * 詠唱の中断を確かめる場面。新しい戦闘の最初の状態から、味方の魔術師が「炎」を詠唱中のまま手番を迎えた状態を作る。
+ * finish(facing) は、同じ操作（移動 → 向きを決めて終了）を core だけで行った結果。
+ */
+function interruptDrill(core) {
+  const { battle: setup, jobs, rules, spells } = core.data;
+  const base = core.battle.startBattle(setup, jobs, rules, SEED + 1, spells).state;
+  const unitId = 'p-mage-1';
+  const fire = spells.find((s) => s.id === 'fire');
+  const units = base.units.map((u) =>
+    u.id === unitId
+      ? { ...u, ct: 100, mp: u.mp - fire.mpCost, charging: { spellId: 'fire', target: { kind: 'tile', x: u.x, z: 4 }, progress: 50 } }
+      : { ...u, ct: 0 },
+  );
+  const mage = units.find((u) => u.id === unitId);
+  const state = {
+    ...base,
+    units,
+    turn: { unitId, moved: false, acted: false, origin: { x: mage.x, z: mage.z, facing: mage.facing }, chargingAtStart: true },
+    turnNumber: 1,
+  };
+  const move = core.movement.reachableTiles(state, mage).sort((a, b) => a.z - b.z || a.x - b.x)[0];
+  return {
+    unitId,
+    mp: mage.mp,
+    move: { x: move.x, z: move.z },
+    start: { state, events: [{ type: 'turnStarted', unitId, turnNumber: 1 }] },
+    finish(facing) {
+      const moved = core.battle.applyAction(state, { type: 'move', x: move.x, z: move.z }).state;
+      return core.battle.applyAction(moved, { type: 'endTurn', facing }).state;
+    },
   };
 }
 

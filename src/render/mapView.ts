@@ -20,6 +20,8 @@ export interface MapView {
   coordOf(object: THREE.Object3D): TileCoord | undefined;
   /** マスの色分け表示（移動できるマス、攻撃できるマスなど）。渡さなかったマスは表示を消す */
   setMarks(marks: readonly TileMark[]): void;
+  /** 詠唱中の魔法が予約している範囲を、属性の色で薄く表示する。渡さなかったマスは表示を消す */
+  setReserved(tiles: readonly ReservedTile[]): void;
   update(elapsedSeconds: number): void;
   readonly center: THREE.Vector3;
   readonly radius: number;
@@ -39,11 +41,16 @@ const SIDE_COLORS: Record<Terrain, number> = {
   water: 0x3a6a9a,
 };
 
-/** マスの色分けの種類 */
-export type TileMarkKind = 'move' | 'attack' | 'target' | 'selected';
+/** マスの色分けの種類（spellRange: 魔法の射程、spellArea: 魔法の範囲） */
+export type TileMarkKind = 'move' | 'attack' | 'target' | 'selected' | 'spellRange' | 'spellArea';
 
 export interface TileMark extends TileCoord {
   readonly kind: TileMarkKind;
+}
+
+/** 予約されている魔法の範囲（color は属性の色） */
+export interface ReservedTile extends TileCoord {
+  readonly color: number;
 }
 
 const MARK_STYLE: Record<TileMarkKind, { color: number; opacity: number; pulse: number }> = {
@@ -51,7 +58,11 @@ const MARK_STYLE: Record<TileMarkKind, { color: number; opacity: number; pulse: 
   attack: { color: 0xff6a3d, opacity: 0.32, pulse: 0.06 },
   target: { color: 0xff2020, opacity: 0.7, pulse: 0.2 },
   selected: { color: 0xffe14d, opacity: 0.75, pulse: 0.15 },
+  spellRange: { color: 0xa45bff, opacity: 0.3, pulse: 0.06 },
+  spellArea: { color: 0xff3df0, opacity: 0.7, pulse: 0.2 },
 };
+/** 予約されている範囲の濃さ */
+const RESERVED_OPACITY = 0.3;
 
 const COORD_KEY = 'tileCoord';
 
@@ -108,6 +119,25 @@ export function createMapView(map: BattleMap): MapView {
     return { plate, material, frameMaterial, kind: undefined as TileMarkKind | undefined };
   });
 
+  // 予約されている魔法の範囲：色分け表示より少し下に、枠だけを目立たせた薄い板を重ねる
+  const reservedGroup = new THREE.Group();
+  group.add(reservedGroup);
+  const reservedMeshes = map.tiles.map((tile) => {
+    const material = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, opacity: RESERVED_OPACITY });
+    const plate = new THREE.Mesh(markGeometry, material);
+    const frameMaterial = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.8 });
+    const frame = new THREE.LineSegments(frameGeometry, frameMaterial);
+    frame.scale.setScalar(0.86);
+    plate.add(frame);
+    const top = tileTop(tile.x, tile.z);
+    plate.position.set(top.x, top.y + 0.006, top.z);
+    plate.visible = false;
+    plate.renderOrder = 1;
+    plate.userData[COORD_KEY] = { x: tile.x, z: tile.z } satisfies TileCoord;
+    reservedGroup.add(plate);
+    return { plate, material, frameMaterial };
+  });
+
   const radius = Math.hypot(map.width, map.depth) / 2;
   const heightRange = maxHeight * HEIGHT_STEP + BASE_THICKNESS;
 
@@ -136,8 +166,21 @@ export function createMapView(map: BattleMap): MapView {
         m.plate.visible = true;
       }
     },
+    setReserved(tiles) {
+      for (const m of reservedMeshes) m.plate.visible = false;
+      for (const t of tiles) {
+        const m = reservedMeshes[t.z * map.width + t.x];
+        if (!m) continue;
+        m.material.color.setHex(t.color);
+        m.frameMaterial.color.setHex(t.color).offsetHSL(0, 0, 0.15);
+        m.plate.visible = true;
+      }
+    },
     update(elapsed) {
       const wave = Math.sin(elapsed * 4);
+      for (const m of reservedMeshes) {
+        if (m.plate.visible) m.material.opacity = RESERVED_OPACITY + 0.08 * Math.sin(elapsed * 2);
+      }
       for (const m of markMeshes) {
         if (!m.kind) continue;
         const style = MARK_STYLE[m.kind];

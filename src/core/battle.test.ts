@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { runAutoBattle } from './ai';
 import { applyAction, judgeWinner, startBattle } from './battle';
 import type { BattleAction, BattleSetup, BattleState } from './battleTypes';
-import { flat, makeState, testArcher, testJobs, testRules, testWarrior } from './testSupport';
+import { flat, makeState, testAiConfigs, testArcher, testJobs, testRules, testWarrior } from './testSupport';
 
 const setup: BattleSetup = {
   id: 'test-battle',
@@ -179,7 +179,7 @@ describe('勝敗判定', () => {
 
 describe('再現性', () => {
   it('同じシード値と同じ行動の列から、同じ結果になる', () => {
-    const first = runAutoBattle(startBattle(setup, testJobs, testRules, 2024).state, 500);
+    const first = runAutoBattle(startBattle(setup, testJobs, testRules, 2024).state, 500, testAiConfigs);
     // 記録した行動の列を、同じシード値の初期状態にもう一度与える
     let replayed: BattleState = startBattle(setup, testJobs, testRules, 2024).state;
     const replayedEvents = [];
@@ -203,7 +203,7 @@ describe('再現性', () => {
   it('シード値が違えば、結果が変わりうる', () => {
     const outcomes = new Set<string>();
     for (let seed = 1; seed <= 10; seed++) {
-      outcomes.add(JSON.stringify(runAutoBattle(startBattle(setup, testJobs, testRules, seed).state, 500).state.units));
+      outcomes.add(JSON.stringify(runAutoBattle(startBattle(setup, testJobs, testRules, seed).state, 500, testAiConfigs).state.units));
     }
     expect(outcomes.size).toBeGreaterThan(1);
   });
