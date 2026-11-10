@@ -374,7 +374,7 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
       const chosen = await getMode();
       check(
         chosen.kind === 'spellTargetKind' && chosen.unitId === there.id,
-        `ユニット ${there.id} のマスをタップしたのに、選ばれたのは ${JSON.stringify(chosen)}`,
+        `ユニット ${there.id} のマスをタップしたのに、選ばれたのは ${JSON.stringify(chosen)} / タップの記録 ${JSON.stringify(await T(() => window.__tactics.tapLog()))} / ユニットの位置 ${JSON.stringify([there.x, there.z, await T((id) => window.__tactics.unitScreen(id), there.id)])}`,
       );
       await pressButton(action.target.kind === 'unit' ? 'ユニットを狙う' : 'マスを狙う');
     } else {
@@ -556,7 +556,7 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
         const chosen = await getMode();
         check(
           chosen.kind === 'facing' && chosen.facing === action.facing,
-          `矢印 ${action.facing} をタップしたのに、選ばれた向きは ${JSON.stringify(chosen)}`,
+          `矢印 ${action.facing} をタップしたのに、選ばれた向きは ${JSON.stringify(chosen)} / タップの記録 ${JSON.stringify(await T(() => window.__tactics.tapLog()))} / 矢印の位置 ${JSON.stringify(await T((d) => window.__tactics.arrowScreen(d), action.facing))}`,
         );
       }
       const turn = state.turnNumber;

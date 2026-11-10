@@ -44,4 +44,13 @@ export function attachCameraInput(canvas: HTMLCanvasElement, rig: CameraRig, onT
     { passive: false },
   );
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  // 指で触れた後にブラウザが出す「まねのクリック」を止める。
+  // タップでボタンが現れた時に、その同じ場所のボタンが勝手に押されてしまうのを防ぐため（ゴーストクリック）
+  canvas.addEventListener(
+    'touchend',
+    (e) => {
+      if (e.cancelable) e.preventDefault();
+    },
+    { passive: false },
+  );
 }

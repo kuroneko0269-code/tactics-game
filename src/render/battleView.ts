@@ -417,7 +417,8 @@ export function createBattleView(options: {
     arrowScreenPosition(direction) {
       const arrow = arrows.find((a) => a.dir === direction);
       if (!arrowGroup.visible || !arrow) return undefined;
-      const s = screenOf(arrow.mesh.getWorldPosition(new THREE.Vector3()));
+      // 矢印の頭（三角の部分）の内側の点。原点は三角と軸の境目にあり、タップの判定が当たりにくいため
+      const s = screenOf(arrow.mesh.localToWorld(new THREE.Vector3(0, 0, 0.12)));
       return { x: s.x, y: s.y };
     },
     update(dt, elapsed) {
