@@ -168,13 +168,15 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
     if (!facing) return;
     const { center, dirs } = handlers.facingScreen(facing.unitId);
     const assigned = assignFacingSlots(center, dirs);
-    const w = window.innerWidth;
-    const h = window.innerHeight;
+    // ユニットが画面の端にいる時は、4つのボタンをまとめて内側へずらす（1つずつ端に寄せると重なるため）
+    const reach = FACING_RADIUS_PX * Math.SQRT1_2 + 30;
+    const cx = clampNum(center.x, reach, Math.max(reach, window.innerWidth - reach));
+    const cy = clampNum(center.y, reach, Math.max(reach, window.innerHeight - reach));
     for (const f of facingButtons) {
       const a = assigned.find((x) => x.slot === f.slot)!;
       const angle = SLOT_ANGLES[f.slot];
-      const x = clampNum(center.x + Math.cos(angle) * FACING_RADIUS_PX, 30, w - 30);
-      const y = clampNum(center.y + Math.sin(angle) * FACING_RADIUS_PX, 30, h - 30);
+      const x = cx + Math.cos(angle) * FACING_RADIUS_PX;
+      const y = cy + Math.sin(angle) * FACING_RADIUS_PX;
       f.button.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
       f.button.dataset.direction = a.direction;
       f.button.classList.toggle('selected', a.direction === facing.selected);

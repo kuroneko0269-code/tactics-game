@@ -97,20 +97,26 @@ async function main() {
   );
   check(expectedCasts > 0, `シード値 ${SEED} では味方が魔法を使いません。別のシード値を選んでください`);
 
-  const browser = await chromium.launch({
-    headless: !HEADED,
-    args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist'],
-  });
   const started = Date.now();
+  // 画面サイズごとに、別々のブラウザ（別々のプロセス）で動かす。
+  // 1つのブラウザで複数の画面を開くと、描画（ソフトウェアで行う）が1つの描画用プロセスに集まって順番待ちになり、
+  // 3つ同時・高解像度の画面写真つきの時に、時間切れで止まったように見えていたため。
   const results = await Promise.all(
-    VIEWPORTS.map((name) =>
-      playOneBattle(browser, baseUrl, name, core, expected).then(
-        (r) => ({ name, ok: true, ...r }),
-        (e) => ({ name, ok: false, error: e }),
-      ),
-    ),
+    VIEWPORTS.map(async (name) => {
+      const browser = await chromium.launch({
+        headless: !HEADED,
+        args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist'],
+      });
+      try {
+        const r = await playOneBattle(browser, baseUrl, name, core, expected);
+        return { name, ok: true, ...r };
+      } catch (e) {
+        return { name, ok: false, error: e };
+      } finally {
+        await browser.close();
+      }
+    }),
   );
-  await browser.close();
   await server.close();
 
   console.log('');
@@ -159,8 +165,9 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
   const { label, ...contextOptions } = options;
   // スマホの端末設定は WebKit 用なので、Chromium で開くために browserName 関係を外す
   delete contextOptions.defaultBrowserType;
-  // 画面写真を撮らない時は、描画を軽くするため画素の密度を 1 にする（ソフトウェア描画で遅いため）
-  if (!SCREENSHOT_DIR) contextOptions.deviceScaleFactor = 1;
+  // 画素の密度: 画面写真を撮らない時は 1、撮る時も 2 まで（スマホの端末設定は 3 だが、ソフトウェア描画では
+  // 描く画素の数が 2.25 倍になって遅く、3つ同時に動かすと時間切れになっていたため。画面の描画も 2 倍までにしている）
+  contextOptions.deviceScaleFactor = SCREENSHOT_DIR ? Math.min(2, contextOptions.deviceScaleFactor ?? 1) : 1;
   const context = await browser.newContext(contextOptions);
   const page = await context.newPage();
   holder.page = page;

@@ -355,6 +355,8 @@ export function createBattleController(start: ActionResult, deps: BattleControll
         view.setMarks([self]);
         view.showFacingArrows(unit.id, mode.facing);
         void view.turnTo(unit.id, mode.facing);
+        // 向きのボタンがユニットの周りに出るので、ユニットが画面の端なら見やすい所へ寄せる
+        void view.focusTiles([unit]);
         hud.showFacingPad(unit.id, mode.facing, (facing) => {
           if (mode.kind === 'facing') setMode({ kind: 'facing', facing });
         });
