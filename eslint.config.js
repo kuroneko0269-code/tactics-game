@@ -24,6 +24,19 @@ const viewLayerPatterns = [
   },
 ];
 
+/**
+ * core で禁止する Math の関数。
+ * 三角関数・指数・対数・べき乗などは、規格で結果の細かい桁まで決まっておらず、
+ * ブラウザやサーバーの実行環境によって結果がわずかに変わりうる。
+ * （四則演算、Math.floor / abs / min / max / sqrt / imul などは、どの環境でも同じ結果になるので使ってよい）
+ */
+const nonDeterministicMath = [
+  'sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'atan2',
+  'sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh',
+  'exp', 'expm1', 'log', 'log1p', 'log2', 'log10',
+  'pow', 'cbrt', 'hypot',
+];
+
 /** core から読み込んではいけないもの */
 const coreForbiddenImports = {
   patterns: [
@@ -83,6 +96,28 @@ export default tseslint.config(
           message:
             'core では Math.random を使わず、src/core/rng.ts のシード付き乱数を使ってください（同じ状態から同じ結果を再現するため）。',
         },
+        ...nonDeterministicMath.map((property) => ({
+          object: 'Math',
+          property,
+          message: `core では Math.${property} を使えません。実行環境によって結果がわずかに変わりうるためです（ブラウザとサーバーで結果を一致させるため、整数の計算にしてください）。`,
+        })),
+        {
+          object: 'Date',
+          property: 'now',
+          message: 'core では現在時刻を使えません（同じ状態と行動から同じ結果にするため）。',
+        },
+      ],
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "BinaryExpression[operator='**'], AssignmentExpression[operator='**=']",
+          message:
+            'core ではべき乗の演算子（**）を使えません。Math.pow と同じく、実行環境によって結果がわずかに変わりうるためです。',
+        },
+        {
+          selector: "NewExpression[callee.name='Date']",
+          message: 'core では現在時刻（new Date）を使えません（同じ状態と行動から同じ結果にするため）。',
+        },
       ],
       'no-restricted-globals': [
         'error',
@@ -90,6 +125,10 @@ export default tseslint.config(
           name,
           message: 'core ではブラウザ専用の機能を使えません。',
         })),
+        {
+          name: 'performance',
+          message: 'core では現在時刻（performance.now など）を使えません（同じ状態と行動から同じ結果にするため）。',
+        },
       ],
     },
   },

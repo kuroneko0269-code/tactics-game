@@ -3,7 +3,6 @@ import { createMap, getTile, isInBounds, type MapDefinition } from './map';
 
 const small: MapDefinition = {
   id: 'small',
-  name: '小',
   heights: [
     [0, 1, 2],
     [3, 4, 5],

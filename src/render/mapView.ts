@@ -18,8 +18,8 @@ export interface MapView {
   tileTop(x: number, z: number): THREE.Vector3;
   /** 3D オブジェクト → それが表すマス座標（マス以外なら undefined） */
   coordOf(object: THREE.Object3D): TileCoord | undefined;
-  /** 選択表示を切り替える。undefined で選択解除 */
-  setSelected(coord: TileCoord | undefined): void;
+  /** マスの色分け表示（移動できるマス、攻撃できるマスなど）。渡さなかったマスは表示を消す */
+  setMarks(marks: readonly TileMark[]): void;
   update(elapsedSeconds: number): void;
   readonly center: THREE.Vector3;
   readonly radius: number;
@@ -37,6 +37,20 @@ const SIDE_COLORS: Record<Terrain, number> = {
   dirt: 0x8a6a40,
   stone: 0x6e6e72,
   water: 0x3a6a9a,
+};
+
+/** マスの色分けの種類 */
+export type TileMarkKind = 'move' | 'attack' | 'target' | 'selected';
+
+export interface TileMark extends TileCoord {
+  readonly kind: TileMarkKind;
+}
+
+const MARK_STYLE: Record<TileMarkKind, { color: number; opacity: number; pulse: number }> = {
+  move: { color: 0x3d8bff, opacity: 0.5, pulse: 0.12 },
+  attack: { color: 0xff6a3d, opacity: 0.32, pulse: 0.06 },
+  target: { color: 0xff2020, opacity: 0.7, pulse: 0.2 },
+  selected: { color: 0xffe14d, opacity: 0.75, pulse: 0.15 },
 };
 
 const COORD_KEY = 'tileCoord';
@@ -75,20 +89,24 @@ export function createMapView(map: BattleMap): MapView {
     group.add(mesh);
   }
 
-  // 選択表示：マスの上面に重ねる、光る枠と半透明の板
-  const highlight = new THREE.Group();
-  const plate = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.96, 0.96).rotateX(-Math.PI / 2),
-    new THREE.MeshBasicMaterial({ color: 0xffe14d, transparent: true, opacity: 0.7, depthWrite: false }),
-  );
-  const frame = new THREE.LineSegments(
-    new THREE.EdgesGeometry(new THREE.PlaneGeometry(0.98, 0.98).rotateX(-Math.PI / 2)),
-    new THREE.LineBasicMaterial({ color: 0xffffff }),
-  );
-  highlight.add(plate, frame);
-  highlight.visible = false;
-  highlight.renderOrder = 1;
-  group.add(highlight);
+  // 色分け表示：マスの上面に重ねる半透明の板と枠。マスごとに1枚ずつ用意して、表示を切り替える
+  const markGeometry = new THREE.PlaneGeometry(0.94, 0.94).rotateX(-Math.PI / 2);
+  const frameGeometry = new THREE.EdgesGeometry(new THREE.PlaneGeometry(0.94, 0.94).rotateX(-Math.PI / 2));
+  const markGroup = new THREE.Group();
+  group.add(markGroup);
+  const markMeshes = map.tiles.map((tile) => {
+    const material = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false });
+    const plate = new THREE.Mesh(markGeometry, material);
+    const frameMaterial = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.9 });
+    plate.add(new THREE.LineSegments(frameGeometry, frameMaterial));
+    const top = tileTop(tile.x, tile.z);
+    plate.position.set(top.x, top.y + 0.012, top.z);
+    plate.visible = false;
+    plate.renderOrder = 1;
+    plate.userData[COORD_KEY] = { x: tile.x, z: tile.z } satisfies TileCoord;
+    markGroup.add(plate);
+    return { plate, material, frameMaterial, kind: undefined as TileMarkKind | undefined };
+  });
 
   const radius = Math.hypot(map.width, map.depth) / 2;
   const heightRange = maxHeight * HEIGHT_STEP + BASE_THICKNESS;
@@ -103,18 +121,27 @@ export function createMapView(map: BattleMap): MapView {
       }
       return undefined;
     },
-    setSelected(coord) {
-      if (!coord) {
-        highlight.visible = false;
-        return;
+    setMarks(marks) {
+      for (const m of markMeshes) {
+        m.plate.visible = false;
+        m.kind = undefined;
       }
-      const top = tileTop(coord.x, coord.z);
-      highlight.position.set(top.x, top.y + 0.01, top.z);
-      highlight.visible = true;
+      for (const mark of marks) {
+        const m = markMeshes[mark.z * map.width + mark.x];
+        if (!m) continue;
+        const style = MARK_STYLE[mark.kind];
+        m.kind = mark.kind;
+        m.material.color.setHex(style.color);
+        m.frameMaterial.color.setHex(style.color).offsetHSL(0, 0, 0.2);
+        m.plate.visible = true;
+      }
     },
     update(elapsed) {
-      if (highlight.visible) {
-        (plate.material as THREE.MeshBasicMaterial).opacity = 0.6 + 0.25 * Math.sin(elapsed * 5);
+      const wave = Math.sin(elapsed * 4);
+      for (const m of markMeshes) {
+        if (!m.kind) continue;
+        const style = MARK_STYLE[m.kind];
+        m.material.opacity = style.opacity + style.pulse * wave;
       }
     },
     center: new THREE.Vector3(0, (maxHeight * HEIGHT_STEP) / 2, 0),

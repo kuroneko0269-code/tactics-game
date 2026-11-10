@@ -1,39 +1,43 @@
 import './ui/style.css';
 import * as THREE from 'three';
-import { createMap, getTile } from './core/map';
-import { testMap } from './data/maps/testMap';
-import { testUnits } from './data/units';
+import { startBattle } from './core/battle';
+import { battleRules } from './data/battleRules';
+import { firstBattle } from './data/battles/firstBattle';
+import { jobs } from './data/jobs';
 import { createStage } from './render/stage';
 import { createCameraRig } from './render/cameraRig';
-import { createMapView, type TileCoord } from './render/mapView';
-import { createPuppet } from './render/puppet';
+import { createMapView } from './render/mapView';
+import { createBattleView } from './render/battleView';
 import { onTapObject } from './render/picker';
+import { createBattleController } from './ui/battleController';
 import { createHud } from './ui/hud';
+import { TEXT } from './ui/text';
+import { createUnitLabels } from './ui/unitLabels';
 
 /**
- * 動作確認用の画面。
- * マップ・カメラ・仮の人形・HUD を組み立てて、タップでマスを選択できるようにする。
+ * 入口。定義データ（data）を戦闘ルール（core）に渡して戦闘を始め、
+ * 3D 表示（render）と画面の操作（ui）を組み立てる。
  */
 function main(): void {
   const stageEl = document.getElementById('stage');
   const hudEl = document.getElementById('hud');
-  if (!stageEl || !hudEl) throw new Error('#stage または #hud が見つかりません');
+  const labelsEl = document.getElementById('labels');
+  if (!stageEl || !hudEl || !labelsEl) throw new Error('#stage / #hud / #labels が見つかりません');
+  document.title = TEXT.appTitle;
 
-  const map = createMap(testMap);
+  // シード値（乱数の種）。URL に ?seed=123 と付けると、同じ戦闘を再現できる
+  const seedParam = Number(new URLSearchParams(location.search).get('seed'));
+  let nextSeed = Number.isInteger(seedParam) && seedParam > 0 ? seedParam : randomSeed();
+  const newBattle = () => {
+    const seed = nextSeed;
+    nextSeed = randomSeed();
+    return startBattle(firstBattle, jobs, battleRules, seed);
+  };
+  const first = newBattle();
+
   const stage = createStage(stageEl);
-
-  const mapView = createMapView(map);
+  const mapView = createMapView(first.state.map);
   stage.scene.add(mapView.group);
-
-  const puppets = testUnits.map((unit) => {
-    const puppet = createPuppet(unit.colors);
-    puppet.group.position.copy(mapView.tileTop(unit.x, unit.z));
-    puppet.setFacing(unit.facing);
-    // 人形をタップしても、立っているマスを選択したことにする
-    puppet.group.userData.tileCoord = { x: unit.x, z: unit.z } satisfies TileCoord;
-    stage.scene.add(puppet.group);
-    return { unit, puppet };
-  });
 
   const rig = createCameraRig({
     target: mapView.center,
@@ -42,20 +46,31 @@ function main(): void {
   });
   stage.onResize((w, h) => rig.resize(w, h));
 
-  const select = (coord: TileCoord | undefined) => {
-    mapView.setSelected(coord);
-    const tile = coord ? getTile(map, coord.x, coord.z) : undefined;
-    const unit = coord ? testUnits.find((u) => u.x === coord.x && u.z === coord.z) : undefined;
-    hud.showSelection(tile, unit?.name);
-  };
+  const view = createBattleView({
+    scene: stage.scene,
+    mapView,
+    initial: first.state,
+    camera: () => rig.camera,
+    canvas: stage.renderer.domElement,
+  });
+  view.sync(first.state);
 
-  const hud = createHud(hudEl, map.name, { onRotate: (d) => rig.rotate(d) });
+  const hud = createHud(hudEl, first.state.map.id, { onRotate: (d) => rig.rotate(d) });
+  const labels = createUnitLabels(
+    labelsEl,
+    first.state.units.map((u) => ({ id: u.id, team: u.team, hp: u.hp, maxHp: u.stats.maxHp })),
+  );
+  const controller = createBattleController(first, { view, hud, labels, newBattle });
 
   onTapObject(
     stage.renderer.domElement,
     () => rig.camera,
-    () => [mapView.group, ...puppets.map((p) => p.puppet.group)],
-    (object) => select(object ? mapView.coordOf(object) : undefined),
+    () => view.pickTargets(),
+    (objects) => {
+      const coords = objects.map((o) => view.coordOf(o)).filter((c) => c !== undefined);
+      const direction = objects.map((o) => view.directionOf(o)).find((d) => d !== undefined);
+      controller.onTap(coords, direction);
+    },
   );
 
   // キーボードでも回転できるように（Q / E キー、左右矢印キー）
@@ -64,16 +79,31 @@ function main(): void {
     if (e.key === 'e' || e.key === 'ArrowRight') rig.rotate(1);
   });
 
+  // 開発中だけ、自動テスト（ブラウザ操作の自動化）から状態と画面座標を読めるようにする
+  if (import.meta.env.DEV) {
+    (window as unknown as Record<string, unknown>).__tactics = {
+      state: () => controller.state,
+      mode: () => controller.mode,
+      modeDetail: () => controller.modeDetail,
+      tileScreen: (x: number, z: number) => view.tileScreenPosition(x, z),
+    };
+  }
+
   const timer = new THREE.Timer();
   stage.renderer.setAnimationLoop((time) => {
     timer.update(time);
-    const dt = timer.getDelta();
+    const dt = Math.min(timer.getDelta(), 0.1);
     const elapsed = timer.getElapsed();
     rig.update(dt);
     mapView.update(elapsed);
-    for (const p of puppets) p.puppet.update(elapsed);
+    view.update(dt, elapsed);
     stage.renderer.render(stage.scene, rig.camera);
+    labels.setPositions(view.unitAnchors());
   });
+}
+
+function randomSeed(): number {
+  return Math.floor(Math.random() * 0x7fffffff) + 1;
 }
 
 main();

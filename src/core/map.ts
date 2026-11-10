@@ -16,17 +16,18 @@ export interface Tile {
 
 export interface BattleMap {
   readonly id: string;
-  readonly name: string;
   readonly width: number;
   readonly depth: number;
   /** tiles[z * width + x] */
   readonly tiles: readonly Tile[];
 }
 
-/** src/data に置くマップ定義の形 */
+/**
+ * src/data に置くマップ定義の形。
+ * 画面に出すマップ名は持たない（文言は src/ui/text.ts に id で引けるようにまとめる）。
+ */
 export interface MapDefinition {
   readonly id: string;
-  readonly name: string;
   /** heights[z][x] = 高さ（段数） */
   readonly heights: readonly (readonly number[])[];
   /** terrain[z] の各文字が1マス。凡例は legend で指定 */
@@ -64,7 +65,7 @@ export function createMap(def: MapDefinition): BattleMap {
       tiles.push({ x, z, height, terrain });
     }
   }
-  return { id: def.id, name: def.name, width, depth, tiles };
+  return { id: def.id, width, depth, tiles };
 }
 
 export function isInBounds(map: BattleMap, x: number, z: number): boolean {
