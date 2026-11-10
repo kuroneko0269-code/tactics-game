@@ -41,6 +41,13 @@ export interface AttackPreviewView {
 
 export interface HudHandlers {
   onRotate(direction: 1 | -1): void;
+  /** 1 で拡大、-1 で縮小 */
+  onZoom(steps: 1 | -1): void;
+  /** カメラの高さを次の段階へ。新しい段階（0: 低い 〜 2: 高い）を返す */
+  onCycleHeight(): number;
+  onResetView(): void;
+  /** 最初のカメラの高さの段階 */
+  readonly initialHeight: number;
 }
 
 export function createHud(root: HTMLElement, mapId: string, handlers: HudHandlers): BattleHud {
@@ -57,16 +64,32 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
   preview.hidden = true;
 
   const bottom = el('div', 'hud-bottom');
-  const rotate = el('div', 'rotate-buttons');
-  rotate.append(
-    button('⟲', TEXT.buttons.rotateLeft, () => handlers.onRotate(-1), 'hud-button small'),
-    button('⟳', TEXT.buttons.rotateRight, () => handlers.onRotate(1), 'hud-button small'),
+  // カメラの操作ボタン（拡大・縮小、回転、高さ、視点を戻す）をひとまとめにする
+  const camera = el('div', 'camera-buttons');
+  camera.setAttribute('role', 'group');
+  const heightButton = button(TEXT.buttons.cameraHeightShort, TEXT.buttons.cameraHeight, () => {
+    showHeight(handlers.onCycleHeight());
+  }, 'hud-button small camera-height');
+  const showHeight = (level: number) => {
+    const name = TEXT.cameraHeights[level] ?? '';
+    heightButton.querySelector('.label')!.textContent = name;
+    heightButton.setAttribute('aria-label', `${TEXT.buttons.cameraHeight}: ${name}`);
+    heightButton.dataset.level = String(level);
+  };
+  camera.append(
+    button('＋', TEXT.buttons.zoomIn, () => handlers.onZoom(1), 'hud-button small camera-zoom-in'),
+    button('－', TEXT.buttons.zoomOut, () => handlers.onZoom(-1), 'hud-button small camera-zoom-out'),
+    button('⟲', TEXT.buttons.rotateLeft, () => handlers.onRotate(-1), 'hud-button small camera-rotate-left'),
+    button('⟳', TEXT.buttons.rotateRight, () => handlers.onRotate(1), 'hud-button small camera-rotate-right'),
+    heightButton,
+    button('◎', TEXT.buttons.resetView, () => handlers.onResetView(), 'hud-button small camera-reset', TEXT.buttons.resetViewShort),
   );
+  showHeight(handlers.initialHeight);
   const hint = el('div', 'hint');
   const actions = el('div', 'actions');
   const actionArea = el('div', 'action-area');
   actionArea.append(hint, actions);
-  bottom.append(rotate, actionArea);
+  bottom.append(camera, actionArea);
 
   const result = el('div', 'result');
   result.hidden = true;
@@ -196,7 +219,13 @@ function el(tag: string, className?: string): HTMLElement {
   return e;
 }
 
-function button(icon: string, label: string, onClick: () => void, className: string): HTMLButtonElement {
+function button(
+  icon: string,
+  label: string,
+  onClick: () => void,
+  className: string,
+  visibleLabel = label,
+): HTMLButtonElement {
   const b = document.createElement('button');
   b.type = 'button';
   b.className = className;
@@ -207,7 +236,7 @@ function button(icon: string, label: string, onClick: () => void, className: str
     b.append(i);
   }
   const l = el('span', 'label');
-  l.textContent = label;
+  l.textContent = visibleLabel;
   b.append(l);
   b.addEventListener('click', onClick);
   return b;

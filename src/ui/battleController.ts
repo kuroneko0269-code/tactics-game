@@ -25,6 +25,11 @@ export interface BattleViewPort {
   animateAttack(event: Extract<BattleEvent, { type: 'attacked' }>, onImpact: () => void): Promise<void>;
   animateDefeat(unitId: string): Promise<void>;
   wait(seconds: number): Promise<void>;
+  /**
+   * 指定したマス（とその上のユニット）が画面の見やすい範囲になければ、カメラをそこへ滑らかに寄せる。
+   * カメラが止まったら解決する。
+   */
+  focusTiles(tiles: readonly Coord[]): Promise<void>;
 }
 
 export interface BattleControllerDeps {
@@ -174,10 +179,14 @@ export function createBattleController(start: ActionResult, deps: BattleControll
   const play = async (events: readonly BattleEvent[]) => {
     for (const ev of events) {
       switch (ev.type) {
-        case 'turnStarted':
+        case 'turnStarted': {
+          const unit = getUnit(state, ev.unitId);
           view.setActive(ev.unitId);
-          hud.setUnitInfo(getUnit(state, ev.unitId), ev.turnNumber);
+          hud.setUnitInfo(unit, ev.turnNumber);
+          // 手番が回ってきたユニットが画面の外にいれば、カメラを寄せる（敵の手番も同じ）
+          await view.focusTiles([unit]);
           break;
+        }
         case 'moved':
           view.setMarks([]);
           await view.animateMove(ev.unitId, ev.path);
@@ -262,10 +271,12 @@ export function createBattleController(start: ActionResult, deps: BattleControll
       if (action.type === 'move') {
         const moves = reachableTiles(state, actor()).map((c) => ({ x: c.x, z: c.z, kind: 'move' as const }));
         view.setMarks([...moves, { x: action.x, z: action.z, kind: 'selected' }]);
+        await view.focusTiles([actor(), action]);
         await view.wait(ENEMY_PAUSE.beforeMove);
       } else if (action.type === 'attack') {
         const target = getUnit(state, action.targetId);
         view.setMarks([{ x: target.x, z: target.z, kind: 'target' }]);
+        await view.focusTiles([actor(), target]);
         await view.wait(ENEMY_PAUSE.beforeAttack);
       }
       const result = applyAction(state, action);

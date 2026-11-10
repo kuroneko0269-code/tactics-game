@@ -33,6 +33,12 @@ export interface BattleView {
   unitAnchors(): { id: string; x: number; y: number; visible: boolean }[];
   /** マスの上面中央の画面座標（px）。自動テスト用 */
   tileScreenPosition(x: number, z: number): { x: number; y: number };
+  /** マスの上面の中央と、その周り8か所の画面座標（px）。奥のマスの見えている部分を探すため。自動テスト用 */
+  tileScreenPoints(x: number, z: number): { x: number; y: number }[];
+  /** ユニットの体の中ほどの画面座標（px）。自動テスト用 */
+  unitScreenPosition(unitId: string): { x: number; y: number };
+  /** 向き選びの矢印の画面座標（px）。矢印が出ていなければ undefined。自動テスト用 */
+  arrowScreenPosition(direction: Direction): { x: number; y: number } | undefined;
   update(deltaSeconds: number, elapsedSeconds: number): void;
 }
 
@@ -280,6 +286,26 @@ export function createBattleView(options: {
     },
     tileScreenPosition(x, z) {
       const s = screenOf(mapView.tileTop(x, z));
+      return { x: s.x, y: s.y };
+    },
+    tileScreenPoints(x, z) {
+      const top = mapView.tileTop(x, z);
+      const offsets = [0, 0.3, -0.3];
+      return offsets.flatMap((dx) =>
+        offsets.map((dz) => {
+          const s = screenOf(top.clone().add(new THREE.Vector3(dx, 0, dz)));
+          return { x: s.x, y: s.y };
+        }),
+      );
+    },
+    unitScreenPosition(unitId) {
+      const s = screenOf(visual(unitId).puppet.group.position.clone().add(new THREE.Vector3(0, 0.5, 0)));
+      return { x: s.x, y: s.y };
+    },
+    arrowScreenPosition(direction) {
+      const arrow = arrows.find((a) => a.dir === direction);
+      if (!arrowGroup.visible || !arrow) return undefined;
+      const s = screenOf(arrow.mesh.getWorldPosition(new THREE.Vector3()));
       return { x: s.x, y: s.y };
     },
     update(dt, elapsed) {
