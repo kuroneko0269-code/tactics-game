@@ -114,7 +114,7 @@ async function main() {
       console.log(
         `✔ ${label}: ${r.winner === 'player' ? '勝利' : '敗北'}（${r.turns}手番、味方の手番 ${r.playerTurns}、` +
           `魔法の指定 ${r.casts}回（ユニット狙い ${r.unitCasts}・マス狙い ${r.tileCasts}）、詠唱の中断 ${r.interrupts}回、` +
-          `カメラ操作 ${r.cameraOps}回、タップ ${r.taps}回、${r.seconds}秒）`,
+          `向きをマスで選んだ ${r.facingByTile}回、カメラ操作 ${r.cameraOps}回、タップ ${r.taps}回、${r.seconds}秒）`,
       );
     } else {
       failed = true;
@@ -161,7 +161,7 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
   const log = (msg) => console.log(`[${label}] ${msg}`);
   const started = Date.now();
   const deadline = started + BATTLE_TIMEOUT_MS;
-  const stats = { taps: 0, cameraOps: 0, playerTurns: 0, casts: 0, unitCasts: 0, tileCasts: 0, interrupts: 0 };
+  const stats = { taps: 0, cameraOps: 0, playerTurns: 0, casts: 0, unitCasts: 0, tileCasts: 0, interrupts: 0, facingByTile: 0 };
   const policy = playerPolicy(core);
   const { text } = core.data;
   const INPUT_MODES = [
@@ -376,7 +376,17 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
       await waitCameraIdle();
       check((await snapshot()) === before, '回転ボタンで、向きが誤って選ばれました');
     }
-    throw new CheckError(`向きの矢印 ${dir} の見えている部分が、どの向きからも見つかりませんでした`);
+    // 矢印が小さく重なって選びにくい時は、人がするように、その方向の隣のマスをタップして向きを選ぶ
+    const state = await getState();
+    const unit = state.units.find((u) => u.id === state.turn.unitId);
+    const v = { north: [0, -1], east: [1, 0], south: [0, 1], west: [-1, 0] }[dir];
+    const tile = { x: unit.x + v[0], z: unit.z + v[1] };
+    check(
+      tile.x >= 0 && tile.z >= 0 && tile.x < state.map.width && tile.z < state.map.depth,
+      `向きの矢印 ${dir} の見えている部分が見つからず、その方向の隣のマスもありません`,
+    );
+    stats.facingByTile++;
+    await tapTile(tile.x, tile.z);
   };
 
   // ---- 魔法の指定 ----
