@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { createCameraRig, PORTRAIT_ZOOM, ZOOM_MAX, ZOOM_MIN } from './cameraRig';
+import { createCameraRig, LANDSCAPE_ZOOM, PORTRAIT_ZOOM, ZOOM_MAX, ZOOM_MIN } from './cameraRig';
 
 function makeRig(width = 800, height = 600) {
   const rig = createCameraRig({
@@ -23,9 +23,19 @@ function screenOf(rig: ReturnType<typeof makeRig>, p: THREE.Vector3) {
 }
 
 describe('カメラ', () => {
-  it('横長の画面は拡大率 1、縦長の画面は最初から拡大した状態', () => {
+  it('PC など大きな横長の画面は拡大率 1。スマホの縦向き・横向きは最初から拡大した状態', () => {
     expect(makeRig(800, 600).zoom).toBe(1);
+    expect(makeRig(1280, 800).zoom).toBe(1);
     expect(makeRig(390, 844).zoom).toBe(PORTRAIT_ZOOM);
+    expect(makeRig(844, 390).zoom).toBe(LANDSCAPE_ZOOM);
+  });
+
+  it('縦向きと横向きを切り替えると、その向きの初期の拡大率になる', () => {
+    const rig = makeRig(390, 844);
+    rig.resize(844, 390);
+    expect(rig.zoom).toBe(LANDSCAPE_ZOOM);
+    rig.resize(390, 844);
+    expect(rig.zoom).toBe(PORTRAIT_ZOOM);
   });
 
   it('拡大・縮小には上限と下限がある', () => {

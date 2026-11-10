@@ -3,6 +3,7 @@ import type { BattleEvent, BattleState, SpellElement, Team } from '../core/battl
 import { DIRECTION_VECTORS, DIRECTIONS, type Coord, type Direction } from '../core/geometry';
 import type { MapView, ReservedTile, TileCoord, TileMark } from './mapView';
 import { createPuppet, YAW_OF, type Puppet, type PuppetLook } from './puppet';
+import { judgeTap, type TapCandidates, type TapHit } from './tapJudge';
 import { createTweens, easeInOut, easeOutCubic } from './tweens';
 
 /**
@@ -12,10 +13,13 @@ import { createTweens, easeInOut, easeOutCubic } from './tweens';
 export interface BattleView {
   /** タップ判定の対象 */
   pickTargets(): THREE.Object3D[];
-  /** タップされた物 → マス座標（マス・ユニット・向きの矢印） */
+  /** タップされた物 → マス座標（マス・ユニット） */
   coordOf(object: THREE.Object3D): TileCoord | undefined;
-  /** タップされた物が向きの矢印なら、その向き */
-  directionOf(object: THREE.Object3D): Direction | undefined;
+  /**
+   * 画面上の点 (x, y) をタップした時に選ぶマスの候補を、優先する順に返す（tapJudge.ts の規則）。
+   * hitsAt は、画面上の点の下にある物を手前から順に返す関数。
+   */
+  tapCandidates(hitsAt: (x: number, y: number) => THREE.Intersection[], x: number, y: number): TapCandidates;
   /** 状態に合わせて、すべてのユニットの位置・向き・表示を即座にそろえる */
   sync(state: BattleState): void;
   setMarks(marks: readonly TileMark[]): void;
@@ -29,8 +33,13 @@ export interface BattleView {
   animateSpell(event: Extract<BattleEvent, { type: 'spellResolved' }>, onImpact: () => void): Promise<void>;
   /** 手番のユニットの頭上に目印を出す */
   setActive(unitId: string | undefined): void;
-  /** 向きを選ぶための矢印をユニットの周りに出す（undefined で消す） */
+  /** 選んでいる向きを、ユニットの足もとの矢印で示す（undefined で消す）。矢印はタップの対象ではない */
   showFacingArrows(unitId: string | undefined, selected?: Direction): void;
+  /**
+   * 向きを選ぶボタンを置くための画面座標（px）: ユニットのマスの中央と、各向きに 1 マス進んだ点。
+   * 向きのボタン（src/ui）を、画面上でその向きの側に並べるために使う。
+   */
+  facingScreen(unitId: string): { center: { x: number; y: number }; dirs: Record<Direction, { x: number; y: number }> };
   turnTo(unitId: string, facing: Direction): Promise<void>;
   animateMove(unitId: string, path: readonly Coord[]): Promise<void>;
   /** 攻撃の動き。当たった（または外れた）瞬間に onImpact を呼ぶ */
@@ -45,10 +54,6 @@ export interface BattleView {
   tileScreenPoints(x: number, z: number): { x: number; y: number }[];
   /** ユニットの体の中ほどの画面座標（px）。自動テスト用 */
   unitScreenPosition(unitId: string): { x: number; y: number };
-  /** 向き選びの矢印の画面座標（px）。矢印が出ていなければ undefined。自動テスト用 */
-  arrowScreenPosition(direction: Direction): { x: number; y: number } | undefined;
-  /** 向き選びの矢印の内側の数か所の画面座標（px）。自動テスト用 */
-  arrowScreenPoints(direction: Direction): { x: number; y: number }[];
   update(deltaSeconds: number, elapsedSeconds: number): void;
 }
 
@@ -66,9 +71,16 @@ const JOB_LOOKS: Record<string, Omit<PuppetLook, 'body'>> = {
 export const ELEMENT_COLORS: Record<SpellElement, number> = {
   fire: 0xff5a1f,
   wind: 0x3fd69a,
-  holy: 0xffe56b,
+  light: 0xffe56b,
 };
 const HEAD_HEIGHT = 1.05;
+/**
+ * タップした点の周りで調べる点（px）。指の太さぶんのずれを考え、タップした点のマスが選べない時に、
+ * すぐ近くの選べるマスを探すため（tapJudge.ts）。半径 5px と 10px の円の上を 8 方向ずつ。
+ */
+const TAP_RING: readonly (readonly [number, number])[] = [5, 10].flatMap((r) =>
+  [0, 1, 2, 3, 4, 5, 6, 7].map((k) => [Math.round(r * Math.cos((k * Math.PI) / 4)), Math.round(r * Math.sin((k * Math.PI) / 4))] as const),
+);
 const STEP_SECONDS = 0.2;
 
 interface UnitVisual {
@@ -162,7 +174,8 @@ export function createBattleView(options: {
     const v = DIRECTION_VECTORS[dir];
     mesh.position.set(v.x * 0.85, 0.08, v.z * 0.85);
     mesh.rotation.y = YAW_OF[dir];
-    mesh.userData.direction = dir;
+    // 足もとの矢印は向きを示すだけ。タップは画面のボタン（src/ui）で受ける
+    mesh.raycast = () => {};
     arrowGroup.add(mesh);
     return { dir, mesh, material };
   });
@@ -173,6 +186,20 @@ export function createBattleView(options: {
   );
   projectile.visible = false;
   scene.add(projectile);
+
+  const mapWidth = options.initial.map.width;
+  const mapDepth = options.initial.map.depth;
+  const coordOf = (object: THREE.Object3D): TileCoord | undefined => {
+    for (let o: THREE.Object3D | null = object; o; o = o.parent) {
+      const coord = o.userData.tileCoord as TileCoord | undefined;
+      if (coord) return coord;
+    }
+    return undefined;
+  };
+  const isUnit = (object: THREE.Object3D) => {
+    for (let o: THREE.Object3D | null = object; o; o = o.parent) if (o.userData.unitId) return true;
+    return false;
+  };
 
   const turnTo = async (unitId: string, facing: Direction) => {
     const { puppet } = visual(unitId);
@@ -197,24 +224,35 @@ export function createBattleView(options: {
   };
 
   return {
-    pickTargets: () => [mapView.group, ...[...visuals.values()].filter((v) => v.alive).map((v) => v.puppet.group), arrowGroup],
-    coordOf(object) {
-      for (let o: THREE.Object3D | null = object; o; o = o.parent) {
-        if (o.userData.direction && activeId) {
-          const c = visual(activeId).coord;
-          const v = DIRECTION_VECTORS[o.userData.direction as Direction];
-          return { x: c.x + v.x, z: c.z + v.z };
+    pickTargets: () => [mapView.group, ...[...visuals.values()].filter((v) => v.alive).map((v) => v.puppet.group)],
+    coordOf,
+    tapCandidates(hitsAt, x, y) {
+      const toHit = (hits: THREE.Intersection[]): TapHit | undefined => {
+        const h = hits[0];
+        if (!h) return undefined;
+        const coord = coordOf(h.object);
+        if (!coord) return undefined;
+        if (isUnit(h.object)) return { kind: 'unit', coord };
+        // マスの柱の側面（法線が横向き）なら、その側面が面している隣のマスと高さも渡す
+        const normal = h.face?.normal;
+        if (normal && Math.abs(normal.y) < 0.5 && mapView.coordOf(h.object) === coord) {
+          const nx = Math.round(normal.x);
+          const nz = Math.round(normal.z);
+          const neighbor = { x: coord.x + nx, z: coord.z + nz };
+          const inMap = neighbor.x >= 0 && neighbor.z >= 0 && neighbor.x < mapWidth && neighbor.z < mapDepth;
+          return {
+            kind: 'side',
+            coord,
+            neighbor: inMap ? neighbor : undefined,
+            hitHeight: h.point.y,
+            top: mapView.tileTop(coord.x, coord.z).y,
+            neighborTop: inMap ? mapView.tileTop(neighbor.x, neighbor.z).y : undefined,
+          };
         }
-        const coord = o.userData.tileCoord as TileCoord | undefined;
-        if (coord) return coord;
-      }
-      return undefined;
-    },
-    directionOf(object) {
-      for (let o: THREE.Object3D | null = object; o; o = o.parent) {
-        if (o.userData.direction) return o.userData.direction as Direction;
-      }
-      return undefined;
+        return { kind: 'top', coord };
+      };
+      const nearby = TAP_RING.map(([dx, dy]) => toHit(hitsAt(x + dx, y + dy)));
+      return judgeTap(toHit(hitsAt(x, y)), nearby);
     },
     sync(state) {
       for (const unit of state.units) {
@@ -305,11 +343,23 @@ export function createBattleView(options: {
       arrowGroup.visible = unitId !== undefined;
       if (!unitId) return;
       arrowGroup.position.copy(mapView.tileTop(visual(unitId).coord.x, visual(unitId).coord.z));
+      // 選んでいる向きの矢印だけを、足もとに出す
       for (const a of arrows) {
-        a.material.color.setHex(a.dir === selected ? 0xffd23d : 0xffffff);
-        a.material.opacity = a.dir === selected ? 1 : 0.8;
-        a.mesh.scale.setScalar(a.dir === selected ? 1.6 : 1.25);
+        a.mesh.visible = a.dir === selected;
+        a.material.color.setHex(0xffd23d);
+        a.material.opacity = 0.95;
+        a.mesh.scale.setScalar(1.3);
       }
+    },
+    facingScreen(unitId) {
+      const c = visual(unitId).coord;
+      const top = mapView.tileTop(c.x, c.z);
+      const at = (dx: number, dz: number) => {
+        const s = screenOf(top.clone().add(new THREE.Vector3(dx, 0, dz)));
+        return { x: s.x, y: s.y };
+      };
+      const dirs = Object.fromEntries(DIRECTIONS.map((d) => [d, at(DIRECTION_VECTORS[d].x, DIRECTION_VECTORS[d].z)]));
+      return { center: at(0, 0), dirs: dirs as Record<Direction, { x: number; y: number }> };
     },
     turnTo,
     async animateMove(unitId, path) {
@@ -415,29 +465,6 @@ export function createBattleView(options: {
     unitScreenPosition(unitId) {
       const s = screenOf(visual(unitId).puppet.group.position.clone().add(new THREE.Vector3(0, 0.5, 0)));
       return { x: s.x, y: s.y };
-    },
-    arrowScreenPosition(direction) {
-      const arrow = arrows.find((a) => a.dir === direction);
-      if (!arrowGroup.visible || !arrow) return undefined;
-      // 矢印の頭（三角の部分）の内側の点。原点は三角と軸の境目にあり、タップの判定が当たりにくいため
-      const s = screenOf(arrow.mesh.localToWorld(new THREE.Vector3(0, 0, 0.12)));
-      return { x: s.x, y: s.y };
-    },
-    arrowScreenPoints(direction) {
-      const arrow = arrows.find((a) => a.dir === direction);
-      if (!arrowGroup.visible || !arrow) return [];
-      // 矢印の頭の中ほど、先、左右、軸（矢印の形の内側の点）
-      const local = [
-        [0, 0.12],
-        [0, 0.22],
-        [-0.12, 0.05],
-        [0.12, 0.05],
-        [0, -0.1],
-      ];
-      return local.map(([x, z]) => {
-        const s = screenOf(arrow.mesh.localToWorld(new THREE.Vector3(x, 0, z)));
-        return { x: s.x, y: s.y };
-      });
     },
     update(dt, elapsed) {
       tweens.update(dt);

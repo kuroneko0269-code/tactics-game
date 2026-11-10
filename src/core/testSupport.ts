@@ -61,7 +61,7 @@ export const testWind: SpellDefinition = {
 /** 範囲の回復魔法 */
 export const testHeal: SpellDefinition = {
   id: 'heal',
-  element: 'holy',
+  element: 'light',
   effect: 'heal',
   power: 200,
   mpCost: 8,

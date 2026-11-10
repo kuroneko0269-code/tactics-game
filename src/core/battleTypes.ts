@@ -25,7 +25,7 @@ export interface UnitStats {
 }
 
 /** 魔法の属性。今は表示と記録だけで、効果の違いはない（後のフェーズで連携魔法と弱点に使う） */
-export type SpellElement = 'fire' | 'wind' | 'holy';
+export type SpellElement = 'fire' | 'wind' | 'light';
 
 /** 魔法の効果の種類 */
 export type SpellEffect = 'damage' | 'heal';
@@ -251,8 +251,11 @@ export type BattleEvent =
       readonly type: 'spellFizzled';
       readonly casterId: string;
       readonly spellId: string;
-      /** casterDefeated: 詠唱者が倒れた / targetDefeated: 狙ったユニットが倒れていた */
-      readonly reason: 'casterDefeated' | 'targetDefeated';
+      /**
+       * casterDefeated: 詠唱者が倒れた。
+       * （狙ったユニットが倒れていた場合は不発にせず、倒れたマスに発動する。フェーズ1 の仕上げで発注者が決定）
+       */
+      readonly reason: 'casterDefeated';
     }
   | {
       /** 詠唱中に自分の手番で移動か行動をしたため、詠唱が中断された（MP は戻らない） */

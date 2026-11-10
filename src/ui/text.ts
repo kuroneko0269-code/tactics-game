@@ -55,7 +55,7 @@ export const TEXT = {
   elements: {
     fire: '炎',
     wind: '風',
-    holy: '聖',
+    light: '光',
   } satisfies Record<SpellElement, string>,
 
   teams: {
@@ -92,10 +92,11 @@ export const TEXT = {
     interrupt: '詠唱をやめる',
     keepCasting: 'やめない',
     wait: '待機',
-    undoMove: '移動を戻す',
+    undoMove: '移動をやり直す',
     back: '戻る',
     confirm: '確定',
-    decide: '決定',
+    /** 向きを決めて手番を終える */
+    endTurn: '確定',
     retry: 'もう一度',
     rotateLeft: '左に回す',
     rotateRight: '右に回す',
@@ -109,6 +110,23 @@ export const TEXT = {
     cameraHeightShort: '高さ',
   },
 
+  /** 手番の終わりの向きを選ぶボタン（画面上の置き場所で呼ぶ。方角名は使わない） */
+  facing: {
+    slots: {
+      upRight: '右上を向く',
+      downRight: '右下を向く',
+      downLeft: '左下を向く',
+      upLeft: '左上を向く',
+    },
+  },
+
+  /** 画面の隅に出す版（ビルドした日時）と、新しい版の案内 */
+  version: {
+    label: (builtAt: string) => `版 ${builtAt}`,
+    dev: '版 開発中',
+    update: '新しい版があります。更新',
+  },
+
   /** カメラの高さの段階（低い → 標準 → 高い） */
   cameraHeights: ['低い', '標準', '高い'] as readonly string[],
 
@@ -117,7 +135,7 @@ export const TEXT = {
     afterMove: '「攻撃」か「待機」を選ぶ',
     chooseTarget: '赤く光る敵をタップ',
     noTarget: '攻撃できる相手がいません',
-    chooseFacing: '矢印かマスをタップして向きを選び「決定」',
+    chooseFacing: '向きは最も近い敵の方。そのままで良ければ「確定」（変える時は矢印をタップ）',
     enemyTurn: '敵の手番',
     chooseSpell: (mp: number, maxMp: number) => `使う魔法を選ぶ（残り MP ${mp} / ${maxMp}）`,
     chooseSpellTarget: '紫のマスから、狙う場所をタップ',
