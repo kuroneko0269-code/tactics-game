@@ -29,7 +29,7 @@ export interface CameraRig {
   readonly heightLevel: HeightLevel;
   /** 拡大率（1 でマップ全体が収まる大きさ） */
   readonly zoom: number;
-  /** 拡大・平行移動・高さを最初の状態に戻す（回転はそのまま） */
+  /** 拡大率と視点の位置を最初の状態に戻す（回転とカメラの高さはそのまま） */
   reset(): void;
   /**
    * 指定した点がすべて画面の見やすい範囲に入っていなければ、それらの中心へ滑らかに寄せる。
@@ -214,8 +214,6 @@ export function createCameraRig(options: CameraRigOptions): CameraRig {
     reset() {
       goalZoom = initialZoom();
       goalPan.set(0, 0);
-      heightLevel = DEFAULT_HEIGHT;
-      goalElevation = degToRad(HEIGHT_ANGLES_DEG[heightLevel]);
     },
     focusOn(points) {
       if (points.length > 0 && !points.every((p) => inSafeBox(p))) {

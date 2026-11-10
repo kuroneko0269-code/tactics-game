@@ -4,6 +4,7 @@
  * - 命中率は向きだけで決まる（攻撃対象から見て、攻撃側が正面・側面・背面のどこにいるか）。
  * - ダメージ = 攻撃力 × 向きの倍率 × 高低差の補正。整数で計算し、端数は切り捨てる。
  * - 高低差の補正は、攻撃側が高いと 1 段ごとに増え、低いと減る（上限・下限あり）。
+ * - 詠唱中の相手には、さらに詠唱中の倍率が掛かる（切り捨て、最小値あり）。
  */
 import type { AttackProfile, BattleRules, BattleState, UnitState } from './battleTypes';
 import { directionToward, manhattan, relativeSide, type Coord, type Direction, type RelativeSide } from './geometry';
@@ -51,16 +52,24 @@ export function heightDamagePercent(rules: BattleRules, attackerHeight: number, 
   return Math.max(-cap, Math.min(cap, raw));
 }
 
-/** 命中した時のダメージ */
-export function computeDamage(rules: BattleRules, attack: number, side: RelativeSide, heightPercent: number): number {
-  const damage = Math.floor((attack * rules.damagePercent[side] * (100 + heightPercent)) / 10000);
-  return Math.max(rules.minimumDamage, damage);
+/** 命中した時のダメージ。chargingPercent は詠唱中の相手への倍率（詠唱中でなければ 100） */
+export function computeDamage(
+  rules: BattleRules,
+  attack: number,
+  side: RelativeSide,
+  heightPercent: number,
+  chargingPercent = 100,
+): number {
+  const base = Math.floor((attack * rules.damagePercent[side] * (100 + heightPercent)) / 10000);
+  return Math.max(rules.minimumDamage, Math.floor((base * chargingPercent) / 100));
 }
 
 export interface AttackPreview {
   readonly side: RelativeSide;
   readonly hitPercent: number;
   readonly heightPercent: number;
+  /** 相手が詠唱中なら詠唱中の倍率（%）、そうでなければ 100 */
+  readonly chargingPercent: number;
   /** 命中した時のダメージ */
   readonly damage: number;
   /** 攻撃のために攻撃側が向き直る向き */
@@ -76,11 +85,13 @@ export function previewAttack(
 ): AttackPreview {
   const side = relativeSide(from, target, target.facing);
   const heightPercent = heightDamagePercent(state.rules, heightAt(state.map, from), heightAt(state.map, target));
+  const chargingPercent = target.charging ? state.rules.chargingDamagePercent : 100;
   return {
     side,
     hitPercent: state.rules.hitPercent[side],
     heightPercent,
-    damage: computeDamage(state.rules, attacker.stats.attack, side, heightPercent),
+    chargingPercent,
+    damage: computeDamage(state.rules, attacker.stats.attack, side, heightPercent, chargingPercent),
     attackerFacing: directionToward(from, target, attacker.facing),
   };
 }

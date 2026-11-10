@@ -1,8 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { chooseApproach, chooseAttack, decideNextAction, playAiTurn, runAutoBattle } from './ai';
+import {
+  chooseApproach,
+  chooseAttack,
+  chooseDamageSpell,
+  chooseHealSpell,
+  decideNextAction,
+  playAiTurn,
+  runAutoBattle,
+  threatMap,
+} from './ai';
 import { startBattle } from './battle';
 import type { BattleSetup } from './battleTypes';
-import { flat, makeState, testArcher, testJobs, testRules } from './testSupport';
+import {
+  flat,
+  makeState,
+  testAi,
+  testAiConfigs,
+  testArcher,
+  testHealer,
+  testJobs,
+  testMage,
+  testRules,
+  testSpells,
+} from './testSupport';
 
 describe('敵 AI の位置選び', () => {
   it('攻撃できる位置が複数あれば、背面 → 側面 → 正面 の順に選ぶ', () => {
@@ -74,7 +94,7 @@ describe('敵 AI の位置選び', () => {
       ],
     });
     expect(chooseAttack(state, state.units[0]!, true)).toBeUndefined();
-    expect(chooseApproach(state, state.units[0]!)).toEqual({ x: 3, z: 1 });
+    expect(chooseApproach(state, state.units[0]!, { ...testAi, stance: 'advance' })).toEqual({ x: 3, z: 1 });
   });
 
   it('近づく時は、崖を避けて実際に歩ける道のりで近い方を選ぶ', () => {
@@ -92,7 +112,7 @@ describe('敵 AI の位置選び', () => {
         { id: 't', team: 'player', x: 2, z: 0 },
       ],
     });
-    expect(chooseApproach(state, state.units[0]!)).toEqual({ x: 0, z: 3 });
+    expect(chooseApproach(state, state.units[0]!, { ...testAi, stance: 'advance' })).toEqual({ x: 0, z: 3 });
   });
 
   it('攻撃する手番は「移動 → 攻撃 → 相手の方を向いて終了」と進む', () => {
@@ -103,8 +123,8 @@ describe('敵 AI の位置選び', () => {
         { id: 't', team: 'player', x: 2, z: 2, facing: 'north' },
       ],
     });
-    expect(decideNextAction(state)).toEqual({ type: 'move', x: 2, z: 3 });
-    const { actions } = playAiTurn(state);
+    expect(decideNextAction(state, testAi)).toEqual({ type: 'move', x: 2, z: 3 });
+    const { actions } = playAiTurn(state, testAi);
     expect(actions).toEqual([
       { type: 'move', x: 2, z: 3 },
       { type: 'attack', targetId: 't' },
@@ -145,8 +165,237 @@ describe('AI 同士の自動戦闘', () => {
 
   it('どのシード値でも、必ず決着がつく', () => {
     for (let seed = 1; seed <= 30; seed++) {
-      const { state } = runAutoBattle(startBattle(setup, testJobs, testRules, seed).state, 1000);
+      const { state } = runAutoBattle(startBattle(setup, testJobs, testRules, seed).state, 1000, testAiConfigs);
       expect(state.winner, `シード値 ${seed}`).not.toBeNull();
     }
+  });
+});
+
+describe('敵 AI: 攻撃できない時の動き', () => {
+  // 敵の戦士（移動 3 + 隣接）は、x = 0〜4 の列まで攻撃を届かせられる。x = 5 から先は届かない
+  const field = (aiX: number, extra: Parameters<typeof makeState>[0]['units'] = [], options = {}) =>
+    makeState({
+      heights: flat(12, 3),
+      units: [{ id: 'ai', team: 'enemy', x: aiX, z: 1 }, { id: 'p', team: 'player', x: 0, z: 1 }, ...extra],
+      ...options,
+    });
+
+  it('単独では、相手の攻撃が届く位置へ踏み込まず、届かないぎりぎりの位置で止まる', () => {
+    const state = field(8);
+    const threat = threatMap(state, 'enemy');
+    expect(threat.get(1 * 12 + 4)).toBe(1);
+    expect(threat.get(1 * 12 + 5)).toBeUndefined();
+    expect(chooseApproach(state, state.units[0]!, testAi)).toEqual({ x: 5, z: 1 });
+    // 改良前の動き（前に出る）なら、届く範囲に踏み込む
+    expect(chooseApproach(state, state.units[0]!, { ...testAi, stance: 'advance' })).toEqual({ x: 5, z: 1 });
+    const far = field(11);
+    expect(chooseApproach(far, far.units[0]!, { ...testAi, stance: 'advance' })).toEqual({ x: 8, z: 1 });
+    // ぎりぎりの位置にいれば、それ以上は進まない
+    const edge = field(5);
+    expect(chooseApproach(edge, edge.units[0]!, testAi)).toBeUndefined();
+    expect(decideNextAction(edge, testAi)).toEqual({ type: 'endTurn', facing: 'west' });
+  });
+
+  it('すでに相手の攻撃が届く位置にいれば、下がって手番を無駄にせず、届く相手が増えないマスへ進む', () => {
+    const state = makeState({
+      heights: flat(12, 5),
+      units: [
+        { id: 'ai', team: 'enemy', job: testArcher, x: 2, z: 1 },
+        { id: 'p', team: 'player', x: 0, z: 1 },
+      ],
+    });
+    const threat = threatMap(state, 'enemy');
+    expect(threat.get(1 * 12 + 2)).toBe(1);
+    const dest = chooseApproach(state, state.units[0]!, testAi)!;
+    expect(threat.get(dest.z * 12 + dest.x) ?? 0).toBeLessThanOrEqual(1);
+    // 下がらない（相手との距離が今より遠くならない）
+    expect(Math.abs(dest.x) + Math.abs(dest.z - 1)).toBeLessThanOrEqual(2);
+  });
+
+  it('近くに味方が十分いれば、単独ではないので踏み込む', () => {
+    // 味方 2 体が近くにいる。届く相手は 1 体
+    const alone = field(7);
+    expect(chooseApproach(alone, alone.units[0]!, testAi)).toEqual({ x: 5, z: 1 });
+    const state = field(7, [
+      { id: 'f1', team: 'enemy', x: 6, z: 0 },
+      { id: 'f2', team: 'enemy', x: 6, z: 2 },
+    ]);
+    expect(chooseApproach(state, state.units[0]!, testAi)).toEqual({ x: 4, z: 1 });
+  });
+
+  it('どちらの軍も一定の手番数（12）攻撃や魔法をしていなければ、前進に切り替える', () => {
+    const calm = field(8, [], { turnNumber: 12, lastAggressionTurn: 1 });
+    expect(chooseApproach(calm, calm.units[0]!, testAi)).toEqual({ x: 5, z: 1 });
+    const stale = field(8, [], { turnNumber: 13, lastAggressionTurn: 1 });
+    expect(chooseApproach(stale, stale.units[0]!, testAi)).toEqual({ x: 5, z: 1 });
+    const far = field(11, [], { turnNumber: 13, lastAggressionTurn: 1 });
+    expect(chooseApproach(far, far.units[0]!, testAi)).toEqual({ x: 8, z: 1 });
+    const edge = field(5, [], { turnNumber: 13, lastAggressionTurn: 1 });
+    expect(chooseApproach(edge, edge.units[0]!, testAi)).toEqual({ x: 2, z: 1 });
+  });
+
+  it('攻撃や魔法があると、にらみ合いの手番数は数え直しになる', () => {
+    const start = startBattle(
+      {
+        id: 'duel',
+        map: { id: 'm', heights: flat(4, 1), terrain: ['gggg'], legend: { g: 'grass' } },
+        units: [
+          { id: 'p', team: 'player', jobId: 'warrior', x: 0, z: 0, facing: 'east' },
+          { id: 'e', team: 'enemy', jobId: 'warrior', x: 1, z: 0, facing: 'west' },
+        ],
+      },
+      testJobs,
+      testRules,
+      1,
+      testSpells,
+    ).state;
+    expect(start.lastAggressionTurn).toBe(0);
+    const { state } = playAiTurn(start, testAi);
+    expect(state.lastAggressionTurn).toBe(1);
+  });
+
+  it('攻撃できる時は、今までどおり攻撃を優先する。詠唱中の相手を攻撃できれば、そちらを狙う', () => {
+    const state = makeState({
+      heights: flat(5, 5),
+      units: [
+        { id: 'ai', team: 'enemy', x: 2, z: 2 },
+        // 背面を取れる相手より、詠唱中の相手を優先する
+        { id: 'back', team: 'player', x: 2, z: 1, facing: 'north', hp: 1 },
+        { id: 'caster', team: 'player', job: testMage, x: 2, z: 4, facing: 'north', charging: { spellId: 'fire', target: { kind: 'tile', x: 0, z: 0 }, progress: 0 } },
+      ],
+    });
+    expect(chooseAttack(state, state.units[0]!, true)?.targetId).toBe('caster');
+  });
+});
+
+describe('敵 AI: 魔術師', () => {
+  /** 魔術師が立つ (4,1) だけ高さ 3 の柱にして、相手の通常攻撃が届かないようにする（届く位置からは撃ち方が変わるため） */
+  const pillar = () => {
+    const h = flat(9, 9);
+    h[1]![4] = 3;
+    return h;
+  };
+  it('巻き込む敵の数から味方の数を引いた値が最も大きい場所に撃つ', () => {
+    const state = makeState({
+      heights: pillar(),
+      units: [
+        { id: 'm', team: 'enemy', job: testMage, x: 4, z: 1 },
+        // (4,4) の周りに敵 3 体。(5,4) を中心にすると 3 体だが、味方も 1 体巻き込む
+        { id: 'p1', team: 'player', x: 4, z: 4 },
+        { id: 'p2', team: 'player', x: 3, z: 4 },
+        { id: 'p3', team: 'player', x: 4, z: 5 },
+        { id: 'ally', team: 'enemy', x: 5, z: 3 },
+      ],
+    });
+    // 移動はせず、今の位置から撃つ場所を選ぶ
+    const plan = chooseDamageSpell(state, state.units[0]!, false)!;
+    expect(plan.spellId).toBe('fire');
+    expect(plan.target).toEqual({ kind: 'unit', unitId: 'p1' });
+  });
+
+  it('味方を巻き込んで差し引き 0 以下になる場所には撃たない', () => {
+    const state = makeState({
+      heights: pillar(),
+      units: [
+        { id: 'm', team: 'enemy', job: testMage, x: 4, z: 1 },
+        { id: 'p1', team: 'player', x: 4, z: 4 },
+        // 敵 1 体のすぐ隣に味方が 2 体。炎は使えないが、風（単体）なら撃てる
+        { id: 'a1', team: 'enemy', x: 3, z: 4 },
+        { id: 'a2', team: 'enemy', x: 5, z: 4 },
+      ],
+    });
+    const plan = chooseDamageSpell(state, state.units[0]!, false)!;
+    expect(plan.spellId).toBe('wind');
+    expect(plan.target).toEqual({ kind: 'unit', unitId: 'p1' });
+  });
+
+  it('巻き込める数が同じなら、動いていない相手や詠唱中の相手を優先する', () => {
+    const state = makeState({
+      heights: pillar(),
+      units: [
+        { id: 'm', team: 'enemy', job: testMage, x: 4, z: 1 },
+        { id: 'moving', team: 'player', x: 2, z: 3, movedLastTurn: true },
+        { id: 'still', team: 'player', x: 6, z: 3, movedLastTurn: false },
+      ],
+    });
+    expect(chooseDamageSpell(state, state.units[0]!, false)?.target).toEqual({ kind: 'unit', unitId: 'still' });
+    const charging = makeState({
+      heights: pillar(),
+      units: [
+        { id: 'm', team: 'enemy', job: testMage, x: 4, z: 1 },
+        { id: 'a', team: 'player', x: 2, z: 3, movedLastTurn: true },
+        { id: 'caster', team: 'player', job: testMage, x: 6, z: 3, movedLastTurn: true, charging: { spellId: 'wind', target: { kind: 'tile', x: 0, z: 0 }, progress: 0 } },
+      ],
+    });
+    expect(chooseDamageSpell(charging, charging.units[0]!, false)?.target).toEqual({ kind: 'unit', unitId: 'caster' });
+  });
+
+  it('手番の行動は「（必要なら移動）→ 魔法の指定 → 相手の方を向いて終了」', () => {
+    const state = makeState({
+      heights: flat(9, 9),
+      units: [
+        { id: 'm', team: 'enemy', job: testMage, x: 4, z: 0 },
+        { id: 'p', team: 'player', x: 4, z: 6 },
+      ],
+    });
+    const { actions } = playAiTurn(state, testAi);
+    expect(actions.map((a) => a.type)).toEqual(['move', 'cast', 'endTurn']);
+  });
+
+  it('詠唱中に手番が来たら、待機して詠唱を続ける', () => {
+    const state = makeState({
+      heights: flat(9, 9),
+      units: [
+        { id: 'm', team: 'enemy', job: testMage, x: 4, z: 0, charging: { spellId: 'fire', target: { kind: 'tile', x: 4, z: 4 }, progress: 50 } },
+        { id: 'p', team: 'player', x: 4, z: 1 },
+      ],
+    });
+    expect(decideNextAction(state, testAi)).toEqual({ type: 'endTurn', facing: 'south' });
+  });
+});
+
+describe('敵 AI: 癒し手', () => {
+  const party = (allyHp: number) =>
+    makeState({
+      heights: flat(12, 5),
+      units: [
+        { id: 'h', team: 'enemy', job: testHealer, x: 10, z: 2 },
+        { id: 'a', team: 'enemy', x: 7, z: 2, hp: allyHp },
+        { id: 'p', team: 'player', x: 1, z: 2 },
+      ],
+    });
+
+  it('HP が半分以下の味方がいれば回復する', () => {
+    const state = party(25);
+    const plan = chooseHealSpell(state, state.units[0]!, true, testAi)!;
+    expect(plan.spellId).toBe('heal');
+    expect(plan.target).toEqual({ kind: 'unit', unitId: 'a' });
+    expect(decideNextAction(state, testAi)).toEqual({ type: 'cast', spellId: 'heal', target: { kind: 'unit', unitId: 'a' } });
+  });
+
+  it('HP が半分より多ければ回復せず、相手の攻撃が届かない位置を保つ', () => {
+    const state = party(26);
+    expect(chooseHealSpell(state, state.units[0]!, true, testAi)).toBeUndefined();
+    const action = decideNextAction(state, testAi);
+    expect(action.type).toBe('move');
+    if (action.type !== 'move') return;
+    expect(threatMap(state, 'enemy').get(action.z * 12 + action.x)).toBeUndefined();
+    // にらみ合いになっても、癒し手は前に出ない
+    const stale = { ...state, turnNumber: 30, lastAggressionTurn: 0 };
+    const staleAction = decideNextAction(stale, testAi);
+    if (staleAction.type === 'move') expect(threatMap(stale, 'enemy').get(staleAction.z * 12 + staleAction.x)).toBeUndefined();
+  });
+
+  it('回復の詠唱がすでに届く予定の味方には、重ねて回復しない', () => {
+    const state = makeState({
+      heights: flat(12, 5),
+      units: [
+        { id: 'h', team: 'enemy', job: testHealer, x: 10, z: 2 },
+        { id: 'h2', team: 'enemy', job: testHealer, x: 10, z: 4, charging: { spellId: 'heal', target: { kind: 'unit', unitId: 'a' }, progress: 0 } },
+        { id: 'a', team: 'enemy', x: 7, z: 2, hp: 10 },
+        { id: 'p', team: 'player', x: 1, z: 2 },
+      ],
+    });
+    expect(chooseHealSpell(state, state.units[0]!, true, testAi)).toBeUndefined();
   });
 });

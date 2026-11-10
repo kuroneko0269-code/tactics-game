@@ -115,15 +115,17 @@ describe('カメラ', () => {
     expect(standard).toBeGreaterThan(low);
   });
 
-  it('視点を戻すと、拡大・位置・高さが最初の状態に戻る', () => {
+  it('視点を戻すと、拡大率と位置だけが最初の状態に戻り、回転と高さはそのまま', () => {
     const rig = makeRig(390, 844);
     rig.zoomAt(2, new THREE.Vector2(0.5, 0.5));
     rig.pan(new THREE.Vector2(0, 0), new THREE.Vector2(0.4, 0));
     rig.cycleHeight();
+    rig.rotate(1);
     rig.reset();
     settle(rig);
     expect(rig.zoom).toBe(PORTRAIT_ZOOM);
-    expect(rig.heightLevel).toBe(1);
+    expect(rig.heightLevel).toBe(2);
+    expect(rig.quarter).toBe(1);
     const s = screenOf(rig, new THREE.Vector3(0, 0.8, 0));
     expect(s.x).toBeCloseTo(0);
     expect(s.y).toBeCloseTo(0);

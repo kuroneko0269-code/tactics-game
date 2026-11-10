@@ -555,13 +555,27 @@ body {
     left: auto;
     right: max(12px, env(safe-area-inset-right));
     bottom: auto;
-    top: 104px;
+    top: 118px;
     transform: none;
     width: 300px;
   }
 
   .unit-info .info-stats {
     display: none;
+  }
+
+  /* HP と MP を1行に収め、情報欄の高さを抑える（魔法の予測と重ならないように） */
+  .info-hp .hp-bar {
+    width: 48px;
+  }
+
+  .info-mp .mp-bar {
+    width: 36px;
+  }
+
+  .spell-meta,
+  .spell-results {
+    font-size: 11px;
   }
 
   /* 縦が狭いので、カメラの操作ボタンは 3列×2段にして高さを抑える */
@@ -611,4 +625,179 @@ body {
     min-width: 72px;
     padding: 8px 12px;
   }
+}
+
+/* ---- 魔法（フェーズ1-2） ---- */
+
+/* 属性の色 */
+.element-fire {
+  --element: #ff6a2b;
+}
+
+.element-wind {
+  --element: #3fd69a;
+}
+
+.element-holy {
+  --element: #ffe56b;
+}
+
+.element-text-fire {
+  color: #ff9a6b;
+}
+
+.element-text-wind {
+  color: #7ff0c0;
+}
+
+.element-text-holy {
+  color: #fff09a;
+}
+
+/* 行動順の欄の、魔法の発動の予定。角の丸い四角で、属性の色に塗り、詠唱者の陣営の色の枠を付ける */
+.chip.spell {
+  border-radius: 7px;
+  background: var(--element);
+  color: #1b2433;
+}
+
+.chip.spell.team-player {
+  border-color: var(--player-light);
+}
+
+.chip.spell.team-enemy {
+  border-color: var(--enemy-light);
+}
+
+/* 確定前の発動の予定（予測） */
+.chip.spell.pending {
+  border-style: dashed;
+  border-color: #fff;
+  animation: pending-blink 1s ease-in-out infinite alternate;
+}
+
+@keyframes pending-blink {
+  from {
+    opacity: 0.55;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* MP バー */
+.mp-bar {
+  display: inline-block;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+  vertical-align: middle;
+}
+
+.mp-fill {
+  display: block;
+  height: 100%;
+  background: #7fb6ff;
+  transition: width 0.3s;
+}
+
+.info-hp {
+  flex-wrap: wrap;
+}
+
+.info-mp {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #b9d6ff;
+}
+
+.info-mp .mp-bar {
+  width: 60px;
+}
+
+.info-charging {
+  font-size: 12px;
+  font-weight: bold;
+  color: var(--element);
+}
+
+/* 頭上の MP（HP の下の細い棒） */
+.unit-label-mp {
+  position: absolute;
+  transform: translate(-50%, 1px);
+  line-height: 0;
+}
+
+.unit-label-mp[hidden] {
+  display: none;
+}
+
+.unit-label-mp .mp-bar {
+  width: 30px;
+  height: 3px;
+}
+
+.popup.heal {
+  color: #8dff9a;
+}
+
+.popup.note {
+  color: #e0c3ff;
+  font-size: 18px;
+}
+
+/* 攻撃の予測: 詠唱中の相手への倍率 */
+.preview-table dd.charging-note {
+  color: #ffd25a;
+  font-size: 12px;
+}
+
+/* 魔法の予測 */
+.spell-meta {
+  font-size: 12px;
+  opacity: 0.85;
+  margin-bottom: 4px;
+}
+
+.spell-warning {
+  margin: 4px 0;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: #c8352e;
+  color: #fff;
+  font-weight: 900;
+  animation: pending-blink 0.6s ease-in-out infinite alternate;
+}
+
+.spell-results {
+  margin: 0;
+  padding-left: 1.2em;
+  font-size: 13px;
+}
+
+.spell-results .nobody {
+  opacity: 0.7;
+}
+
+.spell-note {
+  font-size: 11px;
+  opacity: 0.6;
+  margin-top: 2px;
+}
+
+/* ボタンの補足（消費 MP など） */
+.hud-button .detail {
+  display: block;
+  font-size: 11px;
+  font-weight: normal;
+  opacity: 0.8;
+}
+
+/* 詠唱の中断など、注意が必要なボタン */
+.hud-button.danger {
+  border-color: #ff9a8a;
+  background: #a8302a;
+  color: #fff;
 }

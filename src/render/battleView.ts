@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import type { BattleEvent, BattleState, Team } from '../core/battleTypes';
+import type { BattleEvent, BattleState, SpellElement, Team } from '../core/battleTypes';
 import { DIRECTION_VECTORS, DIRECTIONS, type Coord, type Direction } from '../core/geometry';
-import type { MapView, TileCoord, TileMark } from './mapView';
+import type { MapView, ReservedTile, TileCoord, TileMark } from './mapView';
 import { createPuppet, YAW_OF, type Puppet, type PuppetLook } from './puppet';
 import { createTweens, easeInOut, easeOutCubic } from './tweens';
 
@@ -19,6 +19,14 @@ export interface BattleView {
   /** 状態に合わせて、すべてのユニットの位置・向き・表示を即座にそろえる */
   sync(state: BattleState): void;
   setMarks(marks: readonly TileMark[]): void;
+  /** 詠唱中の魔法が予約している範囲を、属性の色で薄く表示する */
+  setReserved(tiles: readonly { x: number; z: number; element: SpellElement }[]): void;
+  /** 詠唱中のユニットに、属性の色の目印（回る輪）を付ける。element が undefined なら外す */
+  setCharging(unitId: string, element: SpellElement | undefined): void;
+  /** 魔法を指定した時の動き（詠唱者が杖を掲げて、属性の色に光る） */
+  animateCast(event: Extract<BattleEvent, { type: 'castStarted' }>, element: SpellElement): Promise<void>;
+  /** 魔法が発動した時の演出。範囲のマスに属性の色の光の柱を立てる。光った瞬間に onImpact を呼ぶ */
+  animateSpell(event: Extract<BattleEvent, { type: 'spellResolved' }>, onImpact: () => void): Promise<void>;
   /** 手番のユニットの頭上に目印を出す */
   setActive(unitId: string | undefined): void;
   /** 向きを選ぶための矢印をユニットの周りに出す（undefined で消す） */
@@ -39,6 +47,8 @@ export interface BattleView {
   unitScreenPosition(unitId: string): { x: number; y: number };
   /** 向き選びの矢印の画面座標（px）。矢印が出ていなければ undefined。自動テスト用 */
   arrowScreenPosition(direction: Direction): { x: number; y: number } | undefined;
+  /** 向き選びの矢印の内側の数か所の画面座標（px）。自動テスト用 */
+  arrowScreenPoints(direction: Direction): { x: number; y: number }[];
   update(deltaSeconds: number, elapsedSeconds: number): void;
 }
 
@@ -49,6 +59,14 @@ const TEAM_COLORS: Record<Team, { body: number; ring: number }> = {
 const JOB_LOOKS: Record<string, Omit<PuppetLook, 'body'>> = {
   warrior: { accent: 0xf2c14e, weapon: 'sword' },
   archer: { accent: 0x8fd66b, weapon: 'bow' },
+  mage: { accent: 0x8a5cf0, weapon: 'staff' },
+  healer: { accent: 0xf4f1e8, weapon: 'staff' },
+};
+/** 属性の色（仮） */
+export const ELEMENT_COLORS: Record<SpellElement, number> = {
+  fire: 0xff5a1f,
+  wind: 0x3fd69a,
+  holy: 0xffe56b,
 };
 const HEAD_HEIGHT = 1.05;
 const STEP_SECONDS = 0.2;
@@ -57,6 +75,8 @@ interface UnitVisual {
   readonly puppet: Puppet;
   coord: Coord;
   alive: boolean;
+  /** 詠唱中の目印（属性の色の輪） */
+  readonly chargeRing: THREE.Mesh<THREE.TorusGeometry, THREE.MeshBasicMaterial>;
 }
 
 export function createBattleView(options: {
@@ -76,9 +96,35 @@ export function createBattleView(options: {
     puppet.group.add(teamRing(TEAM_COLORS[unit.team].ring));
     puppet.group.add(facingPointer(TEAM_COLORS[unit.team].ring));
     puppet.group.userData.unitId = unit.id;
+    const chargeRing = new THREE.Mesh(
+      new THREE.TorusGeometry(0.42, 0.035, 6, 28).rotateX(Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false }),
+    );
+    chargeRing.visible = false;
+    chargeRing.renderOrder = 3;
+    // 目印は上下に動くので、タップの判定から外す（動きのせいで隣のマスや矢印のタップを横取りしないように）
+    chargeRing.raycast = () => {};
+    puppet.group.add(chargeRing);
     scene.add(puppet.group);
-    visuals.set(unit.id, { puppet, coord: { x: unit.x, z: unit.z }, alive: true });
+    visuals.set(unit.id, { puppet, coord: { x: unit.x, z: unit.z }, alive: true, chargeRing });
   }
+
+  // 魔法の発動の光の柱（マスごとに使い回す）
+  const burstGeometry = new THREE.CylinderGeometry(0.42, 0.42, 1, 12, 1, true);
+  const bursts: THREE.Mesh<THREE.CylinderGeometry, THREE.MeshBasicMaterial>[] = [];
+  const burstAt = (i: number) => {
+    while (bursts.length <= i) {
+      const m = new THREE.Mesh(
+        burstGeometry,
+        new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending }),
+      );
+      m.visible = false;
+      m.renderOrder = 4;
+      scene.add(m);
+      bursts.push(m);
+    }
+    return bursts[i]!;
+  };
 
   const visual = (id: string): UnitVisual => {
     const v = visuals.get(id);
@@ -181,9 +227,76 @@ export function createBattleView(options: {
         v.puppet.setFlash(0);
         v.puppet.body.position.set(0, 0, 0);
         v.puppet.body.rotation.set(0, 0, 0);
+        const spell = unit.charging && unit.spells.find((sp) => sp.id === unit.charging!.spellId);
+        v.chargeRing.visible = Boolean(spell) && v.alive;
+        if (spell) v.chargeRing.material.color.setHex(ELEMENT_COLORS[spell.element]);
       }
     },
     setMarks: (marks) => mapView.setMarks(marks),
+    setReserved(tiles) {
+      mapView.setReserved(tiles.map((t): ReservedTile => ({ x: t.x, z: t.z, color: ELEMENT_COLORS[t.element] })));
+    },
+    setCharging(unitId, element) {
+      const v = visual(unitId);
+      v.chargeRing.visible = element !== undefined;
+      if (element) v.chargeRing.material.color.setHex(ELEMENT_COLORS[element]);
+    },
+    async animateCast(event, element) {
+      const caster = visual(event.casterId);
+      await turnTo(event.casterId, event.casterFacing);
+      const color = new THREE.Color(ELEMENT_COLORS[element]);
+      await tweens.play(0.45, (t) => {
+        const k = Math.sin(Math.PI * t);
+        caster.puppet.body.position.y = 0.12 * k;
+        caster.puppet.setGlow(color, k);
+      });
+      caster.puppet.body.position.y = 0;
+      caster.puppet.setGlow(color, 0);
+    },
+    async animateSpell(event, onImpact) {
+      const color = ELEMENT_COLORS[event.element];
+      const caster = visual(event.casterId);
+      // 詠唱者が光ってから、範囲に光の柱が立つ
+      const casterColor = new THREE.Color(color);
+      await tweens.play(0.3, (t) => caster.puppet.setGlow(casterColor, Math.sin(Math.PI * t)));
+      caster.puppet.setGlow(casterColor, 0);
+      const columns = event.tiles.map((t, i) => {
+        const m = burstAt(i);
+        m.material.color.setHex(color);
+        m.position.copy(mapView.tileTop(t.x, t.z));
+        m.visible = true;
+        return m;
+      });
+      let impacted = false;
+      await tweens.play(0.7, (t) => {
+        const height = 0.2 + 1.6 * easeOutCubic(Math.min(1, t * 2));
+        for (const m of columns) {
+          m.scale.set(1 - 0.3 * t, height, 1 - 0.3 * t);
+          m.position.y = m.position.y - (m.userData.lastHalf ?? 0) + height / 2;
+          m.userData.lastHalf = height / 2;
+          m.material.opacity = 0.75 * (1 - t * t);
+        }
+        if (!impacted && t >= 0.35) {
+          impacted = true;
+          onImpact();
+        }
+        for (const r of event.results) {
+          const target = visual(r.unitId);
+          target.puppet.setGlow(casterColor, event.effect === 'heal' ? 1 - t : 0);
+          if (event.effect === 'damage') target.puppet.setFlash(t < 0.35 ? 0 : 1 - t);
+        }
+      });
+      if (!impacted) onImpact();
+      for (const m of columns) {
+        m.visible = false;
+        m.userData.lastHalf = 0;
+      }
+      for (const r of event.results) {
+        const target = visual(r.unitId);
+        target.puppet.setGlow(casterColor, 0);
+        target.puppet.setFlash(0);
+      }
+    },
     setActive(unitId) {
       activeId = unitId;
       activeMarker.visible = unitId !== undefined;
@@ -275,6 +388,7 @@ export function createBattleView(options: {
       });
       v.alive = false;
       v.puppet.group.visible = false;
+      v.chargeRing.visible = false;
     },
     wait: (seconds) => tweens.wait(seconds),
     unitAnchors() {
@@ -305,12 +419,35 @@ export function createBattleView(options: {
     arrowScreenPosition(direction) {
       const arrow = arrows.find((a) => a.dir === direction);
       if (!arrowGroup.visible || !arrow) return undefined;
-      const s = screenOf(arrow.mesh.getWorldPosition(new THREE.Vector3()));
+      // 矢印の頭（三角の部分）の内側の点。原点は三角と軸の境目にあり、タップの判定が当たりにくいため
+      const s = screenOf(arrow.mesh.localToWorld(new THREE.Vector3(0, 0, 0.12)));
       return { x: s.x, y: s.y };
+    },
+    arrowScreenPoints(direction) {
+      const arrow = arrows.find((a) => a.dir === direction);
+      if (!arrowGroup.visible || !arrow) return [];
+      // 矢印の頭の中ほど、先、左右、軸（矢印の形の内側の点）
+      const local = [
+        [0, 0.12],
+        [0, 0.22],
+        [-0.12, 0.05],
+        [0.12, 0.05],
+        [0, -0.1],
+      ];
+      return local.map(([x, z]) => {
+        const s = screenOf(arrow.mesh.localToWorld(new THREE.Vector3(x, 0, z)));
+        return { x: s.x, y: s.y };
+      });
     },
     update(dt, elapsed) {
       tweens.update(dt);
-      for (const v of visuals.values()) v.puppet.update(elapsed);
+      for (const v of visuals.values()) {
+        v.puppet.update(elapsed);
+        if (v.chargeRing.visible) {
+          v.chargeRing.rotation.y = elapsed * 3;
+          v.chargeRing.position.y = 0.45 + Math.sin(elapsed * 4) * 0.12;
+        }
+      }
       if (activeId && activeMarker.visible) {
         activeMarker.position
           .copy(visual(activeId).puppet.group.position)
