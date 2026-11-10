@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { spells, strikes } from '../data/abilities';
+import { passives } from '../data/passives';
 import { jobs } from '../data/jobs';
 import { progressionRules } from '../data/progression';
 import { initialRoster } from '../data/roster';
 import { changeJob, findUnit, gainJp, learnAbility, replaceUnit } from '../core/progression';
 import { createSaveStore, type SaveBackend } from './saveStore';
 
-const catalog = { jobs, spells, strikes };
+const catalog = { jobs, spells, strikes, passives };
 const memory = (): SaveBackend & { text: string | null } => {
   const b = {
     text: null as string | null,

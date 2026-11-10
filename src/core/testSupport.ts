@@ -7,7 +7,9 @@ import type {
   BattleState,
   ChargeState,
   JobDefinition,
+  PassiveDefinition,
   SpellDefinition,
+  StatusState,
   StrikeDefinition,
   Team,
   UnitCommand,
@@ -28,6 +30,12 @@ export const testRules: BattleRules = {
   heightDamagePercentCap: 20,
   minimumDamage: 1,
   chargingDamagePercent: 125,
+  status: {
+    protect: { harmful: false, turns: 3, damageTakenPercent: 75 },
+    slow: { harmful: true, turns: 2, movePenalty: 2, minMove: 1 },
+    silence: { harmful: true, turns: 2 },
+  },
+  knockback: { fallDamagePercentPerHeight: 10, blockedDamagePercent: 10 },
 };
 
 export const testWarrior: JobDefinition = {
@@ -50,6 +58,7 @@ export const testPowerStrike: StrikeDefinition = { id: 'powerStrike', damagePerc
 /** 狙い撃ち: 攻撃力が元の、詠唱のある単体の技。射程 3〜6。弓が必要 */
 export const testAimedShot: SpellDefinition = {
   id: 'aimedShot',
+  kind: 'skill',
   element: 'none',
   effect: 'damage',
   stat: 'attack',
@@ -66,6 +75,7 @@ export const testAimedShot: SpellDefinition = {
 /** 雷: 単体で威力が高く、詠唱の遅い攻撃魔法 */
 export const testThunder: SpellDefinition = {
   id: 'thunder',
+  kind: 'magic',
   element: 'thunder',
   effect: 'damage',
   power: 300,
@@ -79,6 +89,7 @@ export const testThunder: SpellDefinition = {
 /** 大癒し: 単体で回復量が大きい */
 export const testBigHeal: SpellDefinition = {
   id: 'bigHeal',
+  kind: 'magic',
   element: 'light',
   effect: 'heal',
   power: 400,
@@ -92,6 +103,7 @@ export const testBigHeal: SpellDefinition = {
 /** 範囲の攻撃魔法（中心と上下左右の5マス、高さの許容 2）。詠唱は遅い */
 export const testFire: SpellDefinition = {
   id: 'fire',
+  kind: 'magic',
   element: 'fire',
   effect: 'damage',
   power: 200,
@@ -105,6 +117,7 @@ export const testFire: SpellDefinition = {
 /** 単体の攻撃魔法。詠唱は速い */
 export const testWind: SpellDefinition = {
   id: 'wind',
+  kind: 'magic',
   element: 'wind',
   effect: 'damage',
   power: 100,
@@ -118,6 +131,7 @@ export const testWind: SpellDefinition = {
 /** 範囲の回復魔法 */
 export const testHeal: SpellDefinition = {
   id: 'heal',
+  kind: 'magic',
   element: 'light',
   effect: 'heal',
   power: 200,
@@ -128,8 +142,71 @@ export const testHeal: SpellDefinition = {
   castSpeed: 50,
 };
 
-export const testSpells = [testFire, testWind, testHeal, testAimedShot, testThunder, testBigHeal];
-export const testStrikes = [testPowerStrike];
+/** 封じ: 単体に沈黙を付ける。詠唱は速い */
+export const testSeal: SpellDefinition = {
+  id: 'seal',
+  kind: 'magic',
+  element: 'none',
+  effect: 'status',
+  inflicts: 'silence',
+  power: 0,
+  mpCost: 8,
+  range: 4,
+  areaRadius: 0,
+  heightTolerance: 0,
+  castSpeed: 50,
+};
+
+/** 守りの祈り: 5マスに守りを付ける */
+export const testProtectPrayer: SpellDefinition = {
+  id: 'protectPrayer',
+  kind: 'magic',
+  element: 'light',
+  effect: 'status',
+  inflicts: 'protect',
+  power: 0,
+  mpCost: 10,
+  range: 4,
+  areaRadius: 1,
+  heightTolerance: 2,
+  castSpeed: 50,
+};
+
+/** 突き飛ばし: ダメージ 50%、1マス押し出す。剣か杖が必要 */
+export const testKnockback: StrikeDefinition = {
+  id: 'knockback',
+  damagePercent: 50,
+  hitBonus: 0,
+  weapons: ['sword', 'staff'],
+  knockback: true,
+};
+
+/** 足止めの矢: ダメージ 60%、鈍足を付ける。弓が必要 */
+export const testSlowArrow: StrikeDefinition = { id: 'slowArrow', damagePercent: 60, hitBonus: 0, weapons: ['bow'], inflicts: 'slow' };
+
+export const testSpells = [testFire, testWind, testHeal, testAimedShot, testThunder, testBigHeal, testSeal, testProtectPrayer];
+export const testStrikes = [testPowerStrike, testKnockback, testSlowArrow];
+
+/** テスト用の受動的なアビリティ（本番の数値は src/data/passives.ts） */
+export const testPassives: readonly PassiveDefinition[] = [
+  { id: 'counter', slot: 'reaction', effect: { kind: 'counter' } },
+  { id: 'evade', slot: 'reaction', effect: { kind: 'evade', hitPenalty: 20 } },
+  { id: 'magicShell', slot: 'reaction', effect: { kind: 'magicShell', damageTakenPercent: 80 } },
+  { id: 'meditate', slot: 'reaction', effect: { kind: 'meditate', mp: 6 } },
+  { id: 'heavyArmor', slot: 'support', effect: { kind: 'maxHpPercent', percent: 115 } },
+  { id: 'focus', slot: 'support', effect: { kind: 'weaponHitBonus', bonus: 10 } },
+  { id: 'quickCast', slot: 'support', effect: { kind: 'castSpeedPercent', percent: 125 } },
+  { id: 'thrift', slot: 'support', effect: { kind: 'mpCostPercent', percent: 75 } },
+  { id: 'quickStep', slot: 'movement', effect: { kind: 'moveBonus', amount: 1 } },
+  { id: 'lightFoot', slot: 'movement', effect: { kind: 'jumpBonus', amount: 1 } },
+];
+
+/** id の受動的なアビリティの定義（テスト用） */
+export function testPassive(id: string): PassiveDefinition {
+  const p = testPassives.find((x) => x.id === id);
+  if (!p) throw new Error(`テスト用の受動的なアビリティ ${id} がありません`);
+  return p;
+}
 
 /** 魔力 10。炎は 20、風は 10 のダメージ */
 export const testMage: JobDefinition = {
@@ -154,7 +231,7 @@ export const testHealer: JobDefinition = {
 
 export const testJobs = [testWarrior, testArcher, testMage, testHealer];
 
-export const testAi: AiConfig = { advanceAfterIdleTurns: 12, healBelowPercent: 50, supportRange: 3 };
+export const testAi: AiConfig = { advanceAfterIdleTurns: 12, healBelowPercent: 50, supportRange: 3, slowValue: 6, protectMinAllies: 2 };
 export const testAiConfigs: AiConfigs = { player: testAi, enemy: testAi };
 
 export interface TestUnit {
@@ -171,6 +248,10 @@ export interface TestUnit {
   movedLastTurn?: boolean;
   /** 使えるアビリティ（省くと、ジョブのアビリティすべてを主コマンドとして使える） */
   commands?: UnitCommand[];
+  /** 付けている受動的なアビリティの id（testPassives から引く。能力値への反映はしない） */
+  passives?: string[];
+  statuses?: StatusState[];
+  level?: number;
 }
 
 /** 平らなマップ（すべて高さ 0） */
@@ -211,12 +292,14 @@ export function makeState(options: {
       stats: job.stats,
       attack: job.attack,
       mp: u.mp ?? job.stats.maxMp,
-      level: 1,
+      level: u.level ?? 1,
       weapon: job.weapon ?? null,
       commands,
       spells: testSpells.filter((sp) => ids.includes(sp.id)),
       strikes: testStrikes.filter((sp) => ids.includes(sp.id)),
-      actionCount: 0,
+      passives: (u.passives ?? []).map(testPassive),
+      statuses: u.statuses ?? [],
+      actions: [],
       charging: u.charging ?? null,
       movedLastTurn: u.movedLastTurn ?? false,
     };

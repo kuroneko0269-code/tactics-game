@@ -2,12 +2,13 @@
  * 行動順（CT 方式）と、詠唱中の魔法の発動の順番。
  *
  * 全ユニットの CT（チャージタイム）に素早さを足し続け、しきい値に達したユニットが行動する。
- * 詠唱中の魔法も同じ時計で進み、毎回「詠唱の速さ」だけ溜まって、しきい値に達した時点で発動する。
+ * 詠唱中の魔法も同じ時計で進み、毎回「詠唱の速さ」（「早口」で速くなる）だけ溜まって、しきい値に達した時点で発動する。
  * - 同じ時点で魔法の発動とユニットの手番が重なったら、魔法の発動が先。
  * - 魔法どうしが重なったら、進み具合の大きい方 → 配置順（units の並び）の早い方。
  * - 手番どうしが重なったら、CT の大きい方 → 素早さの高い方 → 配置順の早い方。
  */
 import type { BattleRules, BattleState, UnitState } from './battleTypes';
+import { castSpeedOf } from './effects';
 import { spellOf } from './magic';
 import { isAlive } from './movement';
 
@@ -36,7 +37,7 @@ export function nextTimelineEntry(
     current = current.map((u) => {
       if (!isAlive(u)) return u;
       const charging = u.charging
-        ? { ...u.charging, progress: u.charging.progress + spellOf(u, u.charging.spellId).castSpeed }
+        ? { ...u.charging, progress: u.charging.progress + castSpeedOf(u, spellOf(u, u.charging.spellId)) }
         : null;
       return { ...u, ct: u.ct + u.stats.speed, charging };
     });

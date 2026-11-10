@@ -53,7 +53,7 @@ describe('行動アビリティ: 強打', () => {
     const { state: after, events } = applyAction(state, { type: 'attack', targetId: 'e', abilityId: 'powerStrike' });
     const attacked = events.find((e) => e.type === 'attacked')!;
     expect(attacked).toMatchObject({ abilityId: 'powerStrike' });
-    expect(getUnit(after, 'w').actionCount).toBe(1);
+    expect(getUnit(after, 'w').actions).toHaveLength(1);
     const plain = applyAction(state, { type: 'attack', targetId: 'e' }).events.find((e) => e.type === 'attacked')!;
     expect(plain).toMatchObject({ abilityId: null });
   });
@@ -205,6 +205,6 @@ describe('敵 AI が新しい行動アビリティを使う', () => {
     expect(decideNextAction(state, testAi)).toEqual({ type: 'attack', targetId: 'p' });
     // 戦士も行動を数える
     const after = run(state, [{ type: 'attack', targetId: 'p' }]);
-    expect(getUnit(after, 'w').actionCount).toBe(1);
+    expect(getUnit(after, 'w').actions).toHaveLength(1);
   });
 });

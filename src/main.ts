@@ -13,6 +13,7 @@ import {
 import { createMap } from './core/map';
 import { buildSortie } from './core/sortie';
 import { strikes, spells } from './data/abilities';
+import { passives } from './data/passives';
 import { aiConfig } from './data/aiConfig';
 import { battleRules } from './data/battleRules';
 import { twinHillsBattle } from './data/battles/twinHillsBattle';
@@ -62,7 +63,7 @@ function main(): void {
   }
   document.title = TEXT.appTitle;
 
-  const catalog: GameCatalog = { jobs, spells, strikes };
+  const catalog: GameCatalog = { jobs, spells, strikes, passives };
   const site = twinHillsBattle;
   const store = createSaveStore(localStorageBackend(), catalog, progressionRules, (reason) =>
     console.warn(`セーブデータを読み込めませんでした（${reason}）。はじめからにします`),
@@ -163,7 +164,7 @@ function main(): void {
     const seed = nextSeed;
     nextSeed = randomSeed();
     const setup = buildSortie(site, tierId, roster, catalog);
-    const start: ActionResult = startBattle(setup, catalog.jobs, battleRules, seed, catalog.spells, catalog.strikes);
+    const start: ActionResult = startBattle(setup, catalog.jobs, battleRules, seed, catalog.spells, catalog.strikes, catalog.passives);
     setScreen('battle');
     rig.reset();
     battle = createActiveBattle(start, finishBattle);
