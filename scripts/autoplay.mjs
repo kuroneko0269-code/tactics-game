@@ -4,12 +4,17 @@
 // 勝敗と手番数が「core だけで計算した結果」と一致するかを確かめる。
 // 画面の不具合（タップしたのに違うマスが選ばれる、ボタンが押せない、など）を見つけるためのもの。
 //
+// 育成の流れ（フェーズ2-1a）も確かめる:
+// 拠点 →「出撃」→ 敵の強さ「やさしい」→ 1戦 → 結果の画面（得た経験値と JP が core の計算と一致）→ 拠点
+// →「編成」でアビリティの習得・ジョブチェンジ・副コマンドの付け替え → 再び出撃（部隊の変更が戦闘に反映される）
+// → 技（強打）と副コマンドのメニューの操作 → ページを読み込み直しても部隊の状態が残る →「はじめから」で最初に戻る。
+//
 // - 味方の行動は、敵と同じ AI（src/core/ai.ts）で決め、それを画面のタップで入力する。
 //   そのため、core だけで AI 同士を戦わせた結果（runAutoBattle）と、最終状態が完全に一致するはず。
 // - 魔法は、メニューから選んで射程のマスやユニットをタップし、「ユニットを狙う」「マスを狙う」を選んで確定する。
 //   味方が最初にユニットを狙う魔法を使う時だけ、わざと「マスを狙う」に変える（両方の操作を確かめるため。
 //   core だけの計算でも同じ動かし方をするので、結果は一致するはず）。
-// - 1戦の後、詠唱中に自分の手番が来た場面を用意して、詠唱の中断（確認で「やめない」→ もう一度 →「詠唱をやめる」）を確かめる。
+// - 再び出撃した後、詠唱中に自分の手番が来た場面を用意して、詠唱の中断（確認で「やめない」→ もう一度 →「詠唱をやめる」）を確かめる。
 //   AI 同士の対戦では、詠唱中に自分の手番が来ることがほとんどないため。
 // - 途中で、拡大・縮小（ピンチ・ボタン・ホイール）、視点の移動（ドラッグ）、カメラの高さ、回転、視点を戻す、を行う。
 //   それらの操作の後でも、狙ったマスやユニットを正しくタップできることを確かめる。
@@ -49,6 +54,8 @@ const FAILURE_DIR = 'autoplay-output';
 const FINGER_ERROR_PX = Number(args.finger ?? 8);
 /** 1つの画面サイズで1戦にかけてよい時間の上限 */
 const BATTLE_TIMEOUT_MS = Number(args.timeout ?? 12 * 60 * 1000);
+/** 1戦の後（結果・編成・再び出撃・読み込み直し）にかけてよい時間の上限 */
+const AFTER_BATTLE_TIMEOUT_MS = 6 * 60 * 1000;
 
 const VIEWPORT_OPTIONS = {
   portrait: { label: 'スマホ縦向き', ...devices['iPhone 13'] },
@@ -72,16 +79,33 @@ async function main() {
     ai: await server.ssrLoadModule('/src/core/ai.ts'),
   };
   core.movement = await server.ssrLoadModule('/src/core/movement.ts');
+  core.progression = await server.ssrLoadModule('/src/core/progression.ts');
+  core.sortie = await server.ssrLoadModule('/src/core/sortie.ts');
+  const abilities = await server.ssrLoadModule('/src/data/abilities.ts');
   const data = {
-    battle: (await server.ssrLoadModule('/src/data/battles/firstBattle.ts')).firstBattle,
+    site: (await server.ssrLoadModule('/src/data/battles/twinHillsBattle.ts')).twinHillsBattle,
     jobs: (await server.ssrLoadModule('/src/data/jobs.ts')).jobs,
-    spells: (await server.ssrLoadModule('/src/data/spells.ts')).spells,
+    spells: abilities.spells,
+    strikes: abilities.strikes,
     rules: (await server.ssrLoadModule('/src/data/battleRules.ts')).battleRules,
+    progression: (await server.ssrLoadModule('/src/data/progression.ts')).progressionRules,
+    roster: (await server.ssrLoadModule('/src/data/roster.ts')).initialRoster,
     ai: (await server.ssrLoadModule('/src/data/aiConfig.ts')).aiConfig,
     text: (await server.ssrLoadModule('/src/ui/text.ts')).TEXT,
   };
+  data.catalog = { jobs: data.jobs, spells: data.spells, strikes: data.strikes };
   core.data = data;
-  const startState = core.battle.startBattle(data.battle, data.jobs, data.rules, SEED, data.spells).state;
+  /** 部隊と段階から、画面と同じ方法で戦闘を始める（core だけで） */
+  core.start = (roster, tierId, seed) =>
+    core.battle.startBattle(
+      core.sortie.buildSortie(data.site, tierId, roster, data.catalog),
+      data.jobs,
+      data.rules,
+      seed,
+      data.spells,
+      data.strikes,
+    );
+  const startState = core.start(data.roster, 'easy', SEED).state;
   // core だけで、画面と同じ動かし方（playerPolicy）で決着まで進める
   const policy = playerPolicy(core);
   let expected = startState;
@@ -96,6 +120,12 @@ async function main() {
     `シード値 ${SEED}: core だけの計算では ${expected.winner === 'player' ? '勝利' : '敗北'}（${expected.turnNumber}手番、味方の魔法 ${expectedCasts}回）`,
   );
   check(expectedCasts > 0, `シード値 ${SEED} では味方が魔法を使いません。別のシード値を選んでください`);
+  // 戦闘の後の部隊と、編成の画面で行う変更（core だけで計算）
+  const plan = rosterPlan(core, expected);
+  console.log(
+    `戦闘の後: ${plan.learn ? `${plan.learn.unitId} が ${plan.learn.abilityId} を習得` : '習得できるアビリティなし'}、` +
+      `${plan.jobUnitId} がジョブを変えて戻り、副コマンドに ${plan.subJobId}`,
+  );
 
   const started = Date.now();
   // 画面サイズごとに、別々のブラウザ（別々のプロセス）で動かす。
@@ -108,7 +138,7 @@ async function main() {
         args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist'],
       });
       try {
-        const r = await playOneBattle(browser, baseUrl, name, core, expected);
+        const r = await playOneBattle(browser, baseUrl, name, core, expected, plan);
         return { name, ok: true, ...r };
       } catch (e) {
         return { name, ok: false, error: e };
@@ -129,6 +159,10 @@ async function main() {
           `魔法の指定 ${r.casts}回（ユニット狙い ${r.unitCasts}・マス狙い ${r.tileCasts}）、詠唱の中断 ${r.interrupts}回、` +
           `向きを変えた ${r.facingChanges}回、移動のやり直し ${r.undos}回、カメラ操作 ${r.cameraOps}回、タップ ${r.taps}回、${r.seconds}秒）`,
       );
+      console.log(
+        `  育成: 結果の画面 ✔、習得 ${r.learned}回・ジョブチェンジ ${r.jobChanges}回・副コマンド ${r.subChanges}回、再び出撃 ✔、` +
+          `強打 ✔、読み込み直し ✔、はじめから ✔`,
+      );
       const f = r.finger;
       const sum = (o) => Object.values(o).reduce((a, b) => a + b, 0);
       console.log(
@@ -145,10 +179,10 @@ async function main() {
   if (failed) process.exit(1);
 }
 
-async function playOneBattle(browser, baseUrl, name, core, expected) {
+async function playOneBattle(browser, baseUrl, name, core, expected, plan) {
   const holder = {};
   try {
-    return await playOneBattleInner(browser, baseUrl, name, core, expected, holder);
+    return await playOneBattleInner(browser, baseUrl, name, core, expected, plan, holder);
   } catch (e) {
     // 失敗した時の画面を残す（GitHub Actions では成果物としてダウンロードできる）
     if (holder.page) {
@@ -159,7 +193,7 @@ async function playOneBattle(browser, baseUrl, name, core, expected) {
   }
 }
 
-async function playOneBattleInner(browser, baseUrl, name, core, expected, holder) {
+async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, holder) {
   const options = VIEWPORT_OPTIONS[name];
   check(options, `画面サイズ ${name} は未定義です（portrait / landscape / pc）`);
   const { label, ...contextOptions } = options;
@@ -181,8 +215,22 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
   });
   const log = (msg) => console.log(`[${label}] ${msg}`);
   const started = Date.now();
-  const deadline = started + BATTLE_TIMEOUT_MS;
-  const stats = { taps: 0, cameraOps: 0, playerTurns: 0, casts: 0, unitCasts: 0, tileCasts: 0, interrupts: 0, facingChanges: 0, undos: 0 };
+  /** 待つ時間の上限。1戦の後は、育成の画面の確認のために数え直す */
+  let deadline = started + BATTLE_TIMEOUT_MS;
+  const stats = {
+    taps: 0,
+    cameraOps: 0,
+    playerTurns: 0,
+    casts: 0,
+    unitCasts: 0,
+    tileCasts: 0,
+    interrupts: 0,
+    facingChanges: 0,
+    undos: 0,
+    learned: 0,
+    jobChanges: 0,
+    subChanges: 0,
+  };
   /** 指に近いタップ（狙いの中央から少しずれる）の回数と、そのうち押し直しが必要だった回数（種類ごと） */
   const finger = {
     tries: { move: 0, target: 0, spell: 0, facing: 0 },
@@ -198,7 +246,7 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
     'main',
     'targeting',
     'confirm',
-    'spellMenu',
+    'abilityMenu',
     'spellTarget',
     'spellTargetKind',
     'spellConfirm',
@@ -212,7 +260,7 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
     window.addEventListener('unhandledrejection', (e) => console.error(`unhandledrejection: ${e.reason?.stack ?? e.reason}`)),
   );
   await page.goto(`${baseUrl}?seed=${SEED}&speed=${SPEED}`);
-  await page.waitForFunction(() => window.__tactics !== undefined, null, { timeout: 30000 });
+  await page.waitForFunction(() => window.__tactics?.screen() === 'base', null, { timeout: 30000 });
 
   // ---- 画面から読むもの ----
   const T = (fn, arg) => page.evaluate(fn, arg);
@@ -550,15 +598,24 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
 
   // ---- 魔法の指定 ----
   /** メニューから魔法を選び、狙い先をタップして（必要ならユニットかマスかを選んで）確定する */
-  const castSpell = async (action, unit) => {
-    const spellLabel = text.spells[action.spellId];
-    await pressButton('魔法');
-    await waitFor('使う魔法を選ぶ', () => window.__tactics.mode() === 'spellMenu');
-    // MP が足りない魔法のボタンは押せないこと
-    for (const sp of unit.spells) {
-      const disabled = await page.getByRole('button', { name: text.spells[sp.id], exact: true }).isDisabled();
-      check(disabled === unit.mp < sp.mpCost, `魔法「${text.spells[sp.id]}」のボタンの押せる・押せないが MP と合いません`);
+  /** そのアビリティが入っているコマンドのボタンを押し、メニューを開く */
+  const openCommandOf = async (unit, abilityId) => {
+    const command = unit.commands.find((c) => c.abilityIds.includes(abilityId));
+    check(command, `${unit.id} のコマンドに ${abilityId} がありません`);
+    await pressButton(text.commands[command.jobId]);
+    await waitFor('使うものを選ぶ', () => window.__tactics.mode() === 'abilityMenu');
+    // 武器が合わないアビリティと、MP が足りない魔法のボタンは押せないこと
+    for (const id of command.abilityIds) {
+      const spell = unit.spells.find((s) => s.id === id);
+      const weapons = spell?.weapons ?? unit.strikes.find((s) => s.id === id)?.weapons;
+      const usable = (!weapons || weapons.includes(unit.weapon)) && (!spell || unit.mp >= spell.mpCost);
+      const disabled = await page.getByRole('button', { name: text.abilities[id], exact: true }).isDisabled();
+      check(disabled === !usable, `「${text.abilities[id]}」のボタンの押せる・押せないが、武器や MP と合いません`);
     }
+  };
+  const castSpell = async (action, unit) => {
+    const spellLabel = text.abilities[action.spellId];
+    await openCommandOf(unit, action.spellId);
     await pressButton(spellLabel);
     await waitFor('狙う場所を選ぶ', () => window.__tactics.mode() === 'spellTarget');
     const state = await getState();
@@ -686,6 +743,13 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
     await page.screenshot({ path: path.join(SCREENSHOT_DIR, `${name}-${tag}.png`) });
   };
 
+  // ---- 拠点から出撃する ----
+  await screenshot('00-base');
+  await pressButton('出撃');
+  await waitFor('敵の強さを選ぶ', () => document.querySelector('[data-screen="sortie"]') !== null);
+  await screenshot('00-tiers');
+  await pressButton(text.tiers.easy.name);
+
   // ---- 1戦を進める ----
   await waitForInput();
   const initialCamera = await getCamera();
@@ -784,7 +848,14 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
         [unit.id, action.x, action.z],
       );
     } else if (action.type === 'attack') {
-      if (mode.kind === 'main') await pressButton('攻撃');
+      if (mode.kind === 'main') {
+        if (action.abilityId) {
+          await openCommandOf(unit, action.abilityId);
+          await pressButton(text.abilities[action.abilityId]);
+        } else {
+          await pressButton('攻撃');
+        }
+      }
       await waitFor('攻撃対象を選ぶ', () => window.__tactics.mode() === 'targeting');
       const target = state.units.find((u) => u.id === action.targetId);
       await aimAt(target.x, target.z, target.id, `ユニット ${target.id}`);
@@ -852,17 +923,125 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
   check(final.winner === expected.winner, `勝敗が core の計算と違います（画面 ${final.winner} / core ${expected.winner}）`);
   check(final.turnNumber === expected.turnNumber, `手番数が core の計算と違います（画面 ${final.turnNumber} / core ${expected.turnNumber}）`);
   check(JSON.stringify(final) === JSON.stringify(expected), '最終状態（HP・位置・乱数の状態など）が core の計算と違います');
-  const resultText = await page.locator('.result-title').textContent();
-  check(resultText === (final.winner === 'player' ? '勝利' : '敗北'), `決着の表示が違います（${resultText}）`);
-
   check(stats.casts > 0, '味方の魔法を一度も指定していません');
   check(stats.undos > 0, '「移動をやり直す」を一度も確かめていません');
   check(stats.facingChanges > 0, '向きのボタンを一度も押していません');
   check(stats.unitCasts > 0 && stats.tileCasts > 0, `ユニット狙いとマス狙いの両方を確かめられませんでした（${stats.unitCasts} / ${stats.tileCasts}）`);
 
-  // 「もう一度」で新しい戦闘が始まること
-  await pressButton('もう一度');
-  await waitFor('新しい戦闘', () => window.__tactics.state().turnNumber <= 2 && window.__tactics.state().winner === null);
+  // ---- 結果の画面 ----
+  deadline = Date.now() + AFTER_BATTLE_TIMEOUT_MS;
+  await waitFor('結果の画面', () => window.__tactics.screen() === 'result');
+  const resultText = await page.locator('.report-screen .result-title').textContent();
+  check(resultText === (final.winner === 'player' ? '勝利' : '敗北'), `結果の画面の勝敗の表示が違います（${resultText}）`);
+  for (const u of plan.report.units) {
+    const line = await page.locator(`.report-unit[data-unit-id="${u.unitId}"] .report-gain`).textContent();
+    const want = `${text.report.exp(u.exp)} ・ ${text.report.jp(text.jobs[u.jobId], u.jp)}`;
+    check(line === want, `${u.unitId} の得た経験値と JP の表示が core の計算と違います（画面 ${line} / core ${want}）`);
+  }
+  const levelUps = await page.locator('.report-up').count();
+  const expectedUps = plan.report.units.reduce(
+    (n, u) => n + (u.levelAfter > u.levelBefore ? 1 : 0) + (u.jobLevelAfter > u.jobLevelBefore ? 1 : 0),
+    0,
+  );
+  check(levelUps === expectedUps, `レベルアップの表示の数が違います（画面 ${levelUps} / core ${expectedUps}）`);
+  await screenshot('result-screen');
+  await pressButton(text.report.toBase);
+  await waitFor('拠点', () => window.__tactics.screen() === 'base');
+  const sameRoster = async (want, what) => {
+    const got = await T(() => window.__tactics.roster());
+    check(JSON.stringify(got) === JSON.stringify(want), `${what}: 部隊の状態が core の計算と違います（画面 ${JSON.stringify(got)} / core ${JSON.stringify(want)}）`);
+  };
+  await sameRoster(plan.afterBattle, '戦闘の後');
+
+  // ---- 編成: 習得・ジョブチェンジ・副コマンドの付け替え ----
+  const unitButton = (id) => page.locator(`.roster-card[data-unit-id="${id}"]`);
+  const tapLocator = async (loc) => {
+    stats.taps++;
+    if (touch) await loc.tap();
+    else await loc.click();
+  };
+  await pressButton('編成');
+  await waitFor('編成の画面', () => window.__tactics.screen() === 'roster');
+  await screenshot('roster-list');
+  if (plan.learn) {
+    await tapLocator(unitButton(plan.learn.unitId));
+    await screenshot('roster-detail');
+    await pressButton(text.roster.learn);
+    const row = page.locator(`.learn-job[data-job-id="${plan.learn.jobId}"] .learn-row[data-ability-id="${plan.learn.abilityId}"] button`);
+    check(!(await row.isDisabled()), `${plan.learn.abilityId} の「覚える」が押せません`);
+    await screenshot('roster-learn');
+    await tapLocator(row);
+    await waitFor(
+      '習得',
+      ([u, j, a]) => window.__tactics.roster().units.find((x) => x.id === u).jobs[j].learned.includes(a),
+      [plan.learn.unitId, plan.learn.jobId, plan.learn.abilityId],
+    );
+    stats.learned++;
+    await pressButton(text.roster.back);
+    await pressButton(text.roster.back);
+  }
+  await tapLocator(unitButton(plan.jobUnitId));
+  for (const jobId of [plan.subJobId, plan.homeJobId]) {
+    await pressButton(text.roster.changeJob);
+    await pressButton(text.jobs[jobId]);
+    await waitFor('能力値と成長率の比べる表', () => document.querySelector('.compare-table') !== null);
+    if (stats.jobChanges === 0) await screenshot('roster-job-compare');
+    await pressButton(text.roster.becomeJob(text.jobs[jobId]));
+    await waitFor('ジョブチェンジ', ([u, j]) => window.__tactics.roster().units.find((x) => x.id === u).jobId === j, [plan.jobUnitId, jobId]);
+    stats.jobChanges++;
+  }
+  await pressButton(text.roster.changeSub);
+  await pressButton(text.commands[plan.subJobId]);
+  await waitFor('副コマンド', ([u, j]) => window.__tactics.roster().units.find((x) => x.id === u).slots.secondary === j, [plan.jobUnitId, plan.subJobId]);
+  stats.subChanges++;
+  await screenshot('roster-after');
+  await pressButton(text.roster.back);
+  await pressButton(text.roster.back);
+  await waitFor('拠点', () => window.__tactics.screen() === 'base');
+  await sameRoster(plan.afterEdit, '編成の後');
+
+  // ---- 再び出撃: 部隊の変更が戦闘に反映される ----
+  await pressButton('出撃');
+  await pressButton(text.tiers.normal.name);
+  await waitFor('2戦目', () => window.__tactics.screen() === 'battle' && window.__tactics.state() !== null);
+  const second = await getState();
+  const want = core.start(plan.afterEdit, 'normal', 1).state;
+  for (const u of want.units.filter((u) => u.team === 'player')) {
+    const got = second.units.find((x) => x.id === u.id);
+    const pick = (x) => JSON.stringify([x.jobId, x.level, x.stats, x.commands, x.weapon]);
+    check(pick(got) === pick(u), `2戦目の ${u.id} に部隊の状態が反映されていません（画面 ${pick(got)} / core ${pick(u)}）`);
+  }
+  check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
+
+  // ---- 技（強打）と副コマンドのメニュー ----
+  // 強打を覚えた戦士が、敵の隣で手番を迎えた場面を用意して、「武技」→「強打」→ 相手 → 予測 → 確定 を確かめる。
+  // 副コマンド（攻撃魔法）のメニューも開き、MP が足りない魔法が押せないことを確かめる
+  const sd = strikeDrill(core, plan);
+  await page.evaluate((r) => window.__tactics.load(r), sd.start);
+  await waitFor('強打の手番', (id) => window.__tactics.mode() === 'main' && window.__tactics.state().turn?.unitId === id, sd.unitId);
+  await waitForInput();
+  const sdUnit = (await getState()).units.find((u) => u.id === sd.unitId);
+  await openCommandOf(sdUnit, sd.subAbilityId);
+  await screenshot('sub-command-menu');
+  await pressButton(text.buttons.back);
+  await waitFor('行動を選ぶ', () => window.__tactics.mode() === 'main');
+  await openCommandOf(sdUnit, 'powerStrike');
+  await pressButton(text.abilities.powerStrike);
+  await waitFor('強打の相手を選ぶ', () => {
+    const m = window.__tactics.modeDetail();
+    return m.kind === 'targeting' && m.abilityId === 'powerStrike';
+  });
+  await tapUnit(sd.targetId);
+  const sdMode = await getMode();
+  check(sdMode.kind === 'confirm' && sdMode.abilityId === 'powerStrike' && sdMode.targetId === sd.targetId, `強打の相手の選択が違います（${JSON.stringify(sdMode)}）`);
+  const sdTitle = await page.locator('.preview-title').textContent();
+  check(sdTitle.includes(text.abilities.powerStrike), `強打の予測の題が違います（${sdTitle}）`);
+  await screenshot('strike-preview');
+  await pressButton('確定');
+  await waitFor('強打の後', () => !['busy', 'confirm'].includes(window.__tactics.mode()));
+  const sdAfter = await getState();
+  const pickHit = (st) => JSON.stringify(st.units.map((u) => [u.id, u.hp, u.actionCount]).filter(([id]) => id === sd.unitId || id === sd.targetId));
+  check(pickHit(sdAfter) === pickHit(sd.expected), `強打の結果が core の計算と違います（画面 ${pickHit(sdAfter)} / core ${pickHit(sd.expected)}）`);
   check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
 
   // ---- 詠唱の中断 ----
@@ -909,6 +1088,24 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
   check(pick(drillActual) === pick(drillExpected), `詠唱の中断の後の状態が core の計算と違います（${pick(drillActual)} / ${pick(drillExpected)}）`);
   check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
 
+  // ---- ページを読み込み直しても、部隊の状態が残る ----
+  await page.reload();
+  await page.waitForFunction(() => window.__tactics?.screen() === 'base', null, { timeout: 30000 });
+  await sameRoster(plan.afterEdit, '読み込み直した後');
+  // ---- 「はじめから」: 確認の後、最初の部隊に戻る（読み込み直しても最初のまま） ----
+  await pressButton(text.base.newGame);
+  await waitFor('はじめからの確認', () => document.querySelector('.screen-warning') !== null);
+  await screenshot('new-game-confirm');
+  await pressButton(text.base.cancel);
+  await sameRoster(plan.afterEdit, '「はじめから」をやめた後');
+  await pressButton(text.base.newGame);
+  await pressButton(text.base.confirmNewGameYes);
+  await sameRoster(core.data.roster, '「はじめから」の後');
+  await page.reload();
+  await page.waitForFunction(() => window.__tactics?.screen() === 'base', null, { timeout: 30000 });
+  await sameRoster(core.data.roster, '「はじめから」の後に読み込み直した後');
+  check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
+
   await context.close();
   for (const d of finger.details) log(`押し直し: ${d}`);
   return {
@@ -945,9 +1142,9 @@ function playerPolicy(core) {
  * finish(facing) は、同じ操作（移動 → 向きを決めて終了）を core だけで行った結果。
  */
 function interruptDrill(core) {
-  const { battle: setup, jobs, rules, spells } = core.data;
-  const base = core.battle.startBattle(setup, jobs, rules, SEED + 1, spells).state;
-  const unitId = 'p-mage-1';
+  const { spells } = core.data;
+  const base = core.start(core.data.roster, 'easy', SEED + 1).state;
+  const unitId = 'hero-4';
   const fire = spells.find((s) => s.id === 'fire');
   const units = base.units.map((u) =>
     u.id === unitId
@@ -972,6 +1169,72 @@ function interruptDrill(core) {
       return core.battle.applyAction(moved, { type: 'endTurn', facing }).state;
     },
   };
+}
+
+/**
+ * 戦闘の後の部隊と、編成の画面で行う変更を core だけで計算する。
+ * - 習得: 戦闘で得た JP で覚えられるアビリティ（強打を優先）
+ * - ジョブチェンジ: 2人目の戦士を魔術師にして（風を覚える）、戦士に戻す
+ * - 副コマンド: その戦士の副コマンドを「攻撃魔法」にする
+ */
+function rosterPlan(core, finalState) {
+  const P = core.progression;
+  const { catalog, progression: rules } = core.data;
+  const { roster: afterBattle, report } = P.applyBattleResult(core.data.roster, finalState, catalog, rules);
+  let learn;
+  const candidates = [];
+  for (const u of afterBattle.units) {
+    const job = P.findJob(catalog, u.jobId);
+    for (const a of job.abilities ?? []) {
+      if (P.learnRefusal(u, job.id, a.id, catalog, rules) === null) candidates.push({ unitId: u.id, jobId: job.id, abilityId: a.id });
+    }
+  }
+  learn = candidates.find((c) => c.abilityId === 'powerStrike' && c.unitId === 'hero-1') ?? candidates.find((c) => c.abilityId === 'powerStrike') ?? candidates[0];
+  let roster = afterBattle;
+  if (learn) roster = P.replaceUnit(roster, P.learnAbility(P.findUnit(roster, learn.unitId), learn.jobId, learn.abilityId, catalog, rules));
+  const jobUnitId = 'hero-2';
+  const homeJobId = P.findUnit(roster, jobUnitId).jobId;
+  const subJobId = 'mage';
+  let u = P.findUnit(roster, jobUnitId);
+  u = P.changeJob(u, subJobId, catalog, rules);
+  u = P.changeJob(u, homeJobId, catalog, rules);
+  u = P.setSecondary(u, subJobId, catalog);
+  const afterEdit = P.replaceUnit(roster, u);
+  return { report, afterBattle, learn, jobUnitId, homeJobId, subJobId, afterEdit };
+}
+
+/**
+ * 強打を確かめる場面。強打を覚え、副コマンドに攻撃魔法（風）を付けた戦士が、敵の戦士の隣で手番を迎えた状態。
+ * 部隊は編成の後のもの（強打を覚えていなければ、ここで覚えたことにする）。expected は同じ強打を core だけで行った結果。
+ */
+function strikeDrill(core, plan) {
+  const P = core.progression;
+  const { catalog, progression: rules } = core.data;
+  const unitId = plan.jobUnitId;
+  let u = P.findUnit(plan.afterEdit, unitId);
+  if (!P.jobProgress(u, 'warrior').learned.includes('powerStrike')) {
+    u = P.learnAbility(P.gainJp(u, 'warrior', 1000), 'warrior', 'powerStrike', catalog, rules);
+  }
+  const roster = P.replaceUnit(plan.afterEdit, u);
+  const base = core.start(roster, 'easy', SEED + 2).state;
+  const me = base.units.find((x) => x.id === unitId);
+  const targetId = 'e-warrior-2';
+  // 敵の戦士を、戦士のすぐ前（奥側）に置く。こちらに背を向けさせ、強打の方が通常攻撃より得になるようにする
+  const units = base.units.map((x) =>
+    x.id === unitId
+      ? { ...x, ct: 100 }
+      : x.id === targetId
+        ? { ...x, x: me.x, z: me.z - 1, facing: 'north', ct: 0 }
+        : { ...x, ct: 0 },
+  );
+  const state = {
+    ...base,
+    units,
+    turn: { unitId, moved: false, acted: false, origin: { x: me.x, z: me.z, facing: me.facing }, chargingAtStart: false },
+    turnNumber: 1,
+  };
+  const expected = core.battle.applyAction(state, { type: 'attack', targetId, abilityId: 'powerStrike' }).state;
+  return { unitId, targetId, subAbilityId: 'wind', start: { state, events: [{ type: 'turnStarted', unitId, turnNumber: 1 }] }, expected };
 }
 
 /** ブラウザの中で実行する: 点 (x, y) とその周り 16px が、すべてキャンバス（ボタンなどに隠れていない）か */

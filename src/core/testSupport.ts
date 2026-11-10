@@ -2,7 +2,17 @@
  * core のテスト用の部品。小さなマップとユニットで戦闘の状態を手早く組み立てる。
  * core は src/data を読み込まないので、テスト用の数値はここに置く（本番の数値は src/data）。
  */
-import type { BattleRules, BattleState, ChargeState, JobDefinition, SpellDefinition, Team, UnitState } from './battleTypes';
+import type {
+  BattleRules,
+  BattleState,
+  ChargeState,
+  JobDefinition,
+  SpellDefinition,
+  StrikeDefinition,
+  Team,
+  UnitCommand,
+  UnitState,
+} from './battleTypes';
 import type { AiConfig, AiConfigs } from './ai';
 import type { Direction } from './geometry';
 import { createMap } from './map';
@@ -24,12 +34,59 @@ export const testWarrior: JobDefinition = {
   id: 'warrior',
   stats: { maxHp: 50, attack: 20, speed: 6, move: 3, jump: 2, maxMp: 0, magic: 0 },
   attack: { kind: 'melee', maxHeightDiff: 2 },
+  weapon: 'sword',
 };
 
 export const testArcher: JobDefinition = {
   id: 'archer',
   stats: { maxHp: 30, attack: 10, speed: 8, move: 3, jump: 2, maxMp: 0, magic: 0 },
   attack: { kind: 'ranged', minRange: 3, maxRange: 5, heightPerExtraRange: 2 },
+  weapon: 'bow',
+};
+
+/** 強打: ダメージ 1.5 倍、命中率 -15。剣か杖が必要 */
+export const testPowerStrike: StrikeDefinition = { id: 'powerStrike', damagePercent: 150, hitBonus: -15, weapons: ['sword', 'staff'] };
+
+/** 狙い撃ち: 攻撃力が元の、詠唱のある単体の技。射程 3〜6。弓が必要 */
+export const testAimedShot: SpellDefinition = {
+  id: 'aimedShot',
+  element: 'none',
+  effect: 'damage',
+  stat: 'attack',
+  power: 150,
+  mpCost: 0,
+  range: 6,
+  minRange: 3,
+  areaRadius: 0,
+  heightTolerance: 0,
+  castSpeed: 50,
+  weapons: ['bow'],
+};
+
+/** 雷: 単体で威力が高く、詠唱の遅い攻撃魔法 */
+export const testThunder: SpellDefinition = {
+  id: 'thunder',
+  element: 'thunder',
+  effect: 'damage',
+  power: 300,
+  mpCost: 12,
+  range: 4,
+  areaRadius: 0,
+  heightTolerance: 0,
+  castSpeed: 20,
+};
+
+/** 大癒し: 単体で回復量が大きい */
+export const testBigHeal: SpellDefinition = {
+  id: 'bigHeal',
+  element: 'light',
+  effect: 'heal',
+  power: 400,
+  mpCost: 12,
+  range: 4,
+  areaRadius: 0,
+  heightTolerance: 0,
+  castSpeed: 34,
 };
 
 /** 範囲の攻撃魔法（中心と上下左右の5マス、高さの許容 2）。詠唱は遅い */
@@ -71,14 +128,19 @@ export const testHeal: SpellDefinition = {
   castSpeed: 50,
 };
 
-export const testSpells = [testFire, testWind, testHeal];
+export const testSpells = [testFire, testWind, testHeal, testAimedShot, testThunder, testBigHeal];
+export const testStrikes = [testPowerStrike];
 
 /** 魔力 10。炎は 20、風は 10 のダメージ */
 export const testMage: JobDefinition = {
   id: 'mage',
   stats: { maxHp: 30, attack: 4, speed: 6, move: 3, jump: 2, maxMp: 30, magic: 10 },
   attack: { kind: 'melee', maxHeightDiff: 2 },
-  spellIds: ['fire', 'wind'],
+  weapon: 'staff',
+  abilities: [
+    { id: 'fire', jpCost: 100 },
+    { id: 'wind', jpCost: 0, starter: true },
+  ],
 };
 
 /** 魔力 10。癒しは 20 回復 */
@@ -86,7 +148,8 @@ export const testHealer: JobDefinition = {
   id: 'healer',
   stats: { maxHp: 30, attack: 4, speed: 6, move: 3, jump: 2, maxMp: 30, magic: 10 },
   attack: { kind: 'melee', maxHeightDiff: 2 },
-  spellIds: ['heal'],
+  weapon: 'staff',
+  abilities: [{ id: 'heal', jpCost: 0, starter: true }],
 };
 
 export const testJobs = [testWarrior, testArcher, testMage, testHealer];
@@ -106,6 +169,8 @@ export interface TestUnit {
   mp?: number;
   charging?: ChargeState;
   movedLastTurn?: boolean;
+  /** 使えるアビリティ（省くと、ジョブのアビリティすべてを主コマンドとして使える） */
+  commands?: UnitCommand[];
 }
 
 /** 平らなマップ（すべて高さ 0） */
@@ -132,6 +197,8 @@ export function makeState(options: {
   });
   const units: UnitState[] = options.units.map((u) => {
     const job = u.job ?? testWarrior;
+    const commands = u.commands ?? [{ jobId: job.id, abilityIds: (job.abilities ?? []).map((a) => a.id) }];
+    const ids = commands.flatMap((c) => c.abilityIds);
     return {
       id: u.id,
       team: u.team,
@@ -144,7 +211,12 @@ export function makeState(options: {
       stats: job.stats,
       attack: job.attack,
       mp: u.mp ?? job.stats.maxMp,
-      spells: (job.spellIds ?? []).map((id) => testSpells.find((sp) => sp.id === id)!),
+      level: 1,
+      weapon: job.weapon ?? null,
+      commands,
+      spells: testSpells.filter((sp) => ids.includes(sp.id)),
+      strikes: testStrikes.filter((sp) => ids.includes(sp.id)),
+      actionCount: 0,
       charging: u.charging ?? null,
       movedLastTurn: u.movedLastTurn ?? false,
     };

@@ -7,7 +7,10 @@
  *   相手の攻撃が届かない位置から撃つことを優先する。同じなら、詠唱中の相手や前の手番で動かなかった相手を多く巻き込む場所を選ぶ。
  * - 通常攻撃できる相手がいれば攻撃する。詠唱中の相手を最優先し、次に 背面 → 側面 → 正面、
  *   同じなら高い位置、それも同じなら反撃を受けにくい位置（届く相手が少ない）、次に移動の少ない位置、
- *   さらに同じなら HP の少ない相手を選ぶ。
+ *   さらに同じなら HP の少ない相手を選ぶ。技（強打など）を使えるなら、通常攻撃と比べて
+ *   「命中率 × 与えるダメージ（相手の残り HP まで）」が大きい方で攻撃する。
+ * - 役割（癒し手として振る舞うか）は、主コマンド（今のジョブ）で決める。副コマンドの回復魔法では癒し手にならない。
+ * - 武器が合わないアビリティと、MP が足りない魔法は使わない。
  * - 攻撃も魔法もできない手番は、最も近い相手に近づくが、敵の攻撃が届く位置へ単独では踏み込まず、
  *   届かないぎりぎりの位置で止まる（味方と足並みを揃えるため）。近くに味方が十分いれば踏み込む（supportRange）。
  *   ただし、どちらの軍も一定の手番数のあいだ攻撃や魔法を行っていなければ、前進に切り替える（にらみ合いを防ぐ）。
@@ -26,9 +29,9 @@ import type {
   Team,
   UnitState,
 } from './battleTypes';
-import { attackableTargets, attackRangeTiles, previewAttack } from './combat';
+import { attackableTargets, attackRangeTiles, previewAttack, weaponFits } from './combat';
 import { DIRECTION_VECTORS, DIRECTIONS, directionToward, manhattan, type Coord, type Direction, type RelativeSide } from './geometry';
-import { chargeArea, hasMpFor, previewSpellAt, spellRangeTiles } from './magic';
+import { canCast, chargeArea, previewSpellAt, spellRangeTiles } from './magic';
 import { getTile } from './map';
 import { canStep, isAlive, reachableTiles, unitAt } from './movement';
 
@@ -65,6 +68,8 @@ interface Position extends Coord {
 export interface AttackPlan {
   readonly position: Coord;
   readonly targetId: string;
+  /** 技（強打など）で攻撃するなら、その id */
+  readonly abilityId?: string;
 }
 
 export interface SpellPlan {
@@ -131,7 +136,27 @@ export function chooseAttack(
       }
     }
   }
-  return best?.plan;
+  if (!best) return undefined;
+  return withBestStrike(state, unit, best.plan);
+}
+
+/**
+ * 攻撃する位置と相手が決まった後で、通常攻撃と技（強打など）のどちらで攻撃するかを決める。
+ * 「命中率 × 与えるダメージ（相手の残り HP まで）」が大きい方。同じなら通常攻撃
+ */
+function withBestStrike(state: BattleState, unit: UnitState, plan: AttackPlan): AttackPlan {
+  const target = state.units.find((u) => u.id === plan.targetId)!;
+  const expected = (strike?: UnitState['strikes'][number]) => {
+    const p = previewAttack(state, unit, target, plan.position, strike);
+    return p.hitPercent * Math.min(p.damage, target.hp);
+  };
+  let best: { abilityId?: string; value: number } = { value: expected() };
+  for (const strike of unit.strikes) {
+    if (!weaponFits(strike.weapons, unit.weapon)) continue;
+    const value = expected(strike);
+    if (value > best.value) best = { abilityId: strike.id, value };
+  }
+  return best.abilityId ? { ...plan, abilityId: best.abilityId } : plan;
 }
 
 /** 中心のマスにいるユニットを狙うか、マスを狙うか。狙いたい陣営のユニットがいれば、そのユニットを追いかける */
@@ -149,9 +174,11 @@ function targetFor(state: BattleState, center: Coord, followTeam: Team): SpellTa
  * 同じなら、詠唱中や前の手番で動かなかった敵を多く巻き込む → （1体だけを狙う時は）詠唱の速い魔法
  * → 中心に敵がいる（その敵を追いかけて狙える）→ 敵に与えるダメージの合計が大きい → 消費 MP が少ない
  * → 移動の少ない位置 の順に選ぶ。
+ * ただし1体だけを狙う時、その相手が詠唱中か前の手番で動かなかった（その場に留まりやすい）なら、
+ * 詠唱の速さより与えるダメージの大きさを優先する（遅くて強い魔法「雷」を使う場面）。
  */
 export function chooseDamageSpell(state: BattleState, unit: UnitState, canMove: boolean): SpellPlan | undefined {
-  const spells = unit.spells.filter((s) => s.effect === 'damage' && hasMpFor(unit, s));
+  const spells = unit.spells.filter((s) => s.effect === 'damage' && canCast(unit, s));
   if (spells.length === 0) return undefined;
   const opponent: Team = unit.team === 'player' ? 'enemy' : 'player';
   const threat = threatMap(state, unit.team);
@@ -181,12 +208,15 @@ export function chooseDamageSpell(state: BattleState, unit: UnitState, canMove: 
         if (enemies === 0 || net < 1) continue;
         // 相手の攻撃が届く位置からは、2体以上を差し引きで巻き込める時だけ撃つ（魔術師は打たれ弱いため）
         if (danger && net < 2) continue;
-        // 1体だけを狙うなら、詠唱の速い魔法の方が逃げられにくい
-        const speed = net === 1 ? -spell.castSpeed : 0;
+        // 1体だけを狙うなら、詠唱の速い魔法の方が逃げられにくい。
+        // 留まりやすい相手なら、単体の魔法のうちダメージの大きい方（範囲の魔法は1体には使わない方を優先）
+        const steady = net === 1 && priority > 0;
+        const single = steady ? (spell.areaRadius > 0 ? 1 : 0) : 0;
+        const speed = net === 1 ? (steady ? -damage : -spell.castSpeed) : 0;
         // 中心に敵がいれば、その敵を追いかける狙い方にできる（発動までに逃げられにくい）
         const target = targetFor(state, center, opponent);
         const follows = target.kind === 'unit' ? 0 : 1;
-        const score = [danger, -net, -priority, speed, follows, -damage, spell.mpCost, pos.steps, tieBreak(state, pos.x, pos.z, center.x, center.z)];
+        const score = [danger, -net, -priority, single, speed, follows, -damage, spell.mpCost, pos.steps, tieBreak(state, pos.x, pos.z, center.x, center.z)];
         if (!best || compareScores(score, best.score) < 0) {
           best = { plan: { position: { x: pos.x, z: pos.z }, spellId: spell.id, target }, score };
         }
@@ -213,7 +243,7 @@ export function chooseHealSpell(
   canMove: boolean,
   config: AiConfig,
 ): SpellPlan | undefined {
-  const spells = unit.spells.filter((s) => s.effect === 'heal' && hasMpFor(unit, s));
+  const spells = unit.spells.filter((s) => s.effect === 'heal' && canCast(unit, s));
   if (spells.length === 0) return undefined;
   const covered = new Set<string>();
   for (const caster of state.units) {
@@ -264,7 +294,11 @@ export function isStalemate(state: BattleState, config: AiConfig): boolean {
   return state.turnNumber - state.lastAggressionTurn >= config.advanceAfterIdleTurns;
 }
 
-const isHealer = (unit: UnitState) => unit.spells.some((s) => s.effect === 'heal');
+/** 癒し手として振る舞うか（主コマンドに回復魔法がある） */
+const isHealer = (unit: UnitState) => {
+  const main = unit.commands[0];
+  return unit.spells.some((s) => s.effect === 'heal' && (!main || main.abilityIds.includes(s.id)));
+};
 
 /** unit の陣営で、生きているのが癒し手だけか */
 const onlyHealersLeft = (state: BattleState, unit: UnitState) =>
@@ -312,7 +346,7 @@ export function chooseApproach(state: BattleState, unit: UnitState, config: AiCo
 }
 
 type Plan =
-  | { readonly kind: 'attack'; readonly position: Coord; readonly targetId: string }
+  | { readonly kind: 'attack'; readonly position: Coord; readonly targetId: string; readonly abilityId?: string }
   | { readonly kind: 'cast'; readonly position: Coord; readonly spellId: string; readonly target: SpellTarget };
 
 /** この手番の行動（攻撃か魔法）と、そのための位置を選ぶ */
@@ -346,7 +380,11 @@ export function decideNextAction(state: BattleState, config: AiConfig): BattleAc
       if (plan.position.x !== unit.x || plan.position.z !== unit.z) {
         return { type: 'move', x: plan.position.x, z: plan.position.z };
       }
-      if (plan.kind === 'attack') return { type: 'attack', targetId: plan.targetId };
+      if (plan.kind === 'attack') {
+        return plan.abilityId
+          ? { type: 'attack', targetId: plan.targetId, abilityId: plan.abilityId }
+          : { type: 'attack', targetId: plan.targetId };
+      }
       return { type: 'cast', spellId: plan.spellId, target: plan.target };
     }
     // 攻撃や魔法の後には移動しない

@@ -5,6 +5,9 @@
  * 攻撃する前なら、移動を取り消して手番開始時の位置に戻れる。
  * 行動は通常攻撃か魔法の指定。魔法はすぐには発動せず、手番と手番の間の時計の進みの中で発動する（magic.ts）。
  * 詠唱中に自分の手番が来たら、待機すれば詠唱を続け、移動か行動をすると詠唱は中断される（MP は戻らない）。
+ * 行動には、通常攻撃のほかに行動アビリティ（強打のようにすぐ出る技と、詠唱のある魔法・狙い撃ち）がある。
+ * アビリティは、必要な武器の種類が合わなければ使えない。
+ * 攻撃・魔法・技を実行するたびに、ユニットの行動の回数（actionCount）を数える（戦闘の後の経験値と JP に使う）。
  * 勝敗は全滅で決まる（敵が全滅で味方の勝ち、味方が全滅で敵の勝ち）。
  */
 import type {
@@ -16,25 +19,32 @@ import type {
   BattleState,
   JobDefinition,
   SpellDefinition,
+  StrikeDefinition,
   Team,
   TurnState,
+  UnitCommand,
   UnitState,
 } from './battleTypes';
-import { attackableTargets, previewAttack } from './combat';
+import { attackableTargets, previewAttack, strikeOf, weaponFits } from './combat';
 import { DIRECTIONS, directionToward } from './geometry';
 import { hasMpFor, isValidSpellTarget, previewSpellAt, spellOf, targetCenter } from './magic';
+import { statsWithGrowth, ZERO_GROWTH } from './progression';
 import { createMap, getTile } from './map';
 import { isAlive, reachableTiles } from './movement';
 import { createRng, restoreRng } from './rng';
 import { ctAfterTurn, nextTimelineEntry } from './turnOrder';
 
-/** 定義データから戦闘を始める。最初の手番が始まった状態を返す */
+/**
+ * 定義データから戦闘を始める。最初の手番が始まった状態を返す。
+ * 能力値は、ジョブの基本値に配置の成長値を足したもの。使えるアビリティは配置のコマンドのもの。
+ */
 export function startBattle(
   setup: BattleSetup,
   jobs: readonly JobDefinition[],
   rules: BattleRules,
   seed: number,
   spells: readonly SpellDefinition[] = [],
+  strikes: readonly StrikeDefinition[] = [],
 ): ActionResult {
   const map = createMap(setup.map);
   const ids = new Set<string>();
@@ -44,11 +54,19 @@ export function startBattle(
     if (ids.has(p.id)) throw new Error(`ユニット id ${p.id} が重複しています`);
     ids.add(p.id);
     if (!getTile(map, p.x, p.z)) throw new Error(`ユニット ${p.id}: 配置 (${p.x}, ${p.z}) がマップ外です`);
-    const unitSpells = (job.spellIds ?? []).map((id) => {
+    const commands: readonly UnitCommand[] = p.commands ?? [
+      { jobId: job.id, abilityIds: (job.abilities ?? []).map((a) => a.id) },
+    ];
+    const unitSpells: SpellDefinition[] = [];
+    const unitStrikes: StrikeDefinition[] = [];
+    for (const id of commands.flatMap((c) => c.abilityIds)) {
       const spell = spells.find((s) => s.id === id);
-      if (!spell) throw new Error(`ジョブ ${job.id}: 魔法 ${id} が見つかりません`);
-      return spell;
-    });
+      const strike = strikes.find((s) => s.id === id);
+      if (spell && !unitSpells.includes(spell)) unitSpells.push(spell);
+      else if (strike && !unitStrikes.includes(strike)) unitStrikes.push(strike);
+      else if (!spell && !strike) throw new Error(`ユニット ${p.id}: アビリティ ${id} が見つかりません`);
+    }
+    const stats = statsWithGrowth(job.stats, p.growth ?? ZERO_GROWTH);
     return {
       id: p.id,
       team: p.team,
@@ -56,12 +74,17 @@ export function startBattle(
       x: p.x,
       z: p.z,
       facing: p.facing,
-      hp: job.stats.maxHp,
+      hp: stats.maxHp,
       ct: 0,
-      stats: job.stats,
+      stats,
       attack: job.attack,
-      mp: job.stats.maxMp,
+      mp: stats.maxMp,
+      level: p.level ?? 1,
+      weapon: job.weapon ?? null,
+      commands,
       spells: unitSpells,
+      strikes: unitStrikes,
+      actionCount: 0,
       charging: null,
       movedLastTurn: false,
     };
@@ -142,7 +165,8 @@ export function applyAction(state: BattleState, action: BattleAction): ActionRes
 
     case 'attack': {
       const target = getUnit(state, action.targetId);
-      const preview = previewAttack(state, unit, target);
+      const strike = action.abilityId === undefined ? undefined : strikeOf(unit, action.abilityId);
+      const preview = previewAttack(state, unit, target, unit, strike);
       const rng = restoreRng(state.rngState);
       const hit = rng.nextInt(1, 100) <= preview.hitPercent;
       const damage = hit ? Math.min(preview.damage, target.hp) : 0;
@@ -151,6 +175,7 @@ export function applyAction(state: BattleState, action: BattleAction): ActionRes
         type: 'attacked',
         attackerId: unit.id,
         targetId: target.id,
+        abilityId: strike?.id ?? null,
         attackerFacing: preview.attackerFacing,
         side: preview.side,
         hitPercent: preview.hitPercent,
@@ -160,7 +185,7 @@ export function applyAction(state: BattleState, action: BattleAction): ActionRes
         targetHp,
         chargingPercent: preview.chargingPercent,
       });
-      let next = updateUnit(state, unit.id, { facing: preview.attackerFacing });
+      let next = updateUnit(state, unit.id, { facing: preview.attackerFacing, actionCount: unit.actionCount + 1 });
       next = updateUnit(next, target.id, { hp: targetHp });
       next = { ...next, rngState: rng.getState(), turn: { ...turn, acted: true }, lastAggressionTurn: state.turnNumber };
       if (targetHp === 0) next = defeat(next, target.id, events);
@@ -178,6 +203,7 @@ export function applyAction(state: BattleState, action: BattleAction): ActionRes
       events.push({ type: 'castStarted', casterId: unit.id, spellId: spell.id, target, mp, casterFacing });
       const next = updateUnit(state, unit.id, {
         mp,
+        actionCount: unit.actionCount + 1,
         facing: casterFacing,
         charging: { spellId: spell.id, target, progress: 0 },
       });
@@ -219,9 +245,14 @@ function validateBeforeInterrupt(state: BattleState, action: BattleAction): void
     if (!attackableTargets(state, unit, unit).some((u) => u.id === action.targetId)) {
       throw new Error(`${action.targetId} は攻撃できません`);
     }
+    if (action.abilityId !== undefined) {
+      const strike = strikeOf(unit, action.abilityId);
+      if (!weaponFits(strike.weapons, unit.weapon)) throw new Error(`武器が合いません（${strike.id}）`);
+    }
   } else if (action.type === 'cast') {
     if (turn.acted) throw new Error('この手番ではもう行動しています');
     const spell = spellOf(unit, action.spellId);
+    if (!weaponFits(spell.weapons, unit.weapon)) throw new Error(`武器が合いません（${spell.id}）`);
     if (!hasMpFor(unit, spell)) throw new Error(`MP が足りません（${spell.id}）`);
     if (!isValidSpellTarget(state, spell, unit, action.target)) throw new Error(`${spell.id} はそこを狙えません`);
   }

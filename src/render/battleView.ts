@@ -55,6 +55,8 @@ export interface BattleView {
   /** ユニットの体の中ほどの画面座標（px）。自動テスト用 */
   unitScreenPosition(unitId: string): { x: number; y: number };
   update(deltaSeconds: number, elapsedSeconds: number): void;
+  /** ユニットや目印をシーンから取り除く（戦闘を終えて拠点へ戻る時） */
+  dispose(): void;
 }
 
 const TEAM_COLORS: Record<Team, { body: number; ring: number }> = {
@@ -71,7 +73,9 @@ const JOB_LOOKS: Record<string, Omit<PuppetLook, 'body'>> = {
 export const ELEMENT_COLORS: Record<SpellElement, number> = {
   fire: 0xff5a1f,
   wind: 0x3fd69a,
+  thunder: 0x6f8bff,
   light: 0xffe56b,
+  none: 0xd9d9d9,
 };
 const HEAD_HEIGHT = 1.05;
 /**
@@ -481,6 +485,13 @@ export function createBattleView(options: {
           .add(new THREE.Vector3(0, HEAD_HEIGHT + 0.25 + Math.abs(Math.sin(elapsed * 3)) * 0.12, 0));
         activeMarker.rotation.y = elapsed * 2;
       }
+    },
+    dispose() {
+      for (const v of visuals.values()) scene.remove(v.puppet.group);
+      for (const m of bursts) scene.remove(m);
+      scene.remove(activeMarker, arrowGroup, projectile);
+      mapView.setMarks([]);
+      mapView.setReserved([]);
     },
   };
 }
