@@ -100,6 +100,8 @@ export function createBattleView(options: {
     );
     chargeRing.visible = false;
     chargeRing.renderOrder = 3;
+    // 目印は上下に動くので、タップの判定から外す（動きのせいで隣のマスや矢印のタップを横取りしないように）
+    chargeRing.raycast = () => {};
     puppet.group.add(chargeRing);
     scene.add(puppet.group);
     visuals.set(unit.id, { puppet, coord: { x: unit.x, z: unit.z }, alive: true, chargeRing });

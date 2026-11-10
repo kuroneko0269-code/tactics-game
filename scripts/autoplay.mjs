@@ -154,6 +154,10 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
   const cdp = touch ? await context.newCDPSession(page) : undefined;
   const pageErrors = [];
   page.on('pageerror', (e) => pageErrors.push(e));
+  // 処理されなかった Promise の失敗（演出の途中のエラーなど）も、ページのエラーとして数える
+  page.on('console', (m) => {
+    if (m.type() === 'error') pageErrors.push(new Error(m.text()));
+  });
   const log = (msg) => console.log(`[${label}] ${msg}`);
   const started = Date.now();
   const deadline = started + BATTLE_TIMEOUT_MS;
@@ -174,6 +178,9 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
   ];
 
   await page.addInitScript(`window.__clearOfButtons = ${clearOfButtons.toString()}`);
+  await page.addInitScript(() =>
+    window.addEventListener('unhandledrejection', (e) => console.error(`unhandledrejection: ${e.reason?.stack ?? e.reason}`)),
+  );
   await page.goto(`${baseUrl}?seed=${SEED}&speed=${SPEED}`);
   await page.waitForFunction(() => window.__tactics !== undefined, null, { timeout: 30000 });
 
@@ -190,7 +197,8 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
     try {
       await page.waitForFunction(fn, arg, { timeout, polling: 50 });
     } catch {
-      throw new CheckError(`待っても「${description}」になりませんでした（${JSON.stringify(await getMode())}）`);
+      const errors = pageErrors.map((e) => e.message).join(' / ');
+      throw new CheckError(`待っても「${description}」になりませんでした（${JSON.stringify(await getMode())}）${errors ? ` ページのエラー: ${errors}` : ''}`);
     }
   };
   /** 入力を待つ状態（または決着）になり、カメラも止まるまで待つ */
