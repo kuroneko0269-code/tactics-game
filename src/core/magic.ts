@@ -8,9 +8,11 @@
  * - 範囲は中心からの歩数で決まる。中心のマスとの高さの差が「高さの許容」を超えるマスには届かない。
  * - 魔法は必ず命中し、向きと高低差の補正を受けない。乱数の揺れもない。
  *   ダメージ・回復量 = 魔力 × 威力 ÷ 100（切り捨て）。詠唱中のユニットが受けるダメージは倍率が掛かる。
- * - 射程は指定する時だけ確かめる（発動時に離れていても発動する）。
+ * - 射程は指定する時だけ確かめる（発動時に離れていても発動する）。射程の下限がある技（狙い撃ち）は、近すぎるマスを狙えない。
+ * - 狙い撃ちのような溜めのある技も、ここでは魔法と同じに扱う（効果量の元が攻撃力になるだけ）。
  */
 import type { BattleRules, BattleState, ChargeState, SpellDefinition, SpellTarget, UnitState } from './battleTypes';
+import { weaponFits } from './combat';
 import { manhattan, type Coord } from './geometry';
 import { getTile, type BattleMap } from './map';
 import { isAlive, unitAt } from './movement';
@@ -27,9 +29,20 @@ export function hasMpFor(unit: UnitState, spell: SpellDefinition): boolean {
   return unit.mp >= spell.mpCost;
 }
 
+/** 武器が合っていて、MP も足りているか（今その魔法・技を指定できるか） */
+export function canCast(unit: UnitState, spell: SpellDefinition): boolean {
+  return weaponFits(spell.weapons, unit.weapon) && hasMpFor(unit, spell);
+}
+
+/** from から c までが、spell の射程の内側か */
+export function inSpellRange(spell: SpellDefinition, from: Coord, c: Coord): boolean {
+  const d = manhattan(from, c);
+  return d >= (spell.minRange ?? 0) && d <= spell.range;
+}
+
 /** from から spell で狙えるマスの一覧（射程の内側。高さは問わない） */
 export function spellRangeTiles(map: BattleMap, spell: SpellDefinition, from: Coord): Coord[] {
-  return map.tiles.filter((t) => manhattan(from, t) <= spell.range).map((t) => ({ x: t.x, z: t.z }));
+  return map.tiles.filter((t) => inSpellRange(spell, from, t)).map((t) => ({ x: t.x, z: t.z }));
 }
 
 /**
@@ -56,9 +69,10 @@ export function spellArea(map: BattleMap, spell: SpellDefinition, center: Coord)
   return result;
 }
 
-/** 魔法の基本の効果量（詠唱中の倍率などを掛ける前） */
+/** 魔法の基本の効果量（詠唱中の倍率などを掛ける前）。元の能力値は魔力（狙い撃ちなどは攻撃力） */
 export function baseSpellAmount(caster: UnitState, spell: SpellDefinition): number {
-  return Math.floor((caster.stats.magic * spell.power) / 100);
+  const stat = spell.stat === 'attack' ? caster.stats.attack : caster.stats.magic;
+  return Math.floor((stat * spell.power) / 100);
 }
 
 /** 魔法の効果量。ダメージなら詠唱中の倍率と最小値、回復なら最大 HP までの上限を反映する */
@@ -118,7 +132,7 @@ export function isValidSpellTarget(
   const center = targetCenter(state, target);
   if (!center || !getTile(state.map, center.x, center.z)) return false;
   if (target.kind === 'tile' && (!Number.isInteger(target.x) || !Number.isInteger(target.z))) return false;
-  return manhattan(from, center) <= spell.range;
+  return inSpellRange(spell, from, center);
 }
 
 /** マスにいるユニットを狙うか、マスそのものを狙うかを決める補助（マスに生きているユニットがいればその id） */

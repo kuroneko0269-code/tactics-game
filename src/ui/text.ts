@@ -3,7 +3,8 @@
  * 文言はここ以外に書かない（将来の翻訳と表記の統一のため）。
  * core は文言を作らず、出来事や状態（例: 地形 'grass'、向き 'back'）だけを返す。それを文言に変えるのがここの役割。
  */
-import type { SpellElement, Team } from '../core/battleTypes';
+import type { GrowthStat, SpellElement, Team, WeaponType } from '../core/battleTypes';
+import type { LearnRefusal } from '../core/progression';
 import type { RelativeSide } from '../core/geometry';
 import type { Terrain } from '../core/map';
 
@@ -37,39 +38,74 @@ export const TEXT = {
     healer: '癒',
   } as Readonly<Record<string, string>>,
 
-  /** 魔法の名前。id で引く */
-  spells: {
-    fire: '炎',
-    wind: '風',
-    heal: '癒し',
+  /** ジョブのコマンド（行動アビリティのまとまり）の名前。ジョブの id で引く */
+  commands: {
+    warrior: '武技',
+    archer: '弓術',
+    mage: '攻撃魔法',
+    healer: '回復魔法',
   } as Readonly<Record<string, string>>,
 
-  /** 行動順の欄に出す、魔法の1文字の略 */
-  spellShort: {
+  /** 行動アビリティ（魔法・技）の名前。id で引く */
+  abilities: {
     fire: '炎',
     wind: '風',
+    thunder: '雷',
+    heal: '癒し',
+    bigHeal: '大癒し',
+    aimedShot: '狙い撃ち',
+    powerStrike: '強打',
+  } as Readonly<Record<string, string>>,
+
+  /** 行動順の欄に出す、詠唱のある魔法・技の1文字の略 */
+  abilityShort: {
+    fire: '炎',
+    wind: '風',
+    thunder: '雷',
     heal: '癒',
+    bigHeal: '大',
+    aimedShot: '狙',
+  } as Readonly<Record<string, string>>,
+
+  /** 行動アビリティの短い説明（編成の画面で、習得する前に見る） */
+  abilityHelp: {
+    fire: '範囲（5マス）の攻撃魔法。詠唱は遅い',
+    wind: '単体の攻撃魔法。詠唱は速い',
+    thunder: '単体の強い攻撃魔法。詠唱はとても遅い',
+    heal: '範囲（5マス）の回復魔法。詠唱は速い',
+    bigHeal: '単体の大きな回復魔法',
+    aimedShot: '狙いを付けてから撃つ。攻撃力の1.5倍、射程 3〜6。弓が必要',
+    powerStrike: 'ダメージ1.5倍、命中率 -15%。剣か杖が必要',
   } as Readonly<Record<string, string>>,
 
   /** 属性の名前 */
   elements: {
     fire: '炎',
     wind: '風',
+    thunder: '雷',
     light: '光',
+    none: '無',
   } satisfies Record<SpellElement, string>,
+
+  /** 武器の種類 */
+  weapons: {
+    sword: '剣',
+    bow: '弓',
+    staff: '杖',
+  } satisfies Record<WeaponType, string>,
 
   teams: {
     player: '味方',
     enemy: '敵',
   } satisfies Record<Team, string>,
 
-  /** ユニットの名前。id で引く */
+  /** ユニットの名前。id で引く（hero-1〜5 は最初の部隊の5人） */
   unitNames: {
-    'p-warrior-1': '戦士A',
-    'p-warrior-2': '戦士B',
-    'p-archer-1': '弓使い',
-    'p-mage-1': '魔術師',
-    'p-healer-1': '癒し手',
+    'hero-1': 'トウマ',
+    'hero-2': 'バルト',
+    'hero-3': 'ミレイ',
+    'hero-4': 'セイル',
+    'hero-5': 'リネ',
     'e-warrior-1': '敵の戦士A',
     'e-warrior-2': '敵の戦士B',
     'e-archer-1': '敵の弓使い',
@@ -86,7 +122,6 @@ export const TEXT = {
 
   buttons: {
     attack: '攻撃',
-    magic: '魔法',
     targetUnit: 'ユニットを狙う',
     targetTile: 'マスを狙う',
     interrupt: '詠唱をやめる',
@@ -132,12 +167,13 @@ export const TEXT = {
 
   hints: {
     playerTurn: '青いマスをタップで移動',
-    afterMove: '「攻撃」か「待機」を選ぶ',
+    afterMove: '行動か「待機」を選ぶ',
     chooseTarget: '赤く光る敵をタップ',
     noTarget: '攻撃できる相手がいません',
     chooseFacing: '最も近い敵の方を向いています。よければ「確定」（変える時は矢印）',
     enemyTurn: '敵の手番',
-    chooseSpell: (mp: number, maxMp: number) => `使う魔法を選ぶ（残り MP ${mp} / ${maxMp}）`,
+    chooseAbility: (mp: number, maxMp: number) => (maxMp > 0 ? `使うものを選ぶ（残り MP ${mp} / ${maxMp}）` : '使うものを選ぶ'),
+    chooseStrikeTarget: (name: string) => `「${name}」: 赤く光る敵をタップ`,
     chooseSpellTarget: '紫のマスから、狙う場所をタップ',
     chooseTargetKind: 'ユニットを追いかけて狙うか、そのマスに撃つかを選ぶ',
     targetKindHelp: 'ユニット: 動いても追いかける ／ マス: 動かれると外れる',
@@ -167,8 +203,14 @@ export const TEXT = {
   fizzled: '不発',
   interrupted: '中断',
 
+  /** アビリティのボタンに添える、使えない理由 */
+  abilityBlocked: {
+    weapon: (weapon: string) => `${weapon}が必要`,
+  },
+
   preview: {
     title: '攻撃の予測',
+    strikeTitle: (name: string) => `「${name}」の予測`,
     hit: '命中率',
     damage: 'ダメージ',
     height: '高低差',
@@ -197,6 +239,96 @@ export const TEXT = {
     enemy: '敗北',
   } satisfies Record<Team, string>,
   resultDetail: (turns: number) => `${turns}手番で決着`,
+
+  /** 能力値の名前（編成の画面） */
+  statNames: {
+    maxHp: 'HP',
+    maxMp: 'MP',
+    attack: '攻撃力',
+    magic: '魔力',
+    speed: '素早さ',
+  } satisfies Record<GrowthStat, string>,
+
+  /** 敵の強さの段階（level は敵のレベル） */
+  tiers: {
+    easy: { name: 'やさしい', help: (level: number) => `敵は Lv ${level}。最初の部隊と同じ強さ` },
+    normal: { name: 'ふつう', help: (level: number) => `敵は Lv ${level}。技を1つずつ覚えている` },
+    hard: { name: 'むずかしい', help: (level: number) => `敵は Lv ${level}。すべての技と魔法を覚えている` },
+  } as Readonly<Record<string, { name: string; help: (level: number) => string }>>,
+
+  /** 拠点の画面 */
+  base: {
+    title: '拠点',
+    sortie: '出撃',
+    roster: '編成',
+    newGame: 'はじめから',
+    confirmNewGame: '部隊の育成の記録をすべて消して、はじめからにしますか？ 元には戻せません',
+    confirmNewGameYes: '消して、はじめから',
+    cancel: 'やめる',
+    chooseTier: (mapName: string) => `${mapName}で戦う。敵の強さを選ぶ`,
+    back: '戻る',
+    saved: '部隊の状態は、この端末に自動で保存されます',
+  },
+
+  /** 戦闘の結果の画面 */
+  report: {
+    title: '戦闘の結果',
+    keep: '負けても、得た経験値と JP は持ち帰れます',
+    exp: (n: number) => `経験値 +${n}`,
+    jp: (job: string, n: number) => `${job}の JP +${n}`,
+    levelUp: (before: number, after: number) => `レベルアップ！ Lv ${before} → ${after}`,
+    jobLevelUp: (job: string, before: number, after: number) => `${job}のレベルアップ！ ${before} → ${after}`,
+    toBase: '拠点へ戻る',
+    canLearn: '習得できるアビリティがあります',
+  },
+
+  /** 編成の画面 */
+  roster: {
+    title: '編成',
+    back: '戻る',
+    level: (lv: number) => `Lv ${lv}`,
+    expToNext: (n: number) => `次のレベルまで ${n}`,
+    maxLevel: 'レベルの上限',
+    jobLevel: (job: string, lv: number) => `${job} Lv ${lv}`,
+    jp: (n: number) => `JP ${n}`,
+    jpToNext: (n: number) => `次のジョブレベルまで ${n} JP`,
+    jobMaxLevel: 'ジョブレベルの上限',
+    growthCapped: '成長の上限に達しています',
+    growthTotal: (points: number, cap: number) => `成長の合計 ${points} / ${cap}`,
+    statsTitle: '能力値',
+    statHeaders: ['', '能力値', '成長値', '成長率'] as readonly string[],
+    moveJump: (move: number, jump: number) => `移動 ${move} ・ ジャンプ ${jump}`,
+    weapon: (w: string) => `武器: ${w}`,
+    abilitiesTitle: 'アビリティ',
+    mainCommand: '主コマンド',
+    subCommand: '副コマンド',
+    none: 'なし',
+    noneLearned: '（習得済みのものがありません）',
+    changeJob: 'ジョブを変える',
+    learn: 'アビリティを覚える',
+    changeSub: '副コマンドを変える',
+    jobListTitle: 'ジョブを選ぶ',
+    jobListHelp: 'ジョブを選ぶと、能力値と成長率の変化が見られます',
+    current: '今のジョブ',
+    locked: 'まだ就けません',
+    unlockNeeds: (job: string, lv: number) => `${job} Lv ${lv} が必要`,
+    compareHeaders: ['', '今', '変更後', '成長率'] as readonly string[],
+    becomeJob: (job: string) => `${job}になる`,
+    learnTitle: 'アビリティを覚える',
+    learnHelp: 'ジョブごとの JP を使って覚えます。JP はそのジョブで戦うと貯まります',
+    learnButton: (cost: number) => `覚える（${cost} JP）`,
+    learned: '習得済み',
+    refusal: {
+      unknownAbility: '覚えられません',
+      alreadyLearned: '習得済み',
+      notEnoughJp: 'JP が足りません',
+      jobLocked: 'ジョブが解放されていません',
+    } satisfies Record<LearnRefusal, string>,
+    subTitle: '副コマンドを選ぶ',
+    subHelp: 'ほかのジョブで覚えたアビリティを、1つのジョブぶん使えます',
+    subNone: '副コマンドなし',
+    noSubChoices: 'ほかのジョブで覚えたアビリティがまだありません',
+  },
 } as const;
 
 export function unitName(id: string, jobId: string): string {

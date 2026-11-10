@@ -68,6 +68,7 @@ export interface SpellPreviewView {
   /** 狙いの説明（ユニットを追いかけるか、マスに撃つか） */
   readonly targetText: string;
   readonly timing: number;
+  /** 消費 MP の説明（MP を使わない技なら空） */
   readonly mpText: string;
   readonly results: readonly { readonly name: string; readonly team: Team; readonly amount: number; readonly hp: number; readonly maxHp: number }[];
   /** 味方を巻き込む（回復なら敵も回復する）時の警告。なければ空 */
@@ -75,6 +76,8 @@ export interface SpellPreviewView {
 }
 
 export interface AttackPreviewView {
+  /** 予測の題（通常攻撃か、技の名前） */
+  readonly title: string;
   readonly targetName: string;
   readonly side: RelativeSide;
   readonly hitPercent: number;
@@ -206,8 +209,8 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
         }
         // 魔法の発動の予定。属性の色で塗り、詠唱者の陣営の色の枠を付ける
         const chip = el('span', `chip spell element-${e.element} team-${e.team}${e.pending ? ' pending' : ''}`);
-        chip.textContent = TEXT.spellShort[e.spellId] ?? '?';
-        chip.title = TEXT.spellTiming(unitName(e.casterId, e.casterJobId), TEXT.spells[e.spellId] ?? e.spellId);
+        chip.textContent = TEXT.abilityShort[e.spellId] ?? '?';
+        chip.title = TEXT.spellTiming(unitName(e.casterId, e.casterJobId), TEXT.abilities[e.spellId] ?? e.spellId);
         order.append(chip);
       });
     },
@@ -223,7 +226,7 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
       const name = el('strong', `team-text-${unit.team}`);
       name.textContent = `${infoState.name}`;
       const job = el('span', 'job');
-      job.textContent = ` ${TEXT.teams[unit.team]}・${TEXT.jobs[unit.jobId] ?? unit.jobId}`;
+      job.textContent = ` ${TEXT.teams[unit.team]}・${TEXT.jobs[unit.jobId] ?? unit.jobId} ${TEXT.roster.level(unit.level)}`;
       const hp = el('div', 'info-hp');
       hp.append(`${TEXT.hp} ${unit.hp} / ${unit.stats.maxHp}`, hpBar(unit.hp, unit.stats.maxHp, unit.team));
       // MP は HP と並べて表示する（MP を持たないジョブは出さない）
@@ -244,7 +247,7 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
       if (unit.charging) {
         const spell = unit.spells.find((sp) => sp.id === unit.charging!.spellId);
         const charging = el('div', `info-charging element-${spell?.element ?? 'fire'}`);
-        charging.textContent = TEXT.chargingInfo(TEXT.spells[unit.charging.spellId] ?? unit.charging.spellId);
+        charging.textContent = TEXT.chargingInfo(TEXT.abilities[unit.charging.spellId] ?? unit.charging.spellId);
         info.append(charging);
       }
     },
@@ -271,7 +274,7 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
       if (!p) return;
       preview.innerHTML = '';
       const title = el('div', 'preview-title');
-      title.textContent = `${TEXT.preview.title}: ${p.targetName}`;
+      title.textContent = `${p.title}: ${p.targetName}`;
       const body = el('div', 'preview-body');
       body.append(sideDiagram(p.side));
       const table = el('dl', 'preview-table');
@@ -305,7 +308,7 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
       const title = el('div', `preview-title element-text-${p.element}`);
       title.textContent = TEXT.spellPreview.title(p.spellName);
       const meta = el('div', 'spell-meta');
-      meta.textContent = `${p.targetText} ・ ${TEXT.spellPreview.timing(p.timing)} ・ ${p.mpText}`;
+      meta.textContent = [p.targetText, TEXT.spellPreview.timing(p.timing), p.mpText].filter((t) => t !== '').join(' ・ ');
       preview.append(title, meta);
       if (p.warning) {
         const warn = el('div', 'spell-warning');

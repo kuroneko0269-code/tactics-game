@@ -10,9 +10,9 @@ import type {
   SpellTarget,
   UnitState,
 } from '../core/battleTypes';
-import { attackableTargets, attackRangeTiles, previewAttack } from '../core/combat';
-import { directionToward, manhattan, type Coord, type Direction } from '../core/geometry';
-import { chargeArea, hasMpFor, previewSpellAt, spellOf, spellRangeTiles, targetCenter } from '../core/magic';
+import { attackableTargets, attackRangeTiles, previewAttack, strikeOf, weaponFits } from '../core/combat';
+import { directionToward, type Coord, type Direction } from '../core/geometry';
+import { chargeArea, hasMpFor, inSpellRange, previewSpellAt, spellOf, spellRangeTiles, targetCenter } from '../core/magic';
 import { reachableTiles, unitAt } from '../core/movement';
 import { predictTimeline } from '../core/turnOrder';
 import type { BattleHud, HudAction, TurnOrderEntry } from './hud';
@@ -54,8 +54,8 @@ export interface BattleControllerDeps {
   readonly labels: UnitLabels;
   /** 敵 AI の設定 */
   readonly ai: AiConfig;
-  /** 新しい戦闘を始める（「もう一度」用） */
-  readonly newBattle: () => ActionResult;
+  /** 決着した時に呼ぶ（結果の画面へ進むため） */
+  readonly onFinished: (state: BattleState) => void;
 }
 
 export interface BattleController {
@@ -67,6 +67,8 @@ export interface BattleController {
   onTap(candidates: readonly Coord[]): void;
   /** 渡した状態から戦闘を始め直す（開発中の自動テスト用） */
   load(result: ActionResult): void;
+  /** 戦闘を途中でやめる（敵の手番を進めるのをやめ、決着も知らせない） */
+  dispose(): void;
   readonly state: BattleState;
   /** プレイヤーの入力を待っているか（自動テスト用） */
   readonly mode: Mode['kind'];
@@ -80,9 +82,11 @@ type PendingStep = { kind: 'mode'; mode: Mode } | { kind: 'action'; action: Batt
 export type Mode =
   | { kind: 'busy' }
   | { kind: 'main' }
-  | { kind: 'targeting' }
-  | { kind: 'confirm'; targetId: string }
-  | { kind: 'spellMenu' }
+  /** 攻撃する相手を選ぶ。abilityId は技（強打など）。通常攻撃なら null */
+  | { kind: 'targeting'; abilityId: string | null }
+  | { kind: 'confirm'; targetId: string; abilityId: string | null }
+  /** コマンド（主コマンドなら 0、副コマンドなら 1）の中から、使う魔法・技を選ぶ */
+  | { kind: 'abilityMenu'; command: number }
   | { kind: 'spellTarget'; spellId: string }
   /** ユニットのいるマスをタップした時、ユニットを狙うかマスを狙うかを選ぶ */
   | { kind: 'spellTargetKind'; spellId: string; x: number; z: number; unitId: string }
@@ -91,6 +95,11 @@ export type Mode =
   | { kind: 'confirmInterrupt'; then: PendingStep }
   | { kind: 'facing'; facing: Direction }
   | { kind: 'ended' };
+
+/** そのアビリティが入っているコマンドの番号（主コマンドなら 0） */
+function commandIndexOf(unit: UnitState, abilityId: string): number {
+  return Math.max(0, unit.commands.findIndex((c) => c.abilityIds.includes(abilityId)));
+}
 
 /** 敵の手番の見せ方（秒） */
 const ENEMY_PAUSE = { start: 0.5, beforeMove: 0.35, beforeAttack: 0.45, afterAction: 0.2 };
@@ -105,6 +114,10 @@ export function createBattleController(start: ActionResult, deps: BattleControll
   let mode: Mode = { kind: 'busy' };
   /** 詠唱の中断を承諾した手番（その手番の中では、もう確認しない） */
   let interruptAcceptedTurn = -1;
+  /** 決着を知らせたか */
+  let finished = false;
+  /** 途中でやめたか */
+  let disposed = false;
 
   const turn = () => state.turn;
   const actor = (): UnitState => {
@@ -112,7 +125,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
     if (!u) throw new Error('手番のユニットがいません');
     return u;
   };
-  const spellName = (id: string) => TEXT.spells[id] ?? id;
+  const abilityName = (id: string) => TEXT.abilities[id] ?? id;
 
   const showTurnOrder = (pendingSpellId?: string) => {
     const entries: TurnOrderEntry[] = predictTimeline(state, TURN_ORDER_COUNT, { pendingSpellId }).map((e, i) => {
@@ -162,7 +175,19 @@ export function createBattleController(start: ActionResult, deps: BattleControll
   };
 
   /** 魔法の狙い先として選べるマスか（射程の内側） */
-  const inSpellRange = (spell: SpellDefinition, c: Coord) => manhattan(actor(), c) <= spell.range;
+  const canAim = (spell: SpellDefinition, c: Coord) => inSpellRange(spell, actor(), c);
+
+  /** コマンドのアビリティのうち、今使えるか（使えなければ、ボタンに添える理由） */
+  const abilityBlock = (unit: UnitState, abilityId: string): { disabled: boolean; detail?: string } => {
+    const spell = unit.spells.find((s) => s.id === abilityId);
+    const strike = unit.strikes.find((s) => s.id === abilityId);
+    const weapons = spell?.weapons ?? strike?.weapons;
+    if (!weaponFits(weapons, unit.weapon)) {
+      return { disabled: true, detail: TEXT.abilityBlocked.weapon(weapons!.map((w) => TEXT.weapons[w]).join('・')) };
+    }
+    if (spell) return { disabled: !hasMpFor(unit, spell), detail: spell.mpCost > 0 ? `${TEXT.mp} ${spell.mpCost}` : undefined };
+    return { disabled: false };
+  };
 
   /** 今のモードに合わせて、マスの色分け・ボタン・案内文を出し直す */
   const refresh = () => {
@@ -185,22 +210,24 @@ export function createBattleController(start: ActionResult, deps: BattleControll
       case 'main': {
         const moves = t.moved ? [] : reachableTiles(state, unit).map((c) => ({ x: c.x, z: c.z, kind: 'move' as const }));
         view.setMarks([...moves, self]);
-        const charging = t.chargingAtStart && unit.charging ? spellName(unit.charging.spellId) : undefined;
+        const charging = t.chargingAtStart && unit.charging ? abilityName(unit.charging.spellId) : undefined;
         hud.setHint(charging ? TEXT.hints.charging(charging) : t.moved ? TEXT.hints.afterMove : TEXT.hints.playerTurn);
+        // 行動のボタン: 攻撃と、習得済みのアビリティがあるコマンド（主コマンド・副コマンド）
+        const commands = unit.commands.map((c, i) => ({ c, i })).filter(({ c }) => c.abilityIds.length > 0);
         const actions: HudAction[] = [
           {
             label: TEXT.buttons.attack,
-            onClick: () => guard({ kind: 'mode', mode: { kind: 'targeting' } }),
+            onClick: () => guard({ kind: 'mode', mode: { kind: 'targeting', abilityId: null } }),
             disabled: t.acted,
-            primary: !t.acted && unit.spells.length === 0 && !charging,
+            primary: !t.acted && commands.length === 0 && !charging,
           },
         ];
-        if (unit.spells.length > 0) {
+        for (const { c, i } of commands) {
           actions.push({
-            label: TEXT.buttons.magic,
-            onClick: () => guard({ kind: 'mode', mode: { kind: 'spellMenu' } }),
+            label: TEXT.commands[c.jobId] ?? c.jobId,
+            onClick: () => guard({ kind: 'mode', mode: { kind: 'abilityMenu', command: i } }),
             disabled: t.acted,
-            primary: !t.acted && !charging,
+            primary: !t.acted && !charging && i === 0,
           });
         }
         actions.push({ label: TEXT.buttons.wait, onClick: () => setMode(facingMode()), primary: Boolean(charging) });
@@ -211,7 +238,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
       }
       case 'confirmInterrupt': {
         view.setMarks([self]);
-        hud.setHint(TEXT.hints.confirmInterrupt(spellName(unit.charging?.spellId ?? '')));
+        hud.setHint(TEXT.hints.confirmInterrupt(abilityName(unit.charging?.spellId ?? '')));
         const then = mode.then;
         hud.setActions([
           { label: TEXT.buttons.keepCasting, onClick: () => setMode({ kind: 'main' }) },
@@ -236,14 +263,21 @@ export function createBattleController(start: ActionResult, deps: BattleControll
           kind: mode.kind === 'confirm' && mode.targetId === u.id ? ('selected' as const) : ('target' as const),
         }));
         view.setMarks([...range, ...targetMarks]);
+        const abilityId = mode.abilityId;
+        const strike = abilityId === null ? undefined : strikeOf(unit, abilityId);
+        const backFromTargeting = (): Mode =>
+          abilityId === null ? { kind: 'main' } : { kind: 'abilityMenu', command: commandIndexOf(unit, abilityId) };
         if (mode.kind === 'targeting') {
-          hud.setHint(targets.length > 0 ? TEXT.hints.chooseTarget : TEXT.hints.noTarget);
-          hud.setActions([{ label: TEXT.buttons.back, onClick: () => setMode({ kind: 'main' }) }]);
+          hud.setHint(
+            targets.length === 0 ? TEXT.hints.noTarget : strike ? TEXT.hints.chooseStrikeTarget(abilityName(strike.id)) : TEXT.hints.chooseTarget,
+          );
+          hud.setActions([{ label: TEXT.buttons.back, onClick: () => setMode(backFromTargeting()) }]);
         } else {
           const target = getUnit(state, mode.targetId);
-          const p = previewAttack(state, unit, target);
+          const p = previewAttack(state, unit, target, unit, strike);
           hud.setHint('');
           hud.showPreview({
+            title: strike ? TEXT.preview.strikeTitle(abilityName(strike.id)) : TEXT.preview.title,
             targetName: unitName(target.id, target.jobId),
             side: p.side,
             hitPercent: p.hitPercent,
@@ -253,26 +287,30 @@ export function createBattleController(start: ActionResult, deps: BattleControll
             targetHp: target.hp,
             targetMaxHp: target.stats.maxHp,
           });
+          const action: BattleAction =
+            abilityId === null ? { type: 'attack', targetId: target.id } : { type: 'attack', targetId: target.id, abilityId };
           hud.setActions([
-            { label: TEXT.buttons.back, onClick: () => setMode({ kind: 'targeting' }) },
-            { label: TEXT.buttons.confirm, primary: true, onClick: () => void perform({ type: 'attack', targetId: target.id }) },
+            { label: TEXT.buttons.back, onClick: () => setMode({ kind: 'targeting', abilityId }) },
+            { label: TEXT.buttons.confirm, primary: true, onClick: () => void perform(action) },
           ]);
         }
         break;
       }
-      case 'spellMenu': {
+      case 'abilityMenu': {
         view.setMarks([self]);
-        hud.setHint(TEXT.hints.chooseSpell(unit.mp, unit.stats.maxMp));
+        hud.setHint(TEXT.hints.chooseAbility(unit.mp, unit.stats.maxMp));
+        const command = unit.commands[mode.command]!;
         hud.setActions([
           { label: TEXT.buttons.back, onClick: () => setMode({ kind: 'main' }) },
-          ...unit.spells.map(
-            (sp): HudAction => ({
-              label: spellName(sp.id),
-              detail: `${TEXT.mp} ${sp.mpCost}`,
-              disabled: !hasMpFor(unit, sp),
-              onClick: () => setMode({ kind: 'spellTarget', spellId: sp.id }),
-            }),
-          ),
+          ...command.abilityIds.map((id): HudAction => {
+            const isSpell = unit.spells.some((s) => s.id === id);
+            return {
+              label: abilityName(id),
+              ...abilityBlock(unit, id),
+              onClick: () =>
+                setMode(isSpell ? { kind: 'spellTarget', spellId: id } : { kind: 'targeting', abilityId: id }),
+            };
+          }),
         ]);
         break;
       }
@@ -284,7 +322,9 @@ export function createBattleController(start: ActionResult, deps: BattleControll
         if (mode.kind === 'spellTarget') {
           view.setMarks([...range, self]);
           hud.setHint(TEXT.hints.chooseSpellTarget);
-          hud.setActions([{ label: TEXT.buttons.back, onClick: () => setMode({ kind: 'spellMenu' }) }]);
+          hud.setActions([
+            { label: TEXT.buttons.back, onClick: () => setMode({ kind: 'abilityMenu', command: commandIndexOf(unit, spell.id) }) },
+          ]);
           showTurnOrder(spell.id);
           break;
         }
@@ -326,7 +366,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
               : '';
         const target = mode.target;
         hud.showSpellPreview({
-          spellName: spellName(spell.id),
+          spellName: abilityName(spell.id),
           element: spell.element,
           effect: spell.effect,
           targetText:
@@ -334,7 +374,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
               ? TEXT.spellPreview.targetUnit(unitName(target.unitId, getUnit(state, target.unitId).jobId))
               : TEXT.spellPreview.targetTile,
           timing,
-          mpText: TEXT.spellPreview.mp(spell.mpCost, unit.mp),
+          mpText: spell.mpCost > 0 ? TEXT.spellPreview.mp(spell.mpCost, unit.mp) : '',
           results: affected.map((r) => ({
             name: unitName(r.unitId, r.unit.jobId),
             team: r.unit.team,
@@ -468,7 +508,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
   };
 
   const perform = async (action: BattleAction) => {
-    if (mode.kind === 'busy' || mode.kind === 'ended') return;
+    if (disposed || mode.kind === 'busy' || mode.kind === 'ended') return;
     const before = turn();
     mode = { kind: 'busy' };
     refresh();
@@ -479,6 +519,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
   };
 
   const afterPlayerAction = (previousUnitId: string | undefined) => {
+    if (disposed) return;
     const t = turn();
     if (state.winner || !t) return void proceed();
     if (t.unitId !== previousUnitId) return void proceed();
@@ -489,13 +530,18 @@ export function createBattleController(start: ActionResult, deps: BattleControll
   /** 次の手番へ。敵なら自動で進め、味方なら入力を待つ */
   const proceed = async () => {
     for (;;) {
+      if (disposed) return;
       if (state.winner || !state.turn) {
         mode = { kind: 'ended' };
         refresh();
         view.setMarks([]);
         view.setActive(undefined);
         hud.setHint('');
-        hud.showResult(state.winner ?? undefined, state.turnNumber, restart);
+        hud.showResult(state.winner ?? undefined, state.turnNumber);
+        if (!finished && !disposed) {
+          finished = true;
+          deps.onFinished(state);
+        }
         return;
       }
       const unit = actor();
@@ -517,7 +563,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
     view.setMarks([{ x: unit.x, z: unit.z, kind: 'selected' }]);
     await view.wait(ENEMY_PAUSE.start);
     const turnNumber = state.turnNumber;
-    while (state.turn && state.turnNumber === turnNumber) {
+    while (state.turn && state.turnNumber === turnNumber && !disposed) {
       const action = decideNextAction(state, deps.ai);
       if (action.type === 'move') {
         const moves = reachableTiles(state, actor()).map((c) => ({ x: c.x, z: c.z, kind: 'move' as const }));
@@ -560,10 +606,9 @@ export function createBattleController(start: ActionResult, deps: BattleControll
     showReserved();
     void play(result.events).then(proceed);
   };
-  const restart = () => startFrom(deps.newBattle());
 
   const onTap = (candidates: readonly Coord[]) => {
-    if (mode.kind === 'busy' || mode.kind === 'ended') return;
+    if (disposed || mode.kind === 'busy' || mode.kind === 'ended') return;
     const first = candidates[0];
     if (mode.kind === 'facing') {
       // マスをタップしても、その方向を向ける（向きのボタンの代わり）
@@ -583,12 +628,12 @@ export function createBattleController(start: ActionResult, deps: BattleControll
       const targets = attackableTargets(state, actor(), actor());
       for (const c of candidates) {
         const target = targets.find((u) => u.x === c.x && u.z === c.z);
-        if (target) return setMode({ kind: 'confirm', targetId: target.id });
+        if (target) return setMode({ kind: 'confirm', targetId: target.id, abilityId: mode.abilityId });
       }
     }
     if (mode.kind === 'spellTarget' || mode.kind === 'spellTargetKind' || mode.kind === 'spellConfirm') {
       const spell = spellOf(actor(), mode.spellId);
-      const c = candidates.find((c) => inSpellRange(spell, c));
+      const c = candidates.find((c) => canAim(spell, c));
       if (c) {
         // ユニットのいるマスなら、ユニットを狙うかマスを狙うかを選ばせる
         const there = unitAt(state, c.x, c.z);
@@ -605,6 +650,10 @@ export function createBattleController(start: ActionResult, deps: BattleControll
   return {
     onTap,
     load: startFrom,
+    dispose() {
+      disposed = true;
+      mode = { kind: 'ended' };
+    },
     get state() {
       return state;
     },

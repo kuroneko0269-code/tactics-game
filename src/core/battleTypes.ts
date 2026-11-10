@@ -24,23 +24,47 @@ export interface UnitStats {
   readonly magic: number;
 }
 
-/** 魔法の属性。今は表示と記録だけで、効果の違いはない（後のフェーズで連携魔法と弱点に使う） */
-export type SpellElement = 'fire' | 'wind' | 'light';
+/**
+ * 魔法の属性。今は表示と記録だけで、効果の違いはない（後のフェーズで連携魔法と弱点に使う）。
+ * none は属性のない技（狙い撃ちなど）。
+ */
+export type SpellElement = 'fire' | 'wind' | 'thunder' | 'light' | 'none';
+
+/** 武器の種類。装備が入るまでは、ジョブごとに固定 */
+export type WeaponType = 'sword' | 'bow' | 'staff';
+
+/** 能力値のうち、レベルが上がると伸びるもの（移動力とジャンプ力は伸びない） */
+export type GrowthStat = 'maxHp' | 'maxMp' | 'attack' | 'magic' | 'speed';
+
+/**
+ * 成長値・成長率。能力ごとに、能力値の 1/100 を単位にした整数で持つ（例: 250 は能力値 2.5 ぶん）。
+ * 能力値に足すのは 100 で割って切り捨てた分で、端数は内部で持ち越す。
+ */
+export type GrowthValues = Readonly<Record<GrowthStat, number>>;
 
 /** 魔法の効果の種類 */
 export type SpellEffect = 'damage' | 'heal';
 
-/** 魔法の定義（src/data に置く） */
+/**
+ * 詠唱のある行動アビリティ（魔法と、狙い撃ちのような溜めのある技）の定義（src/data に置く）。
+ * core の中では、詠唱してから発動するものをまとめて「spell」と呼ぶ。
+ */
 export interface SpellDefinition {
   readonly id: string;
   readonly element: SpellElement;
   readonly effect: SpellEffect;
-  /** 威力（%）。ダメージ・回復量 = 魔力 × 威力 ÷ 100（切り捨て） */
+  /** 効果量の元になる能力値。省くと魔力（magic）。狙い撃ちは攻撃力（attack） */
+  readonly stat?: 'magic' | 'attack';
+  /** 威力（%）。ダメージ・回復量 = 元の能力値 × 威力 ÷ 100（切り捨て） */
   readonly power: number;
   /** 消費 MP */
   readonly mpCost: number;
   /** 射程（歩数）。指定する時だけ確かめる */
   readonly range: number;
+  /** 射程の下限（歩数）。省くと 0（自分のマスも狙える） */
+  readonly minRange?: number;
+  /** 使うのに必要な武器の種類（どれか1つ）。省くと武器を問わない */
+  readonly weapons?: readonly WeaponType[];
   /** 範囲の大きさ（中心からの歩数）。0 なら単体、1 なら中心と上下左右の5マス */
   readonly areaRadius: number;
   /** 高さの許容。中心のマスとの高さの差がこれを超えるマスには届かない */
@@ -68,12 +92,54 @@ export type AttackProfile =
       readonly heightPerExtraRange: number;
     };
 
+/**
+ * すぐに出る技（強打など）の定義（src/data に置く）。通常攻撃と同じ届き方で、命中率とダメージが変わる。
+ */
+export interface StrikeDefinition {
+  readonly id: string;
+  /** 通常攻撃のダメージに掛ける倍率（%）。向きと高低差の補正の後に掛けて切り捨てる */
+  readonly damagePercent: number;
+  /** 命中率に足す値（%。マイナスもある）。結果は 0〜100 に収める */
+  readonly hitBonus: number;
+  /** 使うのに必要な武器の種類（どれか1つ）。省くと武器を問わない */
+  readonly weapons?: readonly WeaponType[];
+}
+
+/** ジョブで習得できる行動アビリティ */
+export interface JobAbility {
+  /** 魔法・技の id（spells か strikes の定義から引く） */
+  readonly id: string;
+  /** 習得に使う JP（そのジョブの JP を消費する） */
+  readonly jpCost: number;
+  /** true なら、そのジョブに就いた時点で習得済みになる（JP を使わない） */
+  readonly starter?: boolean;
+}
+
+/** ジョブの解放条件の1つ（ほかのジョブのレベル） */
+export interface JobRequirement {
+  readonly jobId: string;
+  readonly level: number;
+}
+
 export interface JobDefinition {
   readonly id: string;
+  /** 基本の能力値。ユニットの能力値は、これに成長値を足したもの */
   readonly stats: UnitStats;
   readonly attack: AttackProfile;
-  /** 使える魔法の id（spells の定義から引く） */
-  readonly spellIds?: readonly string[];
+  /** 武器の種類（装備が入るまでは、ジョブごとに固定） */
+  readonly weapon?: WeaponType;
+  /** 行動アビリティの一覧（このジョブのコマンド） */
+  readonly abilities?: readonly JobAbility[];
+  /** 成長率。このジョブでレベルが上がった時（下がった時）に、成長値がこれだけ増える（減る） */
+  readonly growth?: GrowthValues;
+  /** 解放条件。すべて満たすと、このジョブに就ける。空なら最初から就ける */
+  readonly unlock?: readonly JobRequirement[];
+}
+
+/** 使える行動アビリティの1まとまり（コマンド）。jobId のジョブのアビリティのうち、使えるもの */
+export interface UnitCommand {
+  readonly jobId: string;
+  readonly abilityIds: readonly string[];
 }
 
 /** 戦闘ルールの数値。百分率はすべて整数 */
@@ -115,7 +181,7 @@ export interface ChargeState {
   readonly progress: number;
 }
 
-/** 戦闘開始時のユニット配置（src/data に置く） */
+/** 戦闘開始時のユニット配置 */
 export interface UnitPlacement {
   readonly id: string;
   readonly team: Team;
@@ -123,6 +189,15 @@ export interface UnitPlacement {
   readonly x: number;
   readonly z: number;
   readonly facing: Direction;
+  /** キャラクターのレベル。省くと 1 */
+  readonly level?: number;
+  /** 成長値。省くと 0（ジョブの基本値のまま） */
+  readonly growth?: GrowthValues;
+  /**
+   * 使える行動アビリティ（主コマンドが先頭、副コマンドが次）。
+   * 省くと、ジョブのアビリティすべてを主コマンドとして使える（テスト用）。
+   */
+  readonly commands?: readonly UnitCommand[];
 }
 
 /** 1戦ぶんの定義（src/data に置く） */
@@ -145,8 +220,21 @@ export interface UnitState {
   readonly stats: UnitStats;
   readonly attack: AttackProfile;
   readonly mp: number;
-  /** 使える魔法（定義データをそのまま持つ。状態を JSON にしたまま計算できるように） */
+  /** キャラクターのレベル（表示用。戦闘の計算には使わない） */
+  readonly level: number;
+  /** 武器の種類。合わないアビリティは使えない */
+  readonly weapon: WeaponType | null;
+  /** 行動アビリティのコマンド（主コマンドが先頭）。画面のメニューの並び */
+  readonly commands: readonly UnitCommand[];
+  /**
+   * 詠唱のある行動アビリティ（魔法・狙い撃ち）。定義データをそのまま持つ（状態を JSON にしたまま計算できるように）。
+   * commands に含まれるもの。武器が合わないものも含む（使えるかは canUseAbility で確かめる）
+   */
   readonly spells: readonly SpellDefinition[];
+  /** すぐに出る技（強打など）。spells と同じく定義データをそのまま持つ */
+  readonly strikes: readonly StrikeDefinition[];
+  /** この戦闘で実行した行動（攻撃・魔法・技）の回数。戦闘の後の経験値と JP の計算に使う */
+  readonly actionCount: number;
   /** 詠唱中の魔法。詠唱していなければ null */
   readonly charging: ChargeState | null;
   /** 直前の自分の手番で移動したか（AI が「動いていない相手」を見分けるため） */
@@ -188,7 +276,8 @@ export type BattleAction =
   | { readonly type: 'move'; readonly x: number; readonly z: number }
   /** 行動する前なら、移動を取り消して手番開始時の位置と向きに戻せる */
   | { readonly type: 'undoMove' }
-  | { readonly type: 'attack'; readonly targetId: string }
+  /** 通常攻撃。abilityId を付けると、その技（強打など）で攻撃する */
+  | { readonly type: 'attack'; readonly targetId: string; readonly abilityId?: string }
   /** 魔法を指定する（すぐには発動せず、詠唱を始める） */
   | { readonly type: 'cast'; readonly spellId: string; readonly target: SpellTarget }
   /** 向きを決めて手番を終える */
@@ -209,6 +298,8 @@ export type BattleEvent =
       readonly type: 'attacked';
       readonly attackerId: string;
       readonly targetId: string;
+      /** 技（強打など）の id。通常攻撃なら null */
+      readonly abilityId: string | null;
       /** 攻撃のために攻撃側が向き直った向き */
       readonly attackerFacing: Direction;
       readonly side: RelativeSide;
