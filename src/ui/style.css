@@ -555,13 +555,27 @@ body {
     left: auto;
     right: max(12px, env(safe-area-inset-right));
     bottom: auto;
-    top: 104px;
+    top: 118px;
     transform: none;
     width: 300px;
   }
 
   .unit-info .info-stats {
     display: none;
+  }
+
+  /* HP と MP を1行に収め、情報欄の高さを抑える（魔法の予測と重ならないように） */
+  .info-hp .hp-bar {
+    width: 48px;
+  }
+
+  .info-mp .mp-bar {
+    width: 36px;
+  }
+
+  .spell-meta,
+  .spell-results {
+    font-size: 11px;
   }
 
   /* 縦が狭いので、カメラの操作ボタンは 3列×2段にして高さを抑える */
