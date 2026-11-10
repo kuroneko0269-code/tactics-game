@@ -1,4 +1,4 @@
-import type { Team } from '../core/battleTypes';
+import type { StatusId, Team } from '../core/battleTypes';
 import { hpBar, mpBar } from './hud';
 import { TEXT } from './text';
 
@@ -14,8 +14,10 @@ export interface UnitLabels {
   popDamage(id: string, damage: number): void;
   popHeal(id: string, amount: number): void;
   popMiss(id: string): void;
-  /** 「不発」「中断」などの短い文言 */
-  popText(id: string, text: string): void;
+  /** 「不発」「中断」などの短い文言。kind が reaction ならリアクションの名前として目立たせる */
+  popText(id: string, text: string, kind?: 'note' | 'reaction'): void;
+  /** 付いている状態変化の小さな目印（頭上の HP の上に、1文字ずつ） */
+  setStatuses(id: string, statuses: readonly StatusId[]): void;
 }
 
 export function createUnitLabels(
@@ -23,7 +25,7 @@ export function createUnitLabels(
   units: readonly { id: string; team: Team; hp: number; maxHp: number; mp: number; maxMp: number }[],
 ): UnitLabels {
   root.innerHTML = '';
-  const labels = new Map<string, { box: HTMLElement; hp: HTMLElement; mp: HTMLElement; team: Team }>();
+  const labels = new Map<string, { box: HTMLElement; hp: HTMLElement; mp: HTMLElement; statuses: HTMLElement; team: Team }>();
   for (const u of units) {
     const box = document.createElement('div');
     box.className = `unit-label team-${u.team}`;
@@ -31,9 +33,12 @@ export function createUnitLabels(
     hp.className = 'unit-label-hp';
     const mp = document.createElement('div');
     mp.className = 'unit-label-mp';
-    box.append(hp, mp);
+    const statuses = document.createElement('div');
+    statuses.className = 'unit-label-status';
+    statuses.hidden = true;
+    box.append(hp, mp, statuses);
     root.append(box);
-    labels.set(u.id, { box, hp, mp, team: u.team });
+    labels.set(u.id, { box, hp, mp, statuses, team: u.team });
   }
 
   const setHp = (id: string, hp: number, maxHp: number) => {
@@ -83,6 +88,19 @@ export function createUnitLabels(
     popDamage: (id, damage) => pop(id, String(damage), 'damage'),
     popHeal: (id, amount) => pop(id, `+${amount}`, 'heal'),
     popMiss: (id) => pop(id, TEXT.miss, 'miss'),
-    popText: (id, text) => pop(id, text, 'note'),
+    popText: (id, text, kind = 'note') => pop(id, text, kind),
+    setStatuses(id, statuses) {
+      const l = labels.get(id);
+      if (!l) return;
+      l.statuses.innerHTML = '';
+      l.statuses.hidden = statuses.length === 0;
+      for (const st of statuses) {
+        const badge = document.createElement('span');
+        badge.className = `status-badge status-${st}`;
+        badge.textContent = TEXT.statusShort[st];
+        badge.title = TEXT.statuses[st];
+        l.statuses.append(badge);
+      }
+    },
   };
 }

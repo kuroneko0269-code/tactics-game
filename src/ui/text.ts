@@ -3,7 +3,7 @@
  * 文言はここ以外に書かない（将来の翻訳と表記の統一のため）。
  * core は文言を作らず、出来事や状態（例: 地形 'grass'、向き 'back'）だけを返す。それを文言に変えるのがここの役割。
  */
-import type { GrowthStat, SpellElement, Team, WeaponType } from '../core/battleTypes';
+import type { GrowthStat, PassiveSlot, SpellElement, StatusId, Team, WeaponType } from '../core/battleTypes';
 import type { LearnRefusal } from '../core/progression';
 import type { RelativeSide } from '../core/geometry';
 import type { Terrain } from '../core/map';
@@ -46,7 +46,7 @@ export const TEXT = {
     healer: '回復魔法',
   } as Readonly<Record<string, string>>,
 
-  /** 行動アビリティ（魔法・技）の名前。id で引く */
+  /** アビリティ（行動アビリティと、受動的なアビリティ）の名前。id で引く */
   abilities: {
     fire: '炎',
     wind: '風',
@@ -55,6 +55,20 @@ export const TEXT = {
     bigHeal: '大癒し',
     aimedShot: '狙い撃ち',
     powerStrike: '強打',
+    knockback: '突き飛ばし',
+    slowArrow: '足止めの矢',
+    seal: '封じ',
+    protectPrayer: '守りの祈り',
+    counter: '反撃',
+    evade: '身かわし',
+    magicShell: '魔力の殻',
+    meditate: '瞑想',
+    heavyArmor: '重装',
+    focus: '集中',
+    quickCast: '早口',
+    thrift: '節約',
+    quickStep: '早足',
+    lightFoot: '身軽',
   } as Readonly<Record<string, string>>,
 
   /** 行動順の欄に出す、詠唱のある魔法・技の1文字の略 */
@@ -65,6 +79,8 @@ export const TEXT = {
     heal: '癒',
     bigHeal: '大',
     aimedShot: '狙',
+    seal: '封',
+    protectPrayer: '守',
   } as Readonly<Record<string, string>>,
 
   /** 行動アビリティの短い説明（編成の画面で、習得する前に見る） */
@@ -76,7 +92,49 @@ export const TEXT = {
     bigHeal: '単体の大きな回復魔法',
     aimedShot: '狙いを付けてから撃つ。攻撃力の1.5倍、射程 3〜6。弓が必要',
     powerStrike: 'ダメージ1.5倍、命中率 -15%。剣か杖が必要',
+    knockback: '隣の相手に小さなダメージを与え、1マス押し出す。低い所へ落とすと落下ダメージ、押し出せない時は追加のダメージ。詠唱を中断させる。剣か杖が必要',
+    slowArrow: '小さなダメージを与え、鈍足（移動力 -2、2手番）を付ける。弓が必要',
+    seal: '単体に沈黙（魔法を使えない、2手番）を付ける。詠唱中の魔法は中断される。詠唱は速い',
+    protectPrayer: '範囲（5マス）に守り（受けるダメージ -25%、3手番）を付ける。敵も範囲にいれば付く。詠唱は速い',
+    counter: '隣のマスから近接攻撃を受けて生き残った時、通常攻撃で反撃する（反撃に反撃は起きない）',
+    evade: '正面と側面からの、武器による攻撃の命中率 -20',
+    magicShell: '魔法で受けるダメージ -20%',
+    meditate: 'ダメージを受けて生き残った時、MP を 6 回復する',
+    heavyArmor: '最大 HP +15%',
+    focus: '武器による攻撃の命中率 +10',
+    quickCast: '詠唱の速さ +25%',
+    thrift: '消費 MP -25%',
+    quickStep: '移動力 +1',
+    lightFoot: 'ジャンプ力 +1',
   } as Readonly<Record<string, string>>,
+
+  /** 状態変化の名前 */
+  statuses: {
+    protect: '守り',
+    slow: '鈍足',
+    silence: '沈黙',
+  } satisfies Record<StatusId, string>,
+
+  /** 頭上に出す、状態変化の1文字の目印 */
+  statusShort: {
+    protect: '守',
+    slow: '鈍',
+    silence: '沈',
+  } satisfies Record<StatusId, string>,
+
+  /** 状態変化の短い説明（情報の欄） */
+  statusHelp: {
+    protect: '受けるダメージ -25%',
+    slow: '移動力 -2',
+    silence: '魔法を使えない',
+  } satisfies Record<StatusId, string>,
+
+  /** 受動的なアビリティの枠の名前 */
+  passiveSlots: {
+    reaction: 'リアクション',
+    support: 'サポート',
+    movement: 'ムーブ',
+  } satisfies Record<PassiveSlot, string>,
 
   /** 属性の名前 */
   elements: {
@@ -194,18 +252,26 @@ export const TEXT = {
     allyWarning: (n: number) => `⚠ 味方 ${n} 体を巻き込みます`,
     enemyHealWarning: (n: number) => `⚠ 敵 ${n} 体も回復します`,
     mp: (cost: number, mp: number) => `MP ${cost} 消費（残り ${mp - cost}）`,
+    status: (status: string) => `${status}を付ける`,
+    interrupt: '（詠唱を中断）',
+    reduced: (names: string) => `（${names}で軽減）`,
   },
 
   /** 行動順の欄の、魔法の発動の説明 */
   spellTiming: (caster: string, spell: string) => `${caster}の「${spell}」が発動`,
   /** 詠唱中のユニットの説明 */
   chargingInfo: (spell: string) => `詠唱中: ${spell}`,
+  /** 情報の欄の、状態変化（残りの手番数つき） */
+  statusInfo: (name: string, help: string, turns: number) => `${name}（${help}）残り ${turns} 手番`,
+  /** 情報の欄の、付けている受動的なアビリティ */
+  passiveInfo: (slot: string, name: string) => `${slot}: ${name}`,
   fizzled: '不発',
   interrupted: '中断',
 
   /** アビリティのボタンに添える、使えない理由 */
   abilityBlocked: {
     weapon: (weapon: string) => `${weapon}が必要`,
+    silence: '沈黙中',
   },
 
   preview: {
@@ -219,6 +285,21 @@ export const TEXT = {
     charging: (percent: number) => `詠唱中のため ×${percent / 100}`,
     /** 高低差の補正（%）の表示。0 なら「なし」 */
     heightPercent: (percent: number) => (percent === 0 ? 'なし' : `${percent > 0 ? '+' : ''}${percent}%`),
+    /** 補正の内訳 */
+    evade: (name: string, n: number) => `相手の「${name}」で命中 -${n}`,
+    focus: (name: string, n: number) => `「${name}」で命中 +${n}`,
+    protect: (percent: number) => `相手は守り: ダメージ ×${percent / 100}`,
+    knockback: '押し出し',
+    knockbackTo: (fall: number) => (fall > 0 ? `光る先へ押し出す（落下 ${fall}）` : '光る先へ押し出す'),
+    knockbackBlocked: (reason: string, damage: number) => `押し出せない（${reason}）。追加 ${damage}`,
+    knockbackReasons: { edge: 'マップの端', unit: 'ユニットがいる', cliff: '高い段差' } as Readonly<Record<string, string>>,
+    /** 当たって倒れない時の合計 */
+    total: (damage: number, hp: number) => `合計 ${damage}（HP → ${hp}）`,
+    inflicts: (status: string) => `当たると${status}を付ける`,
+    interrupts: '当たると詠唱を中断させる',
+    counter: '反撃あり',
+    counterDetail: (damage: number, hit: number, hp: number) => `受ける見込み ${damage}（命中 ${hit}%、HP → ${Math.max(0, hp - damage)}）`,
+    counterNote: '当たって相手が倒れなければ',
   },
 
   hp: 'HP',
@@ -323,7 +404,23 @@ export const TEXT = {
       alreadyLearned: '習得済み',
       notEnoughJp: 'JP が足りません',
       jobLocked: 'ジョブが解放されていません',
+      jobLevelTooLow: 'ジョブのレベルが足りません',
     } satisfies Record<LearnRefusal, string>,
+    /** 習得の一覧の分類 */
+    learnGroups: {
+      action: '行動',
+      reaction: 'リアクション',
+      support: 'サポート',
+      movement: 'ムーブ',
+    } as Readonly<Record<string, string>>,
+    needJobLevel: (job: string, lv: number) => `${job} Lv ${lv} 以上`,
+    needJobLevelShort: (lv: number) => `ジョブ Lv ${lv} が必要`,
+    jpCost: (cost: number) => `${cost} JP`,
+    passiveTitle: (slot: string) => `${slot}を選ぶ`,
+    passiveHelp: 'どのジョブで覚えたものでも付けられます',
+    passiveNone: '付けない',
+    noPassiveChoices: (slot: string) => `覚えた${slot}がまだありません。「アビリティを覚える」で覚えられます`,
+    changePassive: (slot: string) => `${slot}を変える`,
     subTitle: '副コマンドを選ぶ',
     subHelp: 'ほかのジョブで覚えたアビリティを、1つのジョブぶん使えます',
     subNone: '副コマンドなし',

@@ -150,7 +150,9 @@ function main(): void {
     const canLearn = (id: string) => {
       const u = findUnit(roster, id);
       const job = catalog.jobs.find((j) => j.id === u.jobId)!;
-      return (job.abilities ?? []).some((a) => learnRefusal(u, job.id, a.id, catalog, progressionRules) === null);
+      return [...(job.abilities ?? []), ...(job.passives ?? [])].some(
+        (a) => learnRefusal(u, job.id, a.id, catalog, progressionRules) === null,
+      );
     };
     // 勝敗の表示を少し見せてから、結果の画面へ
     window.setTimeout(() => {
