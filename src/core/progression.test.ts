@@ -4,6 +4,9 @@ import {
   actionExp,
   addGrowth,
   applyBattleResult,
+  equippedPassives,
+  passiveChoices,
+  setPassive,
   expLevelPercent,
   changeJob,
   expToNext,
@@ -34,11 +37,16 @@ import { makeState, testArcher, testHealer, testMage, testPassives, testSpells, 
 const sturdy: JobDefinition = {
   ...testWarrior,
   abilities: [{ id: 'powerStrike', jpCost: 100 }],
+  passives: [
+    { id: 'counter', jpCost: 150, jobLevel: 3 },
+    { id: 'quickStep', jpCost: 80 },
+  ],
   growth: { maxHp: 300, maxMp: 0, attack: 60, magic: 10, speed: 4 },
 };
 /** 魔力と MP がよく伸び、HP は伸びにくいジョブ */
 const scholar: JobDefinition = {
   ...testMage,
+  passives: [{ id: 'magicShell', jpCost: 50 }],
   growth: { maxHp: 150, maxMp: 120, attack: 20, magic: 70, speed: 4 },
 };
 /** ほかのジョブのレベルで解放されるジョブ */
@@ -296,6 +304,50 @@ describe('ジョブチェンジと副コマンド', () => {
     // 副コマンドと同じジョブに変えたら、副コマンドは外れる
     expect(changeJob(u, 'mage', catalog, rules).slots.secondary).toBeNull();
     expect(setSecondary(u, null, catalog).slots.secondary).toBeNull();
+  });
+});
+
+describe('受動的なアビリティ（リアクション・サポート・ムーブ）', () => {
+  it('JP で習得する。そのジョブのレベルが足りないものは習得できない', () => {
+    const u = gainJp(recruit(), 'warrior', 200);
+    // 累計 200 JP はジョブのレベル 2。反撃はレベル 3 が必要
+    expect(jobLevel(u, 'warrior', rules)).toBe(2);
+    expect(learnRefusal(u, 'warrior', 'counter', catalog, rules)).toBe('jobLevelTooLow');
+    expect(learnRefusal(u, 'warrior', 'quickStep', catalog, rules)).toBeNull();
+    const enough = gainJp(u, 'warrior', 100);
+    expect(learnRefusal(enough, 'warrior', 'counter', catalog, rules)).toBeNull();
+    const learned = learnAbility(enough, 'warrior', 'counter', catalog, rules);
+    expect(learned.jobs.warrior).toEqual({ jp: 300 - 150, jpTotal: 300, learned: ['counter'] });
+    // 受動的なアビリティは、コマンド（行動アビリティ）には入らない
+    expect(unitCommands(learned, catalog)).toEqual([{ jobId: 'warrior', abilityIds: [] }]);
+  });
+
+  it('習得したものは、ジョブを問わず、種類ごとの枠に1つずつ付けられる。戦闘には付けたものだけが出る', () => {
+    let u = gainJp(recruit(), 'warrior', 400);
+    u = learnAbility(learnAbility(u, 'warrior', 'counter', catalog, rules), 'warrior', 'quickStep', catalog, rules);
+    u = changeJob(u, 'mage', catalog, rules);
+    u = learnAbility(gainJp(u, 'mage', 50), 'mage', 'magicShell', catalog, rules);
+    expect(passiveChoices(u, 'reaction', catalog)).toEqual(['counter', 'magicShell']);
+    expect(passiveChoices(u, 'movement', catalog)).toEqual(['quickStep']);
+    expect(passiveChoices(u, 'support', catalog)).toEqual([]);
+    // 魔術師のまま、戦士で覚えた反撃と早足を付ける
+    u = setPassive(setPassive(u, 'reaction', 'counter', catalog), 'movement', 'quickStep', catalog);
+    expect(equippedPassives(u)).toEqual(['counter', 'quickStep']);
+    // 付け替えると前のものは外れる。null で外す
+    u = setPassive(u, 'reaction', 'magicShell', catalog);
+    expect(u.slots.reaction).toBe('magicShell');
+    expect(() => setPassive(u, 'support', 'counter', catalog)).toThrow();
+    expect(() => setPassive(recruit(), 'reaction', 'counter', catalog)).toThrow();
+    expect(validateRoster({ units: [u] }, catalog, rules)).toEqual([]);
+    expect(setPassive(u, 'movement', null, catalog).slots.movement).toBeNull();
+  });
+
+  it('習得していないもの・枠の種類が違うものを付けた部隊は、誤りとして見つける', () => {
+    const bad = recruit('warrior', { slots: { secondary: null, reaction: 'quickStep', support: 'counter', movement: null } });
+    expect(validateRoster({ units: [bad] }, catalog, rules)).toEqual([
+      { kind: 'badPassive', unitId: 'u1', slot: 'reaction', abilityId: 'quickStep' },
+      { kind: 'badPassive', unitId: 'u1', slot: 'support', abilityId: 'counter' },
+    ]);
   });
 });
 

@@ -2,7 +2,10 @@
  * core のテスト用の部品。小さなマップとユニットで戦闘の状態を手早く組み立てる。
  * core は src/data を読み込まないので、テスト用の数値はここに置く（本番の数値は src/data）。
  */
+import { applyAction } from './battle';
 import type {
+  ActionResult,
+  BattleAction,
   BattleRules,
   BattleState,
   ChargeState,
@@ -323,4 +326,13 @@ export function makeState(options: {
     turnNumber: options.turnNumber ?? 1,
     lastAggressionTurn: options.lastAggressionTurn ?? 0,
   };
+}
+
+/** seed を変えながら行動を適用し、条件に合う最初の結果を返す（当たり外れを決めるため） */
+export function findSeed(state: BattleState, action: BattleAction, ok: (r: ActionResult) => boolean): ActionResult {
+  for (let seed = 1; seed < 500; seed++) {
+    const r = applyAction({ ...state, rngState: seed }, action);
+    if (ok(r)) return r;
+  }
+  throw new Error('条件に合うシード値が見つかりません');
 }
