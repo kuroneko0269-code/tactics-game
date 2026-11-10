@@ -47,6 +47,8 @@ export interface BattleView {
   unitScreenPosition(unitId: string): { x: number; y: number };
   /** 向き選びの矢印の画面座標（px）。矢印が出ていなければ undefined。自動テスト用 */
   arrowScreenPosition(direction: Direction): { x: number; y: number } | undefined;
+  /** 向き選びの矢印の内側の数か所の画面座標（px）。自動テスト用 */
+  arrowScreenPoints(direction: Direction): { x: number; y: number }[];
   update(deltaSeconds: number, elapsedSeconds: number): void;
 }
 
@@ -420,6 +422,22 @@ export function createBattleView(options: {
       // 矢印の頭（三角の部分）の内側の点。原点は三角と軸の境目にあり、タップの判定が当たりにくいため
       const s = screenOf(arrow.mesh.localToWorld(new THREE.Vector3(0, 0, 0.12)));
       return { x: s.x, y: s.y };
+    },
+    arrowScreenPoints(direction) {
+      const arrow = arrows.find((a) => a.dir === direction);
+      if (!arrowGroup.visible || !arrow) return [];
+      // 矢印の頭の中ほど、先、左右、軸（矢印の形の内側の点）
+      const local = [
+        [0, 0.12],
+        [0, 0.22],
+        [-0.12, 0.05],
+        [0.12, 0.05],
+        [0, -0.1],
+      ];
+      return local.map(([x, z]) => {
+        const s = screenOf(arrow.mesh.localToWorld(new THREE.Vector3(x, 0, z)));
+        return { x: s.x, y: s.y };
+      });
     },
     update(dt, elapsed) {
       tweens.update(dt);

@@ -118,6 +118,9 @@ function main(): void {
       arrowScreen: (dir: Parameters<typeof view.arrowScreenPosition>[0]) => view.arrowScreenPosition(dir),
       pickAt: (x: number, y: number) => pick(x, y).map((o) => view.coordOf(o) ?? null),
       tapLog: () => tapLog.slice(-3),
+      arrowPoints: (dir: Parameters<typeof view.arrowScreenPoints>[0]) => view.arrowScreenPoints(dir),
+      /** その点をタップした時に選ばれる向き（矢印に当たらなければ undefined） */
+      directionAt: (x: number, y: number) => pick(x, y).map((o) => view.directionOf(o)).find((d) => d !== undefined),
       camera: () => ({ zoom: rig.zoom, heightLevel: rig.heightLevel, quarter: rig.quarter, idle: rig.idle }),
       /** 渡した状態から戦闘を始め直す（詠唱の中断など、AI の対戦では起きにくい場面を確かめるため） */
       load: (result: Parameters<typeof controller.load>[0]) => controller.load(result),

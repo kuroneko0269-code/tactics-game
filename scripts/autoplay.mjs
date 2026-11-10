@@ -193,7 +193,8 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
   const center = { x: viewport.width / 2, y: viewport.height / 2 };
 
   const waitFor = async (description, fn, arg) => {
-    const timeout = Math.max(1000, Math.min(60000, deadline - Date.now()));
+    // 3つの画面サイズを同時に動かすと、ソフトウェアでの描画が遅くなり、敵の手番が続くと長く待つことがあるため、長めに待つ
+    const timeout = Math.max(1000, Math.min(180000, deadline - Date.now()));
     try {
       await page.waitForFunction(fn, arg, { timeout, polling: 50 });
     } catch {
@@ -348,8 +349,34 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
     await tapAt(await aimAt(u.x, u.z, id, `ユニット ${id}`));
   };
   const tapArrow = async (dir) => {
-    const p = await bringIntoView(() => T((dir) => window.__tactics.arrowScreen(dir), dir), `向きの矢印 ${dir}`);
-    await tapAt(p);
+    for (let turn = 0; turn < 4; turn++) {
+      await bringIntoView(() => T((dir) => window.__tactics.arrowScreen(dir), dir), `向きの矢印 ${dir}`);
+      // 見る角度によっては、矢印どうしが画面の上で重なる。狙った矢印が一番手前に写っている点を探してタップする
+      const p = await T((dir) => {
+        const t = window.__tactics;
+        // 境目ぎりぎりの点は避ける（周り 2px でも同じ矢印に当たる点だけを使う）
+        const around = [
+          [0, 0],
+          [2, 0],
+          [-2, 0],
+          [0, 2],
+          [0, -2],
+        ];
+        return t
+          .arrowPoints(dir)
+          .find(
+            (p) => window.__clearOfButtons([p.x, p.y]) && around.every(([dx, dy]) => t.directionAt(p.x + dx, p.y + dy) === dir),
+          );
+      }, dir);
+      if (p) return tapAt(p);
+      // ほかの矢印に隠れて見えなければ、人がするようにカメラを回す
+      const before = await snapshot();
+      await pressCameraButton('camera-rotate-right');
+      stats.cameraOps++;
+      await waitCameraIdle();
+      check((await snapshot()) === before, '回転ボタンで、向きが誤って選ばれました');
+    }
+    throw new CheckError(`向きの矢印 ${dir} の見えている部分が、どの向きからも見つかりませんでした`);
   };
 
   // ---- 魔法の指定 ----
@@ -556,7 +583,7 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
         const chosen = await getMode();
         check(
           chosen.kind === 'facing' && chosen.facing === action.facing,
-          `矢印 ${action.facing} をタップしたのに、選ばれた向きは ${JSON.stringify(chosen)} / タップの記録 ${JSON.stringify(await T(() => window.__tactics.tapLog()))} / 矢印の位置 ${JSON.stringify(await T((d) => window.__tactics.arrowScreen(d), action.facing))}`,
+          `矢印 ${action.facing} をタップしたのに、選ばれた向きは ${JSON.stringify(chosen)} / タップの記録 ${JSON.stringify(await T(() => window.__tactics.tapLog()))} / 矢印の位置 ${JSON.stringify(await T((d) => window.__tactics.arrowScreen(d), action.facing))} / 今その点の向き ${await T(() => { const l = window.__tactics.tapLog().at(-1); return String(window.__tactics.directionAt(l.x, l.y)); })} / 点 ${JSON.stringify(await T((d) => window.__tactics.arrowPoints(d).map((p) => [p.x, p.y, window.__tactics.directionAt(p.x, p.y)]), action.facing))}`,
         );
       }
       const turn = state.turnNumber;
