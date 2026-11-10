@@ -1,0 +1,32 @@
+# PR（変更の提案）が出るたびに、lint・型チェック・テスト・ビルドを自動実行する。
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Lint（書き方と依存方向の検査）
+        run: npm run lint
+      - name: 型チェック
+        run: npm run typecheck
+      - name: テスト
+        run: npm test
+      - name: ビルド
+        run: npm run build
