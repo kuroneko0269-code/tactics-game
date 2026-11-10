@@ -818,6 +818,8 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
     } else if (action.type === 'endTurn') {
       if (mode.kind === 'main') await pressButton('待機');
       await waitFor('向きを選ぶ', () => window.__tactics.mode() === 'facing');
+      // 向きを選ぶ時、ユニットが画面の端ならカメラが寄るので、止まるのを待ってからボタンの位置を読む
+      await waitCameraIdle();
       await checkFacingPad();
       if (stats.facingChanges === 0) await screenshot('facing-pad');
       if ((await getMode()).facing !== action.facing) {

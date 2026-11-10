@@ -562,8 +562,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
   };
   const restart = () => startFrom(deps.newBattle());
 
-  const onTap = (tapped: readonly Coord[]) => {
-    let candidates = tapped;
+  const onTap = (candidates: readonly Coord[]) => {
     if (mode.kind === 'busy' || mode.kind === 'ended') return;
     const first = candidates[0];
     if (mode.kind === 'facing') {
@@ -572,10 +571,8 @@ export function createBattleController(start: ActionResult, deps: BattleControll
       if (!first || (first.x === unit.x && first.z === unit.z)) return;
       return setMode({ kind: 'facing', facing: directionToward(unit, first, mode.facing) });
     }
-    // 先頭の候補（タップした点のマス）にユニットがいれば、そのマスだけを見る。
-    // ユニットを見ようとしてタップした時に、近くの別のマスへ移動してしまわないように
+    // ユニットの体をタップした時は、候補はそのユニットのマスだけになっている（tapJudge.ts）
     const occupied = first ? unitAt(state, first.x, first.z) : undefined;
-    if (occupied) candidates = [first!];
     // 今の操作で選べるマスがあれば、候補の先頭から順に探してそれを選ぶ
     if (mode.kind === 'main' && !turn()!.moved) {
       const reachable = reachableTiles(state, actor());

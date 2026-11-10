@@ -135,7 +135,7 @@ export const TEXT = {
     afterMove: '「攻撃」か「待機」を選ぶ',
     chooseTarget: '赤く光る敵をタップ',
     noTarget: '攻撃できる相手がいません',
-    chooseFacing: '向きは最も近い敵の方。そのままで良ければ「確定」（変える時は矢印をタップ）',
+    chooseFacing: '最も近い敵の方を向いています。よければ「確定」（変える時は矢印）',
     enemyTurn: '敵の手番',
     chooseSpell: (mp: number, maxMp: number) => `使う魔法を選ぶ（残り MP ${mp} / ${maxMp}）`,
     chooseSpellTarget: '紫のマスから、狙う場所をタップ',
