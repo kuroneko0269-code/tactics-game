@@ -441,7 +441,12 @@ export function createBattleController(start: ActionResult, deps: BattleControll
               hp: r.hp,
               maxHp: u.stats.maxHp,
               statusText: spell.effect === 'status' ? TEXT.spellPreview.status(TEXT.statuses[spell.inflicts!]) : undefined,
-              note: interrupts ? TEXT.spellPreview.interrupt : reducedBy.length > 0 ? TEXT.spellPreview.reduced(reducedBy.join('・')) : undefined,
+              note:
+                [
+                  r.side ? TEXT.spellPreview.angle(TEXT.sides[r.side], TEXT.preview.heightPercent(r.heightPercent ?? 0)) : '',
+                  interrupts ? TEXT.spellPreview.interrupt : '',
+                  reducedBy.length > 0 ? TEXT.spellPreview.reduced(reducedBy.join('・')) : '',
+                ].join('') || undefined,
             };
           }),
           warning,

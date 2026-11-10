@@ -79,6 +79,7 @@ async function main() {
     ai: await server.ssrLoadModule('/src/core/ai.ts'),
   };
   core.movement = await server.ssrLoadModule('/src/core/movement.ts');
+  core.combat = await server.ssrLoadModule('/src/core/combat.ts');
   core.progression = await server.ssrLoadModule('/src/core/progression.ts');
   core.sortie = await server.ssrLoadModule('/src/core/sortie.ts');
   const abilities = await server.ssrLoadModule('/src/data/abilities.ts');
@@ -87,13 +88,14 @@ async function main() {
     jobs: (await server.ssrLoadModule('/src/data/jobs.ts')).jobs,
     spells: abilities.spells,
     strikes: abilities.strikes,
+    passives: (await server.ssrLoadModule('/src/data/passives.ts')).passives,
     rules: (await server.ssrLoadModule('/src/data/battleRules.ts')).battleRules,
     progression: (await server.ssrLoadModule('/src/data/progression.ts')).progressionRules,
     roster: (await server.ssrLoadModule('/src/data/roster.ts')).initialRoster,
     ai: (await server.ssrLoadModule('/src/data/aiConfig.ts')).aiConfig,
     text: (await server.ssrLoadModule('/src/ui/text.ts')).TEXT,
   };
-  data.catalog = { jobs: data.jobs, spells: data.spells, strikes: data.strikes };
+  data.catalog = { jobs: data.jobs, spells: data.spells, strikes: data.strikes, passives: data.passives };
   core.data = data;
   /** 部隊と段階から、画面と同じ方法で戦闘を始める（core だけで） */
   core.start = (roster, tierId, seed) =>
@@ -104,6 +106,7 @@ async function main() {
       seed,
       data.spells,
       data.strikes,
+      data.passives,
     );
   const startState = core.start(data.roster, 'easy', SEED).state;
   // core だけで、画面と同じ動かし方（playerPolicy）で決着まで進める
@@ -161,7 +164,7 @@ async function main() {
       );
       console.log(
         `  育成: 結果の画面 ✔、習得 ${r.learned}回・ジョブチェンジ ${r.jobChanges}回・副コマンド ${r.subChanges}回、再び出撃 ✔、` +
-          `強打 ✔、読み込み直し ✔、はじめから ✔`,
+          `強打 ✔、突き飛ばし ${r.knockbacks}回、反撃 ${r.counters}回、受動的なアビリティの習得と付け替え ${r.passives}回、読み込み直し ✔、はじめから ✔`,
       );
       const f = r.finger;
       const sum = (o) => Object.values(o).reduce((a, b) => a + b, 0);
@@ -230,6 +233,9 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
     learned: 0,
     jobChanges: 0,
     subChanges: 0,
+    knockbacks: 0,
+    counters: 0,
+    passives: 0,
   };
   /** 指に近いタップ（狙いの中央から少しずれる）の回数と、そのうち押し直しが必要だった回数（種類ごと） */
   const finger = {
@@ -967,7 +973,7 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
     await tapLocator(unitButton(plan.learn.unitId));
     await screenshot('roster-detail');
     await pressButton(text.roster.learn);
-    const row = page.locator(`.learn-job[data-job-id="${plan.learn.jobId}"] .learn-row[data-ability-id="${plan.learn.abilityId}"] button`);
+    const row = page.locator(`.learn-row[data-job-id="${plan.learn.jobId}"][data-ability-id="${plan.learn.abilityId}"] button`);
     check(!(await row.isDisabled()), `${plan.learn.abilityId} の「覚える」が押せません`);
     await screenshot('roster-learn');
     await tapLocator(row);
@@ -1040,8 +1046,67 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   await pressButton('確定');
   await waitFor('強打の後', () => !['busy', 'confirm'].includes(window.__tactics.mode()));
   const sdAfter = await getState();
-  const pickHit = (st) => JSON.stringify(st.units.map((u) => [u.id, u.hp, u.actionCount]).filter(([id]) => id === sd.unitId || id === sd.targetId));
+  const pickHit = (st) => JSON.stringify(st.units.map((u) => [u.id, u.hp, u.actions.length]).filter(([id]) => id === sd.unitId || id === sd.targetId));
   check(pickHit(sdAfter) === pickHit(sd.expected), `強打の結果が core の計算と違います（画面 ${pickHit(sdAfter)} / core ${pickHit(sd.expected)}）`);
+  check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
+
+  // ---- 突き飛ばし ----
+  // 突き飛ばしを覚えた戦士が、高台の上で敵の背後に立った場面を用意して、「武技」→「突き飛ばし」→ 相手 →
+  // 予測（押し出す先と落下ダメージ）→ 確定 を確かめる。押し出す先のマスと、押し出された後の位置・HP を core の計算と比べる
+  await waitForInput();
+  const kd = knockbackDrill(core);
+  await page.evaluate((r) => window.__tactics.load(r), kd.start);
+  await waitFor('突き飛ばしの手番', (id) => window.__tactics.mode() === 'main' && window.__tactics.state().turn?.unitId === id, kd.unitId);
+  await waitForInput();
+  const kdUnit = (await getState()).units.find((u) => u.id === kd.unitId);
+  await openCommandOf(kdUnit, 'knockback');
+  await pressButton(text.abilities.knockback);
+  await waitFor('突き飛ばしの相手を選ぶ', () => {
+    const m = window.__tactics.modeDetail();
+    return m.kind === 'targeting' && m.abilityId === 'knockback';
+  });
+  await tapUnit(kd.targetId);
+  const kdMode = await getMode();
+  check(kdMode.kind === 'confirm' && kdMode.abilityId === 'knockback', `突き飛ばしの相手の選択が違います（${JSON.stringify(kdMode)}）`);
+  const kdPreview = await page.locator('.preview').textContent();
+  check(kdPreview.includes(text.preview.knockback) && kdPreview.includes(text.preview.knockbackTo(kd.fall)), `突き飛ばしの予測に押し出す先と落下ダメージがありません（${kdPreview}）`);
+  const pushMark = await T(() => window.__tactics.marks().filter((m) => m.kind === 'push'));
+  check(JSON.stringify(pushMark.map((m) => [m.x, m.z])) === JSON.stringify([[kd.to.x, kd.to.z]]), `押し出す先のマスの表示が違います（${JSON.stringify(pushMark)}）`);
+  await screenshot('knockback-preview');
+  await pressButton('確定');
+  await waitFor('突き飛ばしの後', () => !['busy', 'confirm'].includes(window.__tactics.mode()));
+  const pickPush = (st) => JSON.stringify(st.units.filter((u) => u.id === kd.targetId).map((u) => [u.x, u.z, u.hp]));
+  check(pickPush(await getState()) === pickPush(kd.expected), `突き飛ばしの結果が core の計算と違います（画面 ${pickPush(await getState())} / core ${pickPush(kd.expected)}）`);
+  stats.knockbacks++;
+  check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
+
+  // ---- 反撃 ----
+  // 「反撃」を付けた敵の隣で手番を迎えた戦士が通常攻撃し、予測に「反撃あり」が出ること、
+  // 反撃が発動して名前が表示され、結果が core の計算と同じになることを確かめる
+  await waitForInput();
+  const cd = counterDrill(core);
+  await page.evaluate((r) => window.__tactics.load(r), cd.start);
+  await waitFor('反撃を受ける手番', (id) => window.__tactics.mode() === 'main' && window.__tactics.state().turn?.unitId === id, cd.unitId);
+  await waitForInput();
+  await pressButton('攻撃');
+  await waitFor('攻撃対象を選ぶ', () => window.__tactics.mode() === 'targeting');
+  await tapUnit(cd.targetId);
+  const cdPreview = await page.locator('.preview').textContent();
+  check(cdPreview.includes(text.preview.counter), `攻撃の予測に「反撃あり」がありません（${cdPreview}）`);
+  await screenshot('counter-preview');
+  const sawReaction = page
+    .waitForFunction((name) => [...document.querySelectorAll('.popup.reaction')].some((p) => p.textContent === name), text.abilities.counter, {
+      timeout: 20000,
+      polling: 20,
+    })
+    .then(() => true)
+    .catch(() => false);
+  await pressButton('確定');
+  check(await sawReaction, 'リアクション「反撃」の名前が表示されませんでした');
+  await waitFor('反撃の後', () => !['busy', 'confirm'].includes(window.__tactics.mode()));
+  const pickCounter = (st) => JSON.stringify(st.units.filter((u) => u.id === cd.unitId || u.id === cd.targetId).map((u) => [u.id, u.hp]));
+  check(pickCounter(await getState()) === pickCounter(cd.expected), `反撃の結果が core の計算と違います（画面 ${pickCounter(await getState())} / core ${pickCounter(cd.expected)}）`);
+  stats.counters++;
   check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
 
   // ---- 詠唱の中断 ----
@@ -1092,12 +1157,50 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   await page.reload();
   await page.waitForFunction(() => window.__tactics?.screen() === 'base', null, { timeout: 30000 });
   await sameRoster(plan.afterEdit, '読み込み直した後');
+  // ---- 受動的なアビリティの習得と付け替え ----
+  // JP の貯まった部隊を用意して、編成の画面で「反撃」を覚え（ジョブのレベルが足りない「重装」は押せない）、
+  // リアクションの枠に付ける。付けた後の部隊は core の計算と同じで、出撃するとその戦闘のユニットに反映される
+  const pd = passiveDrill(core, plan.afterEdit);
+  await page.evaluate((r) => window.__tactics.setRoster(r), pd.start);
+  await waitFor('拠点', () => window.__tactics.screen() === 'base');
+  await pressButton('編成');
+  await tapLocator(unitButton(pd.unitId));
+  await pressButton(text.roster.learn);
+  await waitFor('習得の一覧', () => document.querySelector('.learn-group[data-group="reaction"]') !== null);
+  const lockedRow = page.locator(`.learn-group[data-group="support"] .learn-row[data-ability-id="${pd.lockedId}"] button`);
+  check(await lockedRow.isDisabled(), `ジョブのレベルが足りない ${pd.lockedId} の「覚える」が押せます`);
+  const lockedText = await lockedRow.textContent();
+  check(lockedText.includes(text.roster.needJobLevelShort(pd.lockedLevel)), `ジョブのレベルが足りない理由が出ていません（${lockedText}）`);
+  await screenshot('roster-learn-passive');
+  await tapLocator(page.locator(`.learn-group[data-group="reaction"] .learn-row[data-ability-id="${pd.abilityId}"] button`));
+  await waitFor('受動的なアビリティの習得', ([u, j, a]) => window.__tactics.roster().units.find((x) => x.id === u).jobs[j].learned.includes(a), [pd.unitId, pd.jobId, pd.abilityId]);
+  await pressButton(text.roster.back);
+  await pressButton(text.roster.changePassive(text.passiveSlots.reaction));
+  await pressButton(text.abilities[pd.abilityId]);
+  await waitFor('リアクションの付け替え', ([u, a]) => window.__tactics.roster().units.find((x) => x.id === u).slots.reaction === a, [pd.unitId, pd.abilityId]);
+  const slotText = await page.locator('.passive-slot.slot-reaction').textContent();
+  check(slotText.includes(text.abilities[pd.abilityId]), `付けたリアクションが編成の画面に出ていません（${slotText}）`);
+  await screenshot('roster-passive-equipped');
+  stats.passives++;
+  await pressButton(text.roster.back);
+  await pressButton(text.roster.back);
+  await sameRoster(pd.expected, '受動的なアビリティを付けた後');
+  await pressButton('出撃');
+  await pressButton(text.tiers.easy.name);
+  await waitFor('受動的なアビリティを付けた戦闘', () => window.__tactics.screen() === 'battle' && window.__tactics.state() !== null);
+  const pdUnit = (await getState()).units.find((u) => u.id === pd.unitId);
+  check(JSON.stringify(pdUnit.passives.map((p) => p.id)) === JSON.stringify([pd.abilityId]), `戦闘のユニットに受動的なアビリティが反映されていません（${JSON.stringify(pdUnit.passives)}）`);
+  await page.reload();
+  await page.waitForFunction(() => window.__tactics?.screen() === 'base', null, { timeout: 30000 });
+  await sameRoster(pd.expected, '受動的なアビリティを付けて読み込み直した後');
+  check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
+
   // ---- 「はじめから」: 確認の後、最初の部隊に戻る（読み込み直しても最初のまま） ----
   await pressButton(text.base.newGame);
   await waitFor('はじめからの確認', () => document.querySelector('.screen-warning') !== null);
   await screenshot('new-game-confirm');
   await pressButton(text.base.cancel);
-  await sameRoster(plan.afterEdit, '「はじめから」をやめた後');
+  await sameRoster(pd.expected, '「はじめから」をやめた後');
   await pressButton(text.base.newGame);
   await pressButton(text.base.confirmNewGameYes);
   await sameRoster(core.data.roster, '「はじめから」の後');
@@ -1235,6 +1338,92 @@ function strikeDrill(core, plan) {
   };
   const expected = core.battle.applyAction(state, { type: 'attack', targetId, abilityId: 'powerStrike' }).state;
   return { unitId, targetId, subAbilityId: 'wind', start: { state, events: [{ type: 'turnStarted', unitId, turnNumber: 1 }] }, expected };
+}
+
+/** 敵を動かさずに、指定したユニットの手番から始まる状態を作る（ほかのユニットは CT 0） */
+function drillState(base, unitId, patch) {
+  const units = base.units.map((x) => ({ ...x, ct: x.id === unitId ? 100 : 0, ...(patch[x.id] ?? {}) }));
+  const me = units.find((x) => x.id === unitId);
+  return {
+    ...base,
+    units,
+    turn: { unitId, moved: false, acted: false, origin: { x: me.x, z: me.z, facing: me.facing }, chargingAtStart: false },
+    turnNumber: 1,
+  };
+}
+
+/**
+ * 突き飛ばしを確かめる場面。突き飛ばしを覚えた戦士が、西の高い丘（高さ 4）の上にいて、
+ * その東隣（高さ 3）に敵の戦士が背を向けて立っている。押し出す先（さらに東、高さ 1）は 2 段低いので落下ダメージがある。
+ */
+function knockbackDrill(core) {
+  const P = core.progression;
+  const { catalog, progression: rules } = core.data;
+  const unitId = 'hero-1';
+  const u = P.learnAbility(P.gainJp(P.findUnit(core.data.roster, unitId), 'warrior', 1000), 'warrior', 'knockback', catalog, rules);
+  const base = core.start(P.replaceUnit(core.data.roster, u), 'easy', SEED + 3).state;
+  const targetId = 'e-warrior-1';
+  const state = drillState(base, unitId, {
+    [unitId]: { x: 0, z: 4, facing: 'east' },
+    [targetId]: { x: 1, z: 4, facing: 'east' },
+  });
+  const me = state.units.find((x) => x.id === unitId);
+  const target = state.units.find((x) => x.id === targetId);
+  const strike = me.strikes.find((s) => s.id === 'knockback');
+  const preview = core.combat.previewAttack(state, me, target, me, strike);
+  if (!preview.knockback?.to || preview.knockback.damage <= 0 || preview.hitPercent !== 100) throw new Error('突き飛ばしの場面が想定と違います');
+  const expected = core.battle.applyAction(state, { type: 'attack', targetId, abilityId: 'knockback' }).state;
+  return {
+    unitId,
+    targetId,
+    to: preview.knockback.to,
+    fall: preview.knockback.damage,
+    start: { state, events: [{ type: 'turnStarted', unitId, turnNumber: 1 }] },
+    expected,
+  };
+}
+
+/**
+ * 反撃を確かめる場面。「反撃」を付けた敵の戦士の西隣で、味方の戦士が手番を迎える。
+ * 攻撃と反撃の両方が当たる乱数の状態を選ぶ（反撃は当たって生き残った時だけ起きるため）。
+ */
+function counterDrill(core) {
+  const base = core.start(core.data.roster, 'easy', SEED + 4).state;
+  const unitId = 'hero-1';
+  const targetId = 'e-warrior-1';
+  const counter = core.data.passives.find((p) => p.id === 'counter');
+  const scene = drillState(base, unitId, {
+    [unitId]: { x: 3, z: 6, facing: 'east' },
+    [targetId]: { x: 4, z: 6, facing: 'north', passives: [counter] },
+  });
+  for (let rng = 1; rng < 1000; rng++) {
+    const state = { ...scene, rngState: rng };
+    const r = core.battle.applyAction(state, { type: 'attack', targetId });
+    const attacks = r.events.filter((e) => e.type === 'attacked');
+    if (attacks.length === 2 && attacks.every((a) => a.hit) && !r.state.winner) {
+      return { unitId, targetId, start: { state, events: [{ type: 'turnStarted', unitId, turnNumber: 1 }] }, expected: r.state };
+    }
+  }
+  throw new Error('反撃の場面を作れませんでした');
+}
+
+/**
+ * 受動的なアビリティの習得と付け替えを確かめる部隊。トウマ（戦士）に戦士の JP を 300（ジョブのレベル 3）持たせる。
+ * 「反撃」（ジョブのレベル 3 が必要）は覚えられ、「重装」（ジョブのレベル 4 が必要）は覚えられない。
+ * expected は、反撃を覚えてリアクションの枠に付けた後の部隊（core だけで計算）。
+ */
+function passiveDrill(core, roster) {
+  const P = core.progression;
+  const { catalog, progression: rules } = core.data;
+  const unitId = 'hero-1';
+  const jobId = 'warrior';
+  const u0 = P.findUnit(roster, unitId);
+  const p = P.jobProgress(u0, jobId);
+  const u = { ...u0, jobId, slots: { ...u0.slots, secondary: u0.slots.secondary === jobId ? null : u0.slots.secondary }, jobs: { ...u0.jobs, [jobId]: { ...p, jp: 300, jpTotal: Math.max(300, Math.min(p.jpTotal, 399)) } } };
+  const start = P.replaceUnit(roster, u);
+  if (P.jobLevel(u, jobId, rules) !== 3) throw new Error('受動的なアビリティの場面のジョブのレベルが想定と違います');
+  const learned = P.setPassive(P.learnAbility(u, jobId, 'counter', catalog, rules), 'reaction', 'counter', catalog);
+  return { unitId, jobId, abilityId: 'counter', lockedId: 'heavyArmor', lockedLevel: 4, start, expected: P.replaceUnit(start, learned) };
 }
 
 /** ブラウザの中で実行する: 点 (x, y) とその周り 16px が、すべてキャンバス（ボタンなどに隠れていない）か */

@@ -145,6 +145,11 @@ export interface SpellDefinition {
   readonly inflicts?: StatusId;
   /** 効果量の元になる能力値。省くと魔力（magic）。狙い撃ちは攻撃力（attack） */
   readonly stat?: 'magic' | 'attack';
+  /**
+   * true なら、ダメージに向き（正面・側面・背面）と高低差の補正が掛かる（狙い撃ち）。必ず当たる点は変わらない。
+   * 向きと高さは、発動した時点の詠唱者と相手の位置・相手の向きで決まる
+   */
+  readonly directional?: boolean;
   /** 威力（%）。ダメージ・回復量 = 元の能力値 × 威力 ÷ 100（切り捨て） */
   readonly power: number;
   /** 消費 MP */

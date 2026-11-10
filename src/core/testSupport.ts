@@ -65,6 +65,7 @@ export const testAimedShot: SpellDefinition = {
   element: 'none',
   effect: 'damage',
   stat: 'attack',
+  directional: true,
   power: 150,
   mpCost: 0,
   range: 6,

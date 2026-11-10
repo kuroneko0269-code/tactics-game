@@ -7,6 +7,7 @@
  * - 範囲の魔法は、発動した時点で範囲内にいる全員に効く（攻撃魔法は味方も巻き込み、回復魔法は敵も回復する）。
  * - 範囲は中心からの歩数で決まる。中心のマスとの高さの差が「高さの許容」を超えるマスには届かない。
  * - 魔法は必ず命中し、向きと高低差の補正を受けない。乱数の揺れもない。
+ *   ただし狙い撃ち（directional）は、ダメージに通常攻撃と同じ向きと高低差の補正が掛かる（必ず当たる点は同じ）。
  *   ダメージ・回復量 = 魔力 × 威力 ÷ 100（切り捨て）。詠唱中のユニットが受けるダメージは倍率が掛かる。
  * - 射程は指定する時だけ確かめる（発動時に離れていても発動する）。射程の下限がある技（狙い撃ち）は、近すぎるマスを狙えない。
  * - 狙い撃ちのような溜めのある技も、ここでは魔法と同じに扱う（効果量の元が攻撃力になるだけ）。
@@ -16,9 +17,9 @@
  * - 消費 MP は「節約」で、詠唱の速さは「早口」で変わる（effects.ts）。
  */
 import type { BattleRules, BattleState, ChargeState, SpellDefinition, SpellTarget, UnitState } from './battleTypes';
-import { weaponFits } from './combat';
+import { computeDamage, heightDamagePercent, weaponFits } from './combat';
 import { damageTaken, isSilencedFor, mpCostOf } from './effects';
-import { manhattan, type Coord } from './geometry';
+import { manhattan, relativeSide, type Coord, type RelativeSide } from './geometry';
 import { getTile, type BattleMap } from './map';
 import { isAlive, unitAt } from './movement';
 
@@ -89,9 +90,14 @@ export function spellAmountOn(
   caster: UnitState,
   spell: SpellDefinition,
   target: UnitState,
+  angle?: { side: RelativeSide; heightPercent: number },
 ): number {
   if (spell.effect === 'status') return 0;
-  const base = baseSpellAmount(caster, spell);
+  const stat = spell.stat === 'attack' ? caster.stats.attack : caster.stats.magic;
+  const base =
+    spell.directional && angle
+      ? computeDamage(rules, stat, angle.side, angle.heightPercent, 100, spell.power)
+      : baseSpellAmount(caster, spell);
   if (spell.effect === 'heal') return Math.max(0, Math.min(base, target.stats.maxHp - target.hp));
   const damage = damageTaken(rules, target, Math.max(rules.minimumDamage, base), { magical: spell.kind === 'magic' });
   return Math.min(damage, target.hp);
@@ -100,8 +106,17 @@ export function spellAmountOn(
 export interface SpellPreview {
   readonly center: Coord;
   readonly tiles: readonly Coord[];
-  /** 巻き込まれるユニットと、それぞれの効果量（ダメージまたは回復量）と効果の後の HP */
-  readonly results: readonly { readonly unitId: string; readonly amount: number; readonly hp: number }[];
+  /**
+   * 巻き込まれるユニットと、それぞれの効果量（ダメージまたは回復量）と効果の後の HP。
+   * 向きと高低差の補正が掛かる技（狙い撃ち）では、その向きと補正（%）も入る
+   */
+  readonly results: readonly {
+    readonly unitId: string;
+    readonly amount: number;
+    readonly hp: number;
+    readonly side?: RelativeSide;
+    readonly heightPercent?: number;
+  }[];
 }
 
 /**
@@ -117,13 +132,18 @@ export function previewSpellAt(
   casterOverride?: UnitState,
 ): SpellPreview {
   const tiles = spellArea(state.map, spell, center);
-  const results: { unitId: string; amount: number; hp: number }[] = [];
+  const from = casterOverride ?? caster;
+  const heightOf = (c: Coord) => getTile(state.map, c.x, c.z)?.height ?? 0;
+  const results: { unitId: string; amount: number; hp: number; side?: RelativeSide; heightPercent?: number }[] = [];
   for (const unit of state.units) {
     const u = casterOverride && unit.id === caster.id ? casterOverride : unit;
     if (!isAlive(u) || !tiles.some((t) => t.x === u.x && t.z === u.z)) continue;
-    const amount = spellAmountOn(state.rules, caster, spell, u);
+    const angle = spell.directional
+      ? { side: relativeSide(from, u, u.facing), heightPercent: heightDamagePercent(state.rules, heightOf(from), heightOf(u)) }
+      : undefined;
+    const amount = spellAmountOn(state.rules, caster, spell, u, angle);
     const hp = spell.effect === 'heal' ? u.hp + amount : spell.effect === 'damage' ? u.hp - amount : u.hp;
-    results.push({ unitId: u.id, amount, hp });
+    results.push({ unitId: u.id, amount, hp, ...angle });
   }
   return { center, tiles, results };
 }

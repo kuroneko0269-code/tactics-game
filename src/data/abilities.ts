@@ -92,7 +92,7 @@ export const bigHeal: SpellDefinition = {
 
 /**
  * 狙い撃ち: 弓の溜め撃ち。詠唱（狙いを付ける時間）があり、ダメージは攻撃力の 1.5 倍、射程は弓より 1 長い（3〜6）。
- * 魔法と同じく必ず当たり、向きと高低差の補正は受けない。弓が必要
+ * 魔法と同じく必ず当たる。ダメージには通常攻撃と同じ向きと高低差の補正が掛かる（フェーズ2-1b。高所や背面を取る意味を残すため）。弓が必要
  */
 export const aimedShot: SpellDefinition = {
   id: 'aimedShot',
@@ -100,6 +100,7 @@ export const aimedShot: SpellDefinition = {
   element: 'none',
   effect: 'damage',
   stat: 'attack',
+  directional: true,
   power: 150,
   mpCost: 0,
   range: 6,

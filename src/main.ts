@@ -94,6 +94,8 @@ function main(): void {
   showVersion(metaEl);
 
   let screen: ScreenName = 'base';
+  /** 開発中だけ: 最後にマップに出したマスの色分け（自動プレイで、押し出す先の表示を確かめるため） */
+  let lastMarks: readonly { x: number; z: number; kind: string }[] = [];
   let battle: ActiveBattle | undefined;
   const setScreen = (name: ScreenName) => {
     screen = name;
@@ -201,8 +203,12 @@ function main(): void {
           return [top, top.clone().add(new THREE.Vector3(0, 1.2, 0))];
         }),
       );
+    const setMarks: BattleView['setMarks'] = (marks) => {
+      lastMarks = marks;
+      view.setMarks(marks);
+    };
     const controller = createBattleController(start, {
-      view: { ...view, focusTiles },
+      view: { ...view, focusTiles, setMarks },
       hud,
       labels,
       ai: aiConfig,
@@ -260,7 +266,15 @@ function main(): void {
       /** その点の下にある物のマス（手前から順。判定の規則を通す前） */
       pickAt: (x: number, y: number) => pick(x, y).map((h) => v().coordOf(h.object) ?? null),
       tapLog: () => tapLog.slice(-3),
+      /** 今マップに出しているマスの色分け */
+      marks: () => lastMarks,
       camera: () => ({ zoom: rig.zoom, heightLevel: rig.heightLevel, quarter: rig.quarter, idle: rig.idle }),
+      /** 部隊を差し替えて保存し、拠点の画面に戻る（受動的なアビリティの習得など、JP の貯まった場面を確かめるため） */
+      setRoster: (next: Roster) => {
+        if (validateRoster(next, catalog, progressionRules).length > 0) throw new Error('部隊の定義が正しくありません');
+        updateRoster(next);
+        showBase();
+      },
       /** 渡した状態から戦闘を始め直す（詠唱の中断など、AI の対戦では起きにくい場面を確かめるため） */
       load: (result: ActionResult) => {
         endBattle();
