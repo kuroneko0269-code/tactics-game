@@ -1,0 +1,12 @@
+{
+  // core と data 専用の型チェック設定。
+  // lib から DOM を外しているので、core が window や document などブラウザ専用の機能を
+  // 使うと型チェックで失敗する（= サーバーでもそのまま動くことの保証）。
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": []
+  },
+  "include": ["src/core", "src/data"],
+  "exclude": ["src/**/*.test.ts"]
+}
