@@ -14,6 +14,7 @@ import { createPicker } from './render/picker';
 import { attachCameraInput } from './render/cameraInput';
 import { createBattleController } from './ui/battleController';
 import { createHud } from './ui/hud';
+import { showVersion } from './ui/version';
 import { TEXT } from './ui/text';
 import { createUnitLabels } from './ui/unitLabels';
 
@@ -65,7 +66,9 @@ function main(): void {
     onCycleHeight: () => rig.cycleHeight(),
     onResetView: () => rig.reset(),
     initialHeight: rig.heightLevel,
+    facingScreen: (unitId) => view.facingScreen(unitId),
   });
+  showVersion(hudEl);
   const labels = createUnitLabels(
     labelsEl,
     first.state.units.map((u) => ({ id: u.id, team: u.team, hp: u.hp, maxHp: u.stats.maxHp, mp: u.mp, maxMp: u.stats.maxMp })),
@@ -82,14 +85,13 @@ function main(): void {
 
   const canvas = stage.renderer.domElement;
   /** 開発中だけ: 最近のタップの記録（自動プレイで失敗した時の調査用） */
-  const tapLog: { x: number; y: number; coords: { x: number; z: number }[]; mode: string }[] = [];
+  const tapLog: { x: number; y: number; coords: readonly { x: number; z: number }[]; mode: string }[] = [];
   const pick = createPicker(canvas, () => rig.camera, () => view.pickTargets());
+  const candidatesAt = (x: number, y: number) => view.tapCandidates(pick, x, y);
   attachCameraInput(canvas, rig, (x, y) => {
-    const objects = pick(x, y);
-    const coords = objects.map((o) => view.coordOf(o)).filter((c) => c !== undefined);
-    const direction = objects.map((o) => view.directionOf(o)).find((d) => d !== undefined);
+    const { coords } = candidatesAt(x, y);
     if (import.meta.env.DEV) tapLog.push({ x, y, coords, mode: controller.mode });
-    controller.onTap(coords, direction);
+    controller.onTap(coords);
   });
   // iPhone の Safari で、2本指の操作がページ全体の拡大にならないようにする
   document.addEventListener('gesturestart', (e) => e.preventDefault());
@@ -115,12 +117,11 @@ function main(): void {
       tileScreen: (x: number, z: number) => view.tileScreenPosition(x, z),
       tilePoints: (x: number, z: number) => view.tileScreenPoints(x, z),
       unitScreen: (id: string) => view.unitScreenPosition(id),
-      arrowScreen: (dir: Parameters<typeof view.arrowScreenPosition>[0]) => view.arrowScreenPosition(dir),
-      pickAt: (x: number, y: number) => pick(x, y).map((o) => view.coordOf(o) ?? null),
+      /** その点をタップした時の、選ぶマスの候補（優先する順。tapJudge.ts） */
+      candidatesAt: (x: number, y: number) => candidatesAt(x, y),
+      /** その点の下にある物のマス（手前から順。判定の規則を通す前） */
+      pickAt: (x: number, y: number) => pick(x, y).map((h) => view.coordOf(h.object) ?? null),
       tapLog: () => tapLog.slice(-3),
-      arrowPoints: (dir: Parameters<typeof view.arrowScreenPoints>[0]) => view.arrowScreenPoints(dir),
-      /** その点をタップした時に選ばれる向き（矢印に当たらなければ undefined） */
-      directionAt: (x: number, y: number) => pick(x, y).map((o) => view.directionOf(o)).find((d) => d !== undefined),
       camera: () => ({ zoom: rig.zoom, heightLevel: rig.heightLevel, quarter: rig.quarter, idle: rig.idle }),
       /** 渡した状態から戦闘を始め直す（詠唱の中断など、AI の対戦では起きにくい場面を確かめるため） */
       load: (result: Parameters<typeof controller.load>[0]) => controller.load(result),
@@ -137,6 +138,7 @@ function main(): void {
     view.update(dt, elapsed);
     stage.renderer.render(stage.scene, rig.camera);
     labels.setPositions(view.unitAnchors());
+    hud.update();
   });
 }
 

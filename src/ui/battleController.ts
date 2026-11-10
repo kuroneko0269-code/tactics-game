@@ -1,4 +1,4 @@
-import { decideNextAction, type AiConfig } from '../core/ai';
+import { decideNextAction, defaultFacing, type AiConfig } from '../core/ai';
 import { activeUnit, applyAction, getUnit } from '../core/battle';
 import type {
   ActionResult,
@@ -60,11 +60,11 @@ export interface BattleControllerDeps {
 
 export interface BattleController {
   /**
-   * マス（またはユニット・矢印）がタップされた。
-   * candidates は指の下にあったマスを手前から順に並べたもの（手前のユニットに隠れた奥のマスも含む）。
-   * direction は向きの矢印をタップした時だけ。
+   * マス（またはユニット）がタップされた。
+   * candidates は選ぶマスの候補を優先する順に並べたもの（render/tapJudge.ts の規則）。
+   * 今の操作で選べる最初の候補を選ぶ。先頭はタップした点に一番手前に写っていたマス。
    */
-  onTap(candidates: readonly Coord[], direction?: Direction): void;
+  onTap(candidates: readonly Coord[]): void;
   /** 渡した状態から戦闘を始め直す（開発中の自動テスト用） */
   load(result: ActionResult): void;
   readonly state: BattleState;
@@ -168,6 +168,8 @@ export function createBattleController(start: ActionResult, deps: BattleControll
   const refresh = () => {
     hud.showPreview(undefined);
     view.showFacingArrows(undefined);
+    hud.showFacingPad(undefined);
+    hud.setUndoMove(undefined);
     showReserved();
     if (mode.kind === 'busy' || mode.kind === 'ended') {
       hud.setActions([]);
@@ -201,9 +203,10 @@ export function createBattleController(start: ActionResult, deps: BattleControll
             primary: !t.acted && !charging,
           });
         }
-        actions.push({ label: TEXT.buttons.wait, onClick: () => setMode({ kind: 'facing', facing: unit.facing }), primary: Boolean(charging) });
-        if (t.moved && !t.acted) actions.unshift({ label: TEXT.buttons.undoMove, onClick: () => void perform({ type: 'undoMove' }) });
+        actions.push({ label: TEXT.buttons.wait, onClick: () => setMode(facingMode()), primary: Boolean(charging) });
         hud.setActions(actions);
+        // 移動した直後は「移動をやり直す」を目立つ位置に出す（意図しないマスへ移動した時にすぐ戻せるように）
+        if (t.moved && !t.acted) hud.setUndoMove(() => void perform({ type: 'undoMove' }));
         break;
       }
       case 'confirmInterrupt': {
@@ -352,6 +355,11 @@ export function createBattleController(start: ActionResult, deps: BattleControll
         view.setMarks([self]);
         view.showFacingArrows(unit.id, mode.facing);
         void view.turnTo(unit.id, mode.facing);
+        // 向きのボタンがユニットの周りに出るので、ユニットが画面の端なら見やすい所へ寄せる
+        void view.focusTiles([unit]);
+        hud.showFacingPad(unit.id, mode.facing, (facing) => {
+          if (mode.kind === 'facing') setMode({ kind: 'facing', facing });
+        });
         hud.setHint(TEXT.hints.chooseFacing);
         const actions: HudAction[] = [];
         if (!(t.moved && t.acted)) {
@@ -364,12 +372,15 @@ export function createBattleController(start: ActionResult, deps: BattleControll
           });
         }
         const facing = mode.facing;
-        actions.push({ label: TEXT.buttons.decide, primary: true, onClick: () => void perform({ type: 'endTurn', facing }) });
+        actions.push({ label: TEXT.buttons.endTurn, primary: true, onClick: () => void perform({ type: 'endTurn', facing }) });
         hud.setActions(actions);
         break;
       }
     }
   };
+
+  /** 手番の終わりの向きを選ぶ操作。向きの初期値は最も近い敵の方向（確定ボタン1つで手番を終えられるように） */
+  const facingMode = (): Mode => ({ kind: 'facing', facing: defaultFacing(state, actor()) });
 
   const setMode = (next: Mode) => {
     mode = next;
@@ -471,7 +482,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
     const t = turn();
     if (state.winner || !t) return void proceed();
     if (t.unitId !== previousUnitId) return void proceed();
-    if (t.moved && t.acted) return setMode({ kind: 'facing', facing: actor().facing });
+    if (t.moved && t.acted) return setMode(facingMode());
     setMode({ kind: 'main' });
   };
 
@@ -551,17 +562,18 @@ export function createBattleController(start: ActionResult, deps: BattleControll
   };
   const restart = () => startFrom(deps.newBattle());
 
-  const onTap = (candidates: readonly Coord[], direction?: Direction) => {
+  const onTap = (candidates: readonly Coord[]) => {
     if (mode.kind === 'busy' || mode.kind === 'ended') return;
     const first = candidates[0];
     if (mode.kind === 'facing') {
+      // マスをタップしても、その方向を向ける（向きのボタンの代わり）
       const unit = actor();
-      const tile = candidates.find((c) => c.x !== unit.x || c.z !== unit.z);
-      if (!direction && !tile) return;
-      const facing = direction ?? directionToward(unit, tile!, mode.facing);
-      return setMode({ kind: 'facing', facing });
+      if (!first || (first.x === unit.x && first.z === unit.z)) return;
+      return setMode({ kind: 'facing', facing: directionToward(unit, first, mode.facing) });
     }
-    // 今の操作で選べるマスがあれば、手前から順に探してそれを選ぶ
+    // ユニットの体をタップした時は、候補はそのユニットのマスだけになっている（tapJudge.ts）
+    const occupied = first ? unitAt(state, first.x, first.z) : undefined;
+    // 今の操作で選べるマスがあれば、候補の先頭から順に探してそれを選ぶ
     if (mode.kind === 'main' && !turn()!.moved) {
       const reachable = reachableTiles(state, actor());
       const dest = candidates.find((c) => reachable.some((r) => r.x === c.x && r.z === c.z));
@@ -585,8 +597,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
       }
     }
     // それ以外は、タップしたユニットの情報を見せるだけ
-    const tapped = first ? unitAt(state, first.x, first.z) : undefined;
-    if (tapped) hud.setUnitInfo(tapped, state.turnNumber);
+    if (occupied) hud.setUnitInfo(occupied, state.turnNumber);
   };
 
   void play(start.events).then(proceed);

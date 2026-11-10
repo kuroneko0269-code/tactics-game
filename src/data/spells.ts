@@ -40,7 +40,7 @@ export const wind: SpellDefinition = {
 /** 癒し: 範囲の回復魔法。敵も範囲内にいれば回復する。詠唱は速い */
 export const heal: SpellDefinition = {
   id: 'heal',
-  element: 'holy',
+  element: 'light',
   effect: 'heal',
   power: 200,
   mpCost: 8,

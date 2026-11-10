@@ -252,10 +252,8 @@ function resolveCharge(state: BattleState, casterId: string, events: BattleEvent
   // 詠唱は終わったので、発動の計算では詠唱者を詠唱中として扱わない
   let next = updateUnit(state, casterId, { charging: null });
   const center = targetCenter(next, charge.target);
-  if (!center) {
-    events.push({ type: 'spellFizzled', casterId, spellId: spell.id, reason: 'targetDefeated' });
-    return next;
-  }
+  // 狙ったユニットが倒れていても、倒れたマスを中心に発動する（不発にはしない）
+  if (!center) throw new Error(`魔法の狙い先がありません（${spell.id}）`);
   const preview = previewSpellAt(next, getUnit(next, casterId), spell, center);
   events.push({
     type: 'spellResolved',

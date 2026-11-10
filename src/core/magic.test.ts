@@ -106,18 +106,35 @@ describe('ユニットを狙う・マスを狙う', () => {
     expect(getUnit(state, 'e').hp).toBe(50);
   });
 
-  it('ユニットを狙った魔法は、発動前に対象が倒れていれば不発になる', () => {
+  it('ユニットを狙った魔法は、発動前に対象が倒れていれば、倒れたマスを中心に発動する', () => {
     const state = arena([
       { id: 'e', team: 'enemy', x: 4, z: 5, hp: 5 },
       { id: 'w', team: 'player', x: 4, z: 6, ct: 99 },
+      // e の隣にいる別の敵。炎の範囲（中心と上下左右）に入る
+      { id: 'e2', team: 'enemy', x: 5, z: 5 },
     ]);
-    const { events } = run(state, [
+    const { state: after, events } = run(state, [
       { type: 'cast', spellId: 'fire', target: { kind: 'unit', unitId: 'e' } },
       wait,
       // w の手番。e を倒す
       { type: 'attack', targetId: 'e' },
+      wait,
     ]);
-    expect(events.some((e) => e.type === 'battleEnded')).toBe(true);
+    expect(events).toContainEqual({ type: 'defeated', unitId: 'e' });
+    expect(events.some((e) => e.type === 'spellFizzled')).toBe(false);
+    const resolved = events.find((e) => e.type === 'spellResolved');
+    expect(resolved).toMatchObject({ center: { x: 4, z: 5 } });
+    // 倒れた e は数えず、範囲にいる e2 と w（味方も巻き込む）に当たる
+    expect(resolved?.type === 'spellResolved' && resolved.results.map((r) => r.unitId).sort()).toEqual(['e2', 'w']);
+    expect(getUnit(after, 'e2').hp).toBe(30);
+  });
+
+  it('倒れたユニットは、新しく魔法の狙いには選べない', () => {
+    const state = arena([
+      { id: 'gone', team: 'enemy', x: 4, z: 5, hp: 0 },
+      { id: 'e2', team: 'enemy', x: 0, z: 0 },
+    ]);
+    expect(() => applyAction(state, { type: 'cast', spellId: 'fire', target: { kind: 'unit', unitId: 'gone' } })).toThrow();
     const lastWithTarget = makeState({
       heights: flat(9, 9),
       units: [
@@ -127,8 +144,10 @@ describe('ユニットを狙う・マスを狙う', () => {
       ],
       activeId: 'e2',
     });
+    // 詠唱中の魔法は、倒れたマスへ予約範囲を示し続け、そこに発動する
+    expect(chargeArea(lastWithTarget, getUnit(lastWithTarget, 'm'))).toHaveLength(5);
     const r = applyAction(lastWithTarget, wait);
-    expect(r.events).toContainEqual({ type: 'spellFizzled', casterId: 'm', spellId: 'fire', reason: 'targetDefeated' });
+    expect(r.events).toContainEqual(expect.objectContaining({ type: 'spellResolved', casterId: 'm', center: { x: 4, z: 5 } }));
   });
 
   it('射程は指定の時だけ確かめる。射程の外は指定できないが、発動時に離れていても発動する', () => {

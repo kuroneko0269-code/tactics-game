@@ -594,6 +594,11 @@ body {
     align-items: stretch;
   }
 
+  /* 予測は、左下のカメラの操作ボタン（2列×3段、高さ 156px）より上に出し、重ならないようにする */
+  .preview {
+    bottom: calc(max(12px, env(safe-area-inset-bottom)) + 164px);
+  }
+
   .unit-info {
     max-width: none;
   }
@@ -638,7 +643,7 @@ body {
   --element: #3fd69a;
 }
 
-.element-holy {
+.element-light {
   --element: #ffe56b;
 }
 
@@ -650,7 +655,7 @@ body {
   color: #7ff0c0;
 }
 
-.element-text-holy {
+.element-text-light {
   color: #fff09a;
 }
 
@@ -800,4 +805,94 @@ body {
   border-color: #ff9a8a;
   background: #a8302a;
   color: #fff;
+}
+
+/* ---- フェーズ1 の仕上げ ---- */
+
+/* 移動をやり直すボタン。移動した直後だけ、行動のボタンの上に目立つ色で出す */
+.undo-area:empty {
+  display: none;
+}
+
+.hud-button.undo-move {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-color: #ff9d5c;
+  background: rgba(120, 52, 16, 0.92);
+  color: #fff;
+}
+
+.hud-button.undo-move .icon {
+  font-size: 20px;
+}
+
+/* 手番の終わりの向きを選ぶボタン。ユニットの周りの、画面上のその向きの側に置く（位置は hud.ts が毎フレーム決める） */
+.facing-pad {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.facing-pad[hidden] {
+  display: none;
+}
+
+.hud-button.facing-button {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 52px;
+  height: 52px;
+  min-width: 52px;
+  min-height: 52px;
+  padding: 0;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(20, 28, 42, 0.72);
+  color: #fff;
+  will-change: transform;
+}
+
+.hud-button.facing-button.selected {
+  background: #d9a52e;
+  border-color: #ffe08a;
+  color: #1b2433;
+}
+
+.facing-arrow {
+  display: flex;
+}
+
+.facing-arrow svg {
+  display: block;
+}
+
+/* 版（ビルドした日時）。画面の左下の隅に小さく出す */
+.version-badge {
+  position: absolute;
+  left: max(4px, env(safe-area-inset-left));
+  bottom: 1px;
+  font-size: 9px;
+  line-height: 1;
+  opacity: 0.6;
+  pointer-events: none;
+  text-shadow: 0 0 2px #000;
+}
+
+/* 新しい版があることを知らせ、押すと読み込み直すボタン。画面の上の中央に出す */
+.hud-button.update-button {
+  position: absolute;
+  left: 50%;
+  top: max(8px, env(safe-area-inset-top));
+  transform: translateX(-50%);
+  z-index: 10;
+  min-height: 48px;
+  font-weight: bold;
+  border-color: #8fe388;
+  background: #2f7a3a;
+  color: #fff;
+  white-space: nowrap;
 }

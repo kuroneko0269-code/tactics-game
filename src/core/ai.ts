@@ -27,7 +27,7 @@ import type {
   UnitState,
 } from './battleTypes';
 import { attackableTargets, attackRangeTiles, previewAttack } from './combat';
-import { DIRECTION_VECTORS, DIRECTIONS, directionToward, manhattan, type Coord, type RelativeSide } from './geometry';
+import { DIRECTION_VECTORS, DIRECTIONS, directionToward, manhattan, type Coord, type Direction, type RelativeSide } from './geometry';
 import { chargeArea, hasMpFor, previewSpellAt, spellRangeTiles } from './magic';
 import { getTile } from './map';
 import { canStep, isAlive, reachableTiles, unitAt } from './movement';
@@ -335,11 +335,7 @@ export function decideNextAction(state: BattleState, config: AiConfig): BattleAc
   const unit = activeUnit(state);
   const turn = state.turn;
   if (!unit || !turn) throw new Error('手番のユニットがいません');
-  const nearest = nearestOpponent(state, unit, unit);
-  const endTurn: BattleAction = {
-    type: 'endTurn',
-    facing: nearest ? directionToward(unit, nearest, unit.facing) : unit.facing,
-  };
+  const endTurn: BattleAction = { type: 'endTurn', facing: defaultFacing(state, unit) };
 
   // 詠唱中なら、待機して詠唱を続ける
   if (turn.chargingAtStart && unit.charging) return endTurn;
@@ -360,6 +356,15 @@ export function decideNextAction(state: BattleState, config: AiConfig): BattleAc
     }
   }
   return endTurn;
+}
+
+/**
+ * 手番の終わりの向きの初期値: 最も近い敵の方向（縦横の歩数で数え、同じなら HP の少ない敵）。
+ * 敵がいなければ今の向き。プレイヤーの向き選びの初期値と、AI の向きの両方に使う。
+ */
+export function defaultFacing(state: BattleState, unit: UnitState): Direction {
+  const nearest = nearestOpponent(state, unit, unit);
+  return nearest ? directionToward(unit, nearest, unit.facing) : unit.facing;
 }
 
 /** 手番が終わるまで AI の行動を適用し続ける */

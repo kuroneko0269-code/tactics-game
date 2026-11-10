@@ -2,7 +2,8 @@
  * 魔法（詠唱してから発動する行動）の計算。
  *
  * - 魔法は指定してもすぐには発動しない。詠唱の進み具合がユニットの CT と同じ時計で溜まり、しきい値に達すると発動する。
- * - 狙い方は2通り。ユニットを狙うと、発動までに対象が動いても追いかける。マスを狙うと、その場所に撃つ。
+ * - 狙い方は2通り。ユニットを狙うと、発動までに対象が動いても追いかける（発動前に倒れたら、倒れたマスに撃つ）。
+ *   マスを狙うと、その場所に撃つ。
  * - 範囲の魔法は、発動した時点で範囲内にいる全員に効く（攻撃魔法は味方も巻き込み、回復魔法は敵も回復する）。
  * - 範囲は中心からの歩数で決まる。中心のマスとの高さの差が「高さの許容」を超えるマスには届かない。
  * - 魔法は必ず命中し、向きと高低差の補正を受けない。乱数の揺れもない。
@@ -31,11 +32,15 @@ export function spellRangeTiles(map: BattleMap, spell: SpellDefinition, from: Co
   return map.tiles.filter((t) => manhattan(from, t) <= spell.range).map((t) => ({ x: t.x, z: t.z }));
 }
 
-/** 狙い先の中心のマス。ユニットを狙っていて、そのユニットが倒れていれば undefined */
+/**
+ * 狙い先の中心のマス。ユニットを狙っていれば、そのユニットの今の位置。
+ * 発動前にそのユニットが倒れていても不発にはせず、倒れたマスを中心にする（倒れたユニットは位置を変えないため）。
+ * そのユニットがいなければ undefined。
+ */
 export function targetCenter(state: BattleState, target: SpellTarget): Coord | undefined {
   if (target.kind === 'tile') return { x: target.x, z: target.z };
   const unit = state.units.find((u) => u.id === target.unitId);
-  return unit && isAlive(unit) ? { x: unit.x, z: unit.z } : undefined;
+  return unit ? { x: unit.x, z: unit.z } : undefined;
 }
 
 /** center を中心に spell が届くマス（範囲の内側で、中心との高さの差が許容以下のマス） */
@@ -108,6 +113,8 @@ export function isValidSpellTarget(
   from: Coord,
   target: SpellTarget,
 ): boolean {
+  // 倒れたユニットは、新しく狙うことはできない
+  if (target.kind === 'unit' && !state.units.some((u) => u.id === target.unitId && isAlive(u))) return false;
   const center = targetCenter(state, target);
   if (!center || !getTile(state.map, center.x, center.z)) return false;
   if (target.kind === 'tile' && (!Number.isInteger(target.x) || !Number.isInteger(target.z))) return false;
@@ -119,7 +126,7 @@ export function unitOnTile(state: BattleState, c: Coord): string | undefined {
   return unitAt(state, c.x, c.z)?.id;
 }
 
-/** 詠唱中の魔法が今発動したら届くマス（画面で予約範囲を薄く表示するため）。不発になる状態なら空 */
+/** 詠唱中の魔法が今発動したら届くマス（画面で予約範囲を薄く表示するため）。詠唱中でなければ空 */
 export function chargeArea(state: BattleState, caster: UnitState): Coord[] {
   const charge: ChargeState | null = caster.charging;
   if (!charge || !isAlive(caster)) return [];

@@ -5,6 +5,7 @@ import {
   chooseDamageSpell,
   chooseHealSpell,
   decideNextAction,
+  defaultFacing,
   playAiTurn,
   runAutoBattle,
   threatMap,
@@ -397,5 +398,35 @@ describe('敵 AI: 癒し手', () => {
       ],
     });
     expect(chooseHealSpell(state, state.units[0]!, true, testAi)).toBeUndefined();
+  });
+});
+
+describe('手番の終わりの向きの初期値', () => {
+  it('最も近い敵の方向を向く。距離が同じなら HP の少ない敵、敵がいなければ今の向き', () => {
+    const state = makeState({
+      heights: flat(9, 9),
+      units: [
+        { id: 'p', team: 'player', x: 4, z: 4, facing: 'south' },
+        // 遠い敵（西に 3）と近い敵（北に 2）
+        { id: 'far', team: 'enemy', x: 1, z: 4 },
+        { id: 'near', team: 'enemy', x: 4, z: 2 },
+        // 味方は数えない
+        { id: 'ally', team: 'player', x: 5, z: 4 },
+      ],
+    });
+    expect(defaultFacing(state, state.units[0]!)).toBe('north');
+
+    const tie = makeState({
+      heights: flat(9, 9),
+      units: [
+        { id: 'p', team: 'player', x: 4, z: 4, facing: 'south' },
+        { id: 'a', team: 'enemy', x: 4, z: 2 },
+        { id: 'b', team: 'enemy', x: 6, z: 4, hp: 10 },
+      ],
+    });
+    expect(defaultFacing(tie, tie.units[0]!)).toBe('east');
+
+    const alone = makeState({ heights: flat(9, 9), units: [{ id: 'p', team: 'player', x: 4, z: 4, facing: 'west' }] });
+    expect(defaultFacing(alone, alone.units[0]!)).toBe('west');
   });
 });

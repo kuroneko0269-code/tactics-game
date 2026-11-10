@@ -66,6 +66,12 @@ export const ZOOM_MAX = 4;
 const ZOOM_STEP = 1.35;
 /** 縦長の画面（スマホ縦向き）の初期の拡大率。マップ全体は入らないが、マスが大きく見える */
 export const PORTRAIT_ZOOM = 1.8;
+/**
+ * 横長で縦が狭い画面（スマホ横向き。高さ LANDSCAPE_MAX_HEIGHT px 以下）の初期の拡大率。
+ * 拡大率 1 ではマップ全体が収まるが、マスが小さく押しにくいため（フェーズ1 の仕上げで変更）。
+ */
+export const LANDSCAPE_ZOOM = 1.6;
+export const LANDSCAPE_MAX_HEIGHT = 500;
 const DISTANCE = 40;
 const ROTATE_SECONDS = 0.35;
 /** 滑らかに寄せる速さ（大きいほど速い） */
@@ -81,7 +87,8 @@ export function createCameraRig(options: CameraRigOptions): CameraRig {
   const raycaster = new THREE.Raycaster();
   const ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), -options.target.y);
   let aspect = 1;
-  let portrait = false;
+  /** 画面の形の種類。縦長・横長で縦が狭い（スマホ横向き）・それ以外（PC など） */
+  let shape: 'portrait' | 'landscape' | 'wide' = 'wide';
   let sized = false;
 
   let quarter = 0;
@@ -94,7 +101,7 @@ export function createCameraRig(options: CameraRigOptions): CameraRig {
   let elevation = degToRad(HEIGHT_ANGLES_DEG[heightLevel]);
   let goalElevation = elevation;
 
-  const initialZoom = () => (portrait ? PORTRAIT_ZOOM : 1);
+  const initialZoom = () => (shape === 'portrait' ? PORTRAIT_ZOOM : shape === 'landscape' ? LANDSCAPE_ZOOM : 1);
   let zoom = 1;
   let goalZoom = 1;
   /** 注視点の、マップの中心からのずれ（x, z） */
@@ -249,10 +256,10 @@ export function createCameraRig(options: CameraRigOptions): CameraRig {
     },
     resize(width, height) {
       aspect = width / Math.max(height, 1);
-      const wasPortrait = portrait;
-      portrait = aspect < 0.8;
-      // 最初の表示と、縦横が入れ替わった時は、その向きの初期の拡大率にする
-      if (width > 0 && height > 0 && (!sized || wasPortrait !== portrait)) {
+      const was = shape;
+      shape = aspect < 0.8 ? 'portrait' : height <= LANDSCAPE_MAX_HEIGHT ? 'landscape' : 'wide';
+      // 最初の表示と、縦横が入れ替わった時は、その形の初期の拡大率にする
+      if (width > 0 && height > 0 && (!sized || was !== shape)) {
         sized = true;
         zoom = goalZoom = initialZoom();
       }

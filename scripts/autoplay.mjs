@@ -14,6 +14,11 @@
 // - 途中で、拡大・縮小（ピンチ・ボタン・ホイール）、視点の移動（ドラッグ）、カメラの高さ、回転、視点を戻す、を行う。
 //   それらの操作の後でも、狙ったマスやユニットを正しくタップできることを確かめる。
 //   また、ドラッグやピンチの終わりに、マスやユニットが誤って選ばれないことも確かめる。
+// - マスやユニット、向きのボタンは、まず人の指のように狙いの中央から少しずらして（最大 8px、--finger=px で変更）タップする。
+//   意図と違う結果（何も起きない・違うマスへ移動・違う相手が選ばれる）になったら「押し直しが必要だった」と数え、
+//   違うマスへ移動した時は「移動をやり直す」で戻してから、正確な位置で押し直す。回数は最後に表示する。
+// - 最初の移動の後に「移動をやり直す」を押して戻れること、3手番に1回は向きを初期値（最も近い敵の方）から変えて
+//   向きのボタンを押すこと、向きのボタンが互いに重ならないこと、攻撃・魔法の予測がカメラのボタンに重ならないことも確かめる。
 //
 // 使い方:
 //   npm run autoplay                          スマホ縦向きと横向きで実行
@@ -40,6 +45,8 @@ const SCREENSHOT_DIR = args.screenshots;
 const HEADED = args.headed === 'true';
 /** 失敗した時の画面写真の置き場所 */
 const FAILURE_DIR = 'autoplay-output';
+/** 指のずれの最大（CSS ピクセル）。指先の太さによる狙いのずれの目安 */
+const FINGER_ERROR_PX = Number(args.finger ?? 8);
 /** 1つの画面サイズで1戦にかけてよい時間の上限 */
 const BATTLE_TIMEOUT_MS = Number(args.timeout ?? 12 * 60 * 1000);
 
@@ -90,20 +97,26 @@ async function main() {
   );
   check(expectedCasts > 0, `シード値 ${SEED} では味方が魔法を使いません。別のシード値を選んでください`);
 
-  const browser = await chromium.launch({
-    headless: !HEADED,
-    args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist'],
-  });
   const started = Date.now();
+  // 画面サイズごとに、別々のブラウザ（別々のプロセス）で動かす。
+  // 1つのブラウザで複数の画面を開くと、描画（ソフトウェアで行う）が1つの描画用プロセスに集まって順番待ちになり、
+  // 3つ同時・高解像度の画面写真つきの時に、時間切れで止まったように見えていたため。
   const results = await Promise.all(
-    VIEWPORTS.map((name) =>
-      playOneBattle(browser, baseUrl, name, core, expected).then(
-        (r) => ({ name, ok: true, ...r }),
-        (e) => ({ name, ok: false, error: e }),
-      ),
-    ),
+    VIEWPORTS.map(async (name) => {
+      const browser = await chromium.launch({
+        headless: !HEADED,
+        args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist'],
+      });
+      try {
+        const r = await playOneBattle(browser, baseUrl, name, core, expected);
+        return { name, ok: true, ...r };
+      } catch (e) {
+        return { name, ok: false, error: e };
+      } finally {
+        await browser.close();
+      }
+    }),
   );
-  await browser.close();
   await server.close();
 
   console.log('');
@@ -114,7 +127,14 @@ async function main() {
       console.log(
         `✔ ${label}: ${r.winner === 'player' ? '勝利' : '敗北'}（${r.turns}手番、味方の手番 ${r.playerTurns}、` +
           `魔法の指定 ${r.casts}回（ユニット狙い ${r.unitCasts}・マス狙い ${r.tileCasts}）、詠唱の中断 ${r.interrupts}回、` +
-          `向きをマスで選んだ ${r.facingByTile}回、カメラ操作 ${r.cameraOps}回、タップ ${r.taps}回、${r.seconds}秒）`,
+          `向きを変えた ${r.facingChanges}回、移動のやり直し ${r.undos}回、カメラ操作 ${r.cameraOps}回、タップ ${r.taps}回、${r.seconds}秒）`,
+      );
+      const f = r.finger;
+      const sum = (o) => Object.values(o).reduce((a, b) => a + b, 0);
+      console.log(
+        `  押し直しが必要だった回数: ${sum(f.retaps)} / 指のタップ ${sum(f.tries)}回` +
+          `（移動 ${f.retaps.move}/${f.tries.move}・うち違うマスへ移動 ${f.wrongMoves}、攻撃対象 ${f.retaps.target}/${f.tries.target}、` +
+          `魔法の狙い ${f.retaps.spell}/${f.tries.spell}、向き ${f.retaps.facing}/${f.tries.facing}）`,
       );
     } else {
       failed = true;
@@ -145,8 +165,9 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
   const { label, ...contextOptions } = options;
   // スマホの端末設定は WebKit 用なので、Chromium で開くために browserName 関係を外す
   delete contextOptions.defaultBrowserType;
-  // 画面写真を撮らない時は、描画を軽くするため画素の密度を 1 にする（ソフトウェア描画で遅いため）
-  if (!SCREENSHOT_DIR) contextOptions.deviceScaleFactor = 1;
+  // 画素の密度: 画面写真を撮らない時は 1、撮る時も 2 まで（スマホの端末設定は 3 だが、ソフトウェア描画では
+  // 描く画素の数が 2.25 倍になって遅く、3つ同時に動かすと時間切れになっていたため。画面の描画も 2 倍までにしている）
+  contextOptions.deviceScaleFactor = SCREENSHOT_DIR ? Math.min(2, contextOptions.deviceScaleFactor ?? 1) : 1;
   const context = await browser.newContext(contextOptions);
   const page = await context.newPage();
   holder.page = page;
@@ -161,7 +182,16 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
   const log = (msg) => console.log(`[${label}] ${msg}`);
   const started = Date.now();
   const deadline = started + BATTLE_TIMEOUT_MS;
-  const stats = { taps: 0, cameraOps: 0, playerTurns: 0, casts: 0, unitCasts: 0, tileCasts: 0, interrupts: 0, facingByTile: 0 };
+  const stats = { taps: 0, cameraOps: 0, playerTurns: 0, casts: 0, unitCasts: 0, tileCasts: 0, interrupts: 0, facingChanges: 0, undos: 0 };
+  /** 指に近いタップ（狙いの中央から少しずれる）の回数と、そのうち押し直しが必要だった回数（種類ごと） */
+  const finger = {
+    tries: { move: 0, target: 0, spell: 0, facing: 0 },
+    retaps: { move: 0, target: 0, spell: 0, facing: 0 },
+    /** 意図しないマスへ移動してしまった回数（押し直しの内数） */
+    wrongMoves: 0,
+    details: [],
+  };
+  let fingerIndex = 0;
   const policy = playerPolicy(core);
   const { text } = core.data;
   const INPUT_MODES = [
@@ -307,7 +337,8 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
         const t = window.__tactics;
         const points = [...(unitId ? [t.unitScreen(unitId)] : []), ...t.tilePoints(x, z)];
         // 隣のマスとの境目ぎりぎりの点は避ける（周り 2px でも同じマスが一番手前に写っている点だけを使う）
-        const firstAt = (px, py) => t.pickAt(px, py).find((c) => c !== null);
+        // タップした時に選ばれるマスの第一候補（tapJudge.ts の規則）
+        const firstAt = (px, py) => t.candidatesAt(px, py).coords[0];
         const offsets = [
           [0, 0],
           [2, 0],
@@ -348,45 +379,173 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
     const u = (await getState()).units.find((u) => u.id === id);
     await tapAt(await aimAt(u.x, u.z, id, `ユニット ${id}`));
   };
-  const tapArrow = async (dir) => {
-    for (let turn = 0; turn < 4; turn++) {
-      await bringIntoView(() => T((dir) => window.__tactics.arrowScreen(dir), dir), `向きの矢印 ${dir}`);
-      // 見る角度によっては、矢印どうしが画面の上で重なる。狙った矢印が一番手前に写っている点を探してタップする
-      const p = await T((dir) => {
-        const t = window.__tactics;
-        // 境目ぎりぎりの点は避ける（周り 2px でも同じ矢印に当たる点だけを使う）
-        const around = [
-          [0, 0],
-          [2, 0],
-          [-2, 0],
-          [0, 2],
-          [0, -2],
-        ];
-        return t
-          .arrowPoints(dir)
-          .find(
-            (p) => window.__clearOfButtons([p.x, p.y]) && around.every(([dx, dy]) => t.directionAt(p.x + dx, p.y + dy) === dir),
-          );
-      }, dir);
-      if (p) return tapAt(p);
-      // ほかの矢印に隠れて見えなければ、人がするようにカメラを回す
-      const before = await snapshot();
-      await pressCameraButton('camera-rotate-right');
-      stats.cameraOps++;
-      await waitCameraIdle();
-      check((await snapshot()) === before, '回転ボタンで、向きが誤って選ばれました');
-    }
-    // 矢印が小さく重なって選びにくい時は、人がするように、その方向の隣のマスをタップして向きを選ぶ
-    const state = await getState();
-    const unit = state.units.find((u) => u.id === state.turn.unitId);
-    const v = { north: [0, -1], east: [1, 0], south: [0, 1], west: [-1, 0] }[dir];
-    const tile = { x: unit.x + v[0], z: unit.z + v[1] };
-    check(
-      tile.x >= 0 && tile.z >= 0 && tile.x < state.map.width && tile.z < state.map.depth,
-      `向きの矢印 ${dir} の見えている部分が見つからず、その方向の隣のマスもありません`,
+  /** 向きのボタン（画面上でその向きの側に出る）の中央の点。出ていなければ undefined */
+  const facingButtonPoint = (dir) =>
+    T((dir) => {
+      const b = document.querySelector(`.facing-pad:not([hidden]) .facing-button[data-direction="${dir}"]`);
+      if (!b) return undefined;
+      const r = b.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    }, dir);
+  /** 向きのボタンを正確に押す */
+  const pressFacing = async (dir) => {
+    const b = page.locator(`.facing-pad .facing-button[data-direction="${dir}"]`);
+    stats.taps++;
+    if (touch) await b.tap();
+    else await b.click();
+  };
+  /** 向きのボタン4つが、互いに重ならず、画面の中にあり、指で押せる大きさか */
+  const checkFacingPad = async () => {
+    const boxes = await T(() =>
+      [...document.querySelectorAll('.facing-pad:not([hidden]) .facing-button')].map((b) => {
+        const r = b.getBoundingClientRect();
+        return { d: b.dataset.direction, x: r.left, y: r.top, w: r.width, h: r.height };
+      }),
     );
-    stats.facingByTile++;
-    await tapTile(tile.x, tile.z);
+    check(boxes.length === 4, `向きのボタンが4つありません（${boxes.length}）`);
+    check(new Set(boxes.map((b) => b.d)).size === 4, `向きのボタンの向きが重複しています（${JSON.stringify(boxes)}）`);
+    for (const b of boxes) {
+      check(b.w >= 48 && b.h >= 48, `向きのボタンが小さすぎます（${b.w}×${b.h}）`);
+      check(b.x >= 0 && b.y >= 0 && b.x + b.w <= viewport.width && b.y + b.h <= viewport.height, '向きのボタンが画面の外にあります');
+    }
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i];
+        const b = boxes[j];
+        const overlap = a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+        check(!overlap, `向きのボタンが重なっています（${a.d} と ${b.d}）`);
+      }
+    }
+  };
+  /** 2つの要素の画面上の四角が重なっているか */
+  const overlaps = (selA, selB) =>
+    T(
+      ([a, b]) => {
+        const ea = document.querySelector(a);
+        const eb = document.querySelector(b);
+        if (!ea || !eb || ea.hidden || eb.hidden) return false;
+        const ra = ea.getBoundingClientRect();
+        const rb = eb.getBoundingClientRect();
+        return ra.left < rb.right && rb.left < ra.right && ra.top < rb.bottom && rb.top < ra.bottom;
+      },
+      [selA, selB],
+    );
+
+  // ---- 指に近いタップ（押し直しの回数を数える） ----
+  /**
+   * 人の指は、狙った物の見えている中央から少しずれた所に触れる。そのずれを決まった順番で作る（最大 FINGER_ERROR_PX）。
+   * 乱数ではなく決まった並びなので、毎回同じ結果になる。
+   */
+  const fingerOffset = () => {
+    const k = fingerIndex++;
+    const angle = k * 2.399963; // 黄金角ずつ回して、いろいろな方向にずらす
+    const r = FINGER_ERROR_PX * [1 / 3, 2 / 3, 1][k % 3];
+    return { dx: Math.cos(angle) * r, dy: Math.sin(angle) * r };
+  };
+  /**
+   * マス（またはユニット）の、人が狙う点。ユニットなら体の中ほど、マスなら上面の中央。
+   * そこが手前の物に隠れていたら、上面の見えている点のうち中央に一番近い点。
+   */
+  const fingerPointOf = (x, z, unitId) =>
+    T(
+      ([x, z, unitId]) => {
+        const t = window.__tactics;
+        const center = unitId ? t.unitScreen(unitId) : t.tileScreen(x, z);
+        const isFirst = (p) => {
+          const first = t.candidatesAt(p.x, p.y).coords[0];
+          return first !== undefined && first.x === x && first.z === z;
+        };
+        const ok = (p) => window.__clearOfButtons([p.x, p.y]) && isFirst(p);
+        if (ok(center)) return center;
+        const d = (p) => Math.hypot(p.x - center.x, p.y - center.y);
+        return t
+          .tilePoints(x, z)
+          .filter(ok)
+          .sort((a, b) => d(a) - d(b))[0];
+      },
+      [x, z, unitId],
+    );
+  /**
+   * 指に近いタップを1回する。意図どおりなら true。違えば押し直しとして数え、必要なら元に戻して false を返す
+   * （その後、呼び出し側が正確な位置で押し直す）。
+   * point: 狙う点（undefined なら指のタップはせず、正確な位置で押す）
+   * outcome: タップの結果 'ok' | 'none'（何も起きない）| 'wrong'（違う物が選ばれた）
+   */
+  const fingerTap = async (kind, point, outcome, recover, what) => {
+    if (!point) return false;
+    finger.tries[kind]++;
+    const o = fingerOffset();
+    const p = { x: point.x + o.dx, y: point.y + o.dy };
+    const before = await T(([x, y]) => window.__tactics.candidatesAt(x, y).coords, [p.x, p.y]);
+    await tapAt(p);
+    const result = await outcome();
+    if (result === 'ok') return true;
+    finger.retaps[kind]++;
+    finger.details.push(`${kind} ${what}: ${result === 'wrong' ? '違う物が選ばれた' : '反応なし'}（ずれ ${o.dx.toFixed(1)},${o.dy.toFixed(1)} / 指の下 ${JSON.stringify(before.slice(0, 3))}）`);
+    if (result === 'wrong' && recover) await recover();
+    return false;
+  };
+  /** 少し待って、条件が満たされたか（満たされなければ false） */
+  const settle = async (fn, arg, timeout = 1500) => {
+    try {
+      await page.waitForFunction(fn, arg, { timeout, polling: 30 });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const UNDO_MOVE_LABEL = /^移動を(戻す|やり直す)$/;
+
+  /** 移動先のマスを指でタップする。違うマスへ移動したら「移動をやり直す」で戻してから、正確に押し直す */
+  const fingerMove = async (unit, x, z) => {
+    await aimAt(x, z, undefined, `マス (${x}, ${z})`);
+    const point = await fingerPointOf(x, z);
+    return fingerTap(
+      'move',
+      point,
+      async () => {
+        await settle(
+          ([id, ox, oz]) => {
+            const t = window.__tactics;
+            const u = t.state().units.find((u) => u.id === id);
+            return u.x !== ox || u.z !== oz || t.mode() !== 'main';
+          },
+          [unit.id, unit.x, unit.z],
+          800,
+        );
+        await waitForInput();
+        const now = (await getState()).units.find((u) => u.id === unit.id);
+        const mode = await getMode();
+        if (now.x === x && now.z === z) return 'ok';
+        if (now.x !== unit.x || now.z !== unit.z) return 'wrong';
+        if (mode.kind === 'confirmInterrupt') return 'wrong';
+        return mode.kind === 'main' ? 'none' : 'wrong';
+      },
+      async () => {
+        const mode = await getMode();
+        if (mode.kind === 'confirmInterrupt') {
+          await pressButton('やめない');
+          return;
+        }
+        if (mode.kind === 'main') {
+          finger.wrongMoves++;
+          stats.taps++;
+          const b = page.getByRole('button', { name: UNDO_MOVE_LABEL });
+          if (touch) await b.tap();
+          else await b.click();
+          await waitFor(
+            '移動のやり直し',
+            ([id, ox, oz]) => {
+              const t = window.__tactics;
+              const u = t.state().units.find((u) => u.id === id);
+              return u.x === ox && u.z === oz && t.mode() === 'main';
+            },
+            [unit.id, unit.x, unit.z],
+          );
+        }
+      },
+      `(${x}, ${z})`,
+    );
   };
 
   // ---- 魔法の指定 ----
@@ -406,7 +565,23 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
     const center =
       action.target.kind === 'tile' ? action.target : state.units.find((u) => u.id === action.target.unitId);
     const there = state.units.find((u) => u.hp > 0 && u.x === center.x && u.z === center.z);
-    if (there) {
+    const expectedMode = (m) =>
+      there ? m.kind === 'spellTargetKind' && m.unitId === there.id : m.kind === 'spellConfirm' && m.target.kind === 'tile' && m.target.x === center.x && m.target.z === center.z;
+    await aimAt(center.x, center.z, there?.id, `魔法の狙い (${center.x}, ${center.z})`);
+    const fingerOk = await fingerTap(
+      'spell',
+      await fingerPointOf(center.x, center.z, there?.id),
+      async () => {
+        const m = await getMode();
+        if (expectedMode(m)) return 'ok';
+        return m.kind === 'spellTarget' ? 'none' : 'wrong';
+      },
+      undefined,
+      `(${center.x}, ${center.z})`,
+    );
+    if (fingerOk) {
+      if (there) await pressButton(action.target.kind === 'unit' ? 'ユニットを狙う' : 'マスを狙う');
+    } else if (there) {
       await tapUnit(there.id);
       const chosen = await getMode();
       check(
@@ -423,6 +598,7 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
       `魔法の狙い先が違います（期待 ${JSON.stringify(action.target)} / 画面 ${JSON.stringify(chosen)}）`,
     );
     check(await page.locator('.preview').isVisible(), '魔法の予測が表示されていません');
+    check(!(await overlaps('.preview', '.camera-buttons')), '魔法の予測がカメラのボタンに重なっています');
     const title = await page.locator('.preview-title').textContent();
     check(title.includes(spellLabel), `魔法の予測の題が違います（${title}）`);
     if (stats.casts === 0) await screenshot('cast-preview');
@@ -545,8 +721,44 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
     const action = policy(state);
     if (action.type === 'move') {
       check(mode.kind === 'main', `移動の前のモードが main ではありません（${mode.kind}）`);
+      if (await fingerMove(unit, action.x, action.z)) {
+        await waitFor(
+          `${unit.id} が (${action.x}, ${action.z}) へ移動`,
+          ([id, x, z]) => {
+            const u = window.__tactics.state().units.find((u) => u.id === id);
+            return u.x === x && u.z === z && window.__tactics.mode() !== 'busy';
+          },
+          [unit.id, action.x, action.z],
+        );
+        // 最初の移動の後だけ、「移動をやり直す」を押して元の位置に戻り、もう一度同じマスへ移動する
+        if (stats.undos === 0 && (await getMode()).kind === 'main') {
+          await waitForInput();
+          await screenshot('undo-move');
+          await pressButton('移動をやり直す');
+          await waitFor(
+            '移動のやり直し',
+            ([id, x, z]) => {
+              const u = window.__tactics.state().units.find((u) => u.id === id);
+              return u.x === x && u.z === z && window.__tactics.mode() === 'main';
+            },
+            [unit.id, unit.x, unit.z],
+          );
+          check(!(await page.getByRole('button', { name: '移動をやり直す' }).isVisible()), '移動をやり直した後も「移動をやり直す」が出ています');
+          stats.undos++;
+          await tapTile(action.x, action.z);
+          await waitFor(
+            `${unit.id} が (${action.x}, ${action.z}) へ移動（やり直しの後）`,
+            ([id, x, z]) => {
+              const u = window.__tactics.state().units.find((u) => u.id === id);
+              return u.x === x && u.z === z && window.__tactics.mode() !== 'busy';
+            },
+            [unit.id, action.x, action.z],
+          );
+        }
+        continue;
+      }
       const tapPoint = await aimAt(action.x, action.z, undefined, `マス (${action.x}, ${action.z})`);
-      const picked = await T(([x, y]) => window.__tactics.pickAt(x, y), [tapPoint.x, tapPoint.y]);
+      const picked = await T(([x, y]) => window.__tactics.candidatesAt(x, y), [tapPoint.x, tapPoint.y]);
       await tapAt(tapPoint);
       await page
         .waitForFunction(
@@ -574,12 +786,30 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
     } else if (action.type === 'attack') {
       if (mode.kind === 'main') await pressButton('攻撃');
       await waitFor('攻撃対象を選ぶ', () => window.__tactics.mode() === 'targeting');
-      await tapUnit(action.targetId);
+      const target = state.units.find((u) => u.id === action.targetId);
+      await aimAt(target.x, target.z, target.id, `ユニット ${target.id}`);
+      const ok = await fingerTap(
+        'target',
+        await fingerPointOf(target.x, target.z, target.id),
+        async () => {
+          const m = await getMode();
+          if (m.kind === 'confirm' && m.targetId === action.targetId) return 'ok';
+          return m.kind === 'confirm' ? 'wrong' : 'none';
+        },
+        undefined,
+        target.id,
+      );
+      if (!ok) await tapUnit(action.targetId);
       const chosen = await getMode();
       check(
         chosen.kind === 'confirm' && chosen.targetId === action.targetId,
         `ユニット ${action.targetId} をタップしたのに、選ばれたのは ${JSON.stringify(chosen)}`,
       );
+      check(!(await overlaps('.preview', '.camera-buttons')), '攻撃の予測がカメラのボタンに重なっています');
+      if (!stats.attackPreviewShot) {
+        stats.attackPreviewShot = true;
+        await screenshot('attack-preview');
+      }
       await pressButton('確定');
       await waitFor('攻撃の後', () => window.__tactics.mode() !== 'busy' && window.__tactics.mode() !== 'confirm');
     } else if (action.type === 'cast') {
@@ -588,16 +818,28 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
     } else if (action.type === 'endTurn') {
       if (mode.kind === 'main') await pressButton('待機');
       await waitFor('向きを選ぶ', () => window.__tactics.mode() === 'facing');
+      // 向きを選ぶ時、ユニットが画面の端ならカメラが寄るので、止まるのを待ってからボタンの位置を読む
+      await waitCameraIdle();
+      await checkFacingPad();
+      if (stats.facingChanges === 0) await screenshot('facing-pad');
       if ((await getMode()).facing !== action.facing) {
-        await tapArrow(action.facing);
+        stats.facingChanges++;
+        const ok = await fingerTap(
+          'facing',
+          await facingButtonPoint(action.facing),
+          async () => ((await getMode()).facing === action.facing ? 'ok' : 'wrong'),
+          undefined,
+          action.facing,
+        );
+        if (!ok) await pressFacing(action.facing);
         const chosen = await getMode();
         check(
           chosen.kind === 'facing' && chosen.facing === action.facing,
-          `矢印 ${action.facing} をタップしたのに、選ばれた向きは ${JSON.stringify(chosen)} / タップの記録 ${JSON.stringify(await T(() => window.__tactics.tapLog()))} / 矢印の位置 ${JSON.stringify(await T((d) => window.__tactics.arrowScreen(d), action.facing))} / 今その点の向き ${await T(() => { const l = window.__tactics.tapLog().at(-1); return String(window.__tactics.directionAt(l.x, l.y)); })} / 点 ${JSON.stringify(await T((d) => window.__tactics.arrowPoints(d).map((p) => [p.x, p.y, window.__tactics.directionAt(p.x, p.y)]), action.facing))}`,
+          `向きのボタン ${action.facing} を押したのに、選ばれた向きは ${JSON.stringify(chosen)}`,
         );
       }
       const turn = state.turnNumber;
-      await pressButton('決定');
+      await pressButton('確定');
       await waitFor('次の手番へ', (turn) => window.__tactics.state().turnNumber !== turn || window.__tactics.mode() === 'ended', turn);
     } else {
       throw new CheckError(`想定していない行動: ${JSON.stringify(action)}`);
@@ -614,6 +856,8 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
   check(resultText === (final.winner === 'player' ? '勝利' : '敗北'), `決着の表示が違います（${resultText}）`);
 
   check(stats.casts > 0, '味方の魔法を一度も指定していません');
+  check(stats.undos > 0, '「移動をやり直す」を一度も確かめていません');
+  check(stats.facingChanges > 0, '向きのボタンを一度も押していません');
   check(stats.unitCasts > 0 && stats.tileCasts > 0, `ユニット狙いとマス狙いの両方を確かめられませんでした（${stats.unitCasts} / ${stats.tileCasts}）`);
 
   // 「もう一度」で新しい戦闘が始まること
@@ -656,7 +900,7 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
   await pressButton('待機');
   await waitFor('向きを選ぶ', () => window.__tactics.mode() === 'facing');
   const facing = (await getMode()).facing;
-  await pressButton('決定');
+  await pressButton('確定');
   await waitFor('次の手番へ', () => window.__tactics.state().turnNumber > 1);
   // 直後に敵の手番が来ると HP は変わりうるので、位置・向き・MP・詠唱だけを比べる
   const drillExpected = drill.finish(facing).units.find((u) => u.id === drill.unitId);
@@ -666,9 +910,11 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, holder
   check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
 
   await context.close();
+  for (const d of finger.details) log(`押し直し: ${d}`);
   return {
     winner: final.winner,
     turns: final.turnNumber,
+    finger,
     ...stats,
     seconds: Math.round((Date.now() - started) / 1000),
   };
@@ -682,6 +928,11 @@ function playerPolicy(core) {
   let changed = false;
   return (state) => {
     const action = core.ai.decideNextAction(state, core.data.ai);
+    // 3手番に1回、向きを初期値（最も近い敵の方）から時計回りに1つ変える（向きのボタンを押す操作を確かめるため）
+    if (action.type === 'endTurn' && state.turnNumber % 3 === 0) {
+      const order = ['north', 'east', 'south', 'west'];
+      return { ...action, facing: order[(order.indexOf(action.facing) + 1) % 4] };
+    }
     if (changed || action.type !== 'cast' || action.target.kind !== 'unit') return action;
     changed = true;
     const target = state.units.find((u) => u.id === action.target.unitId);

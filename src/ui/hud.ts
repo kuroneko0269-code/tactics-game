@@ -1,5 +1,5 @@
 import type { SpellEffect, SpellElement, Team, UnitState } from '../core/battleTypes';
-import type { RelativeSide } from '../core/geometry';
+import type { Direction, RelativeSide } from '../core/geometry';
 import { TEXT, unitName } from './text';
 
 /**
@@ -15,7 +15,25 @@ export interface BattleHud {
   showPreview(preview: AttackPreviewView | undefined): void;
   showSpellPreview(preview: SpellPreviewView | undefined): void;
   showResult(winner: Team | undefined, turns: number, onRetry?: () => void): void;
+  /**
+   * 移動を取り消してやり直すボタン。移動した直後（まだ行動していない間）だけ、行動のボタンの上に目立たせて出す。
+   * undefined で消す。
+   */
+  setUndoMove(onClick: (() => void) | undefined): void;
+  /**
+   * 手番の終わりの向きを選ぶボタン（4つ）を、ユニットの周りの画面上のその向きの側に出す。
+   * unitId が undefined なら消す。selected は今選んでいる向き。
+   */
+  showFacingPad(unitId: string | undefined, selected?: Direction, onPick?: (direction: Direction) => void): void;
+  /** 毎フレーム呼ぶ（向きのボタンを、カメラの動きに合わせて置き直す） */
+  update(): void;
 }
+
+/** 向きのボタンを置くための画面座標（BattleView.facingScreen と同じ形） */
+export type FacingScreen = (unitId: string) => {
+  center: { x: number; y: number };
+  dirs: Record<Direction, { x: number; y: number }>;
+};
 
 /** 行動順の欄の1つぶん。ユニットの手番か、魔法の発動 */
 export type TurnOrderEntry =
@@ -77,6 +95,8 @@ export interface HudHandlers {
   onResetView(): void;
   /** 最初のカメラの高さの段階 */
   readonly initialHeight: number;
+  /** 向きのボタンを置く位置を求める */
+  readonly facingScreen: FacingScreen;
 }
 
 export function createHud(root: HTMLElement, mapId: string, handlers: HudHandlers): BattleHud {
@@ -116,14 +136,57 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
   showHeight(handlers.initialHeight);
   const hint = el('div', 'hint');
   const actions = el('div', 'actions');
+  const undoArea = el('div', 'undo-area');
   const actionArea = el('div', 'action-area');
-  actionArea.append(hint, actions);
+  actionArea.append(undoArea, hint, actions);
   bottom.append(camera, actionArea);
 
   const result = el('div', 'result');
   result.hidden = true;
 
-  root.append(top, preview, bottom, result);
+  // 向きのボタン。ほかの表示より先に置き、情報欄やボタンの下に隠れるようにする（それらを覆わないため）
+  const facingPad = el('div', 'facing-pad');
+  facingPad.hidden = true;
+  const facingButtons = FACING_SLOTS.map((slot) => {
+    const b = button('', TEXT.facing.slots[slot], () => {}, 'hud-button facing-button');
+    b.querySelector('.label')!.remove();
+    const arrow = el('span', 'facing-arrow');
+    arrow.innerHTML = ARROW_SVG;
+    b.append(arrow);
+    b.dataset.slot = slot;
+    facingPad.append(b);
+    return { slot, button: b, arrow };
+  });
+  let facing: { unitId: string; selected?: Direction; onPick?: (d: Direction) => void } | undefined;
+  for (const f of facingButtons) {
+    f.button.addEventListener('click', () => {
+      const d = f.button.dataset.direction as Direction | undefined;
+      if (d && facing?.onPick) facing.onPick(d);
+    });
+  }
+  const placeFacingPad = () => {
+    if (!facing) return;
+    const { center, dirs } = handlers.facingScreen(facing.unitId);
+    const assigned = assignFacingSlots(center, dirs);
+    // ユニットが画面の端にいる時は、4つのボタンをまとめて内側へずらす（1つずつ端に寄せると重なるため）
+    const reach = FACING_RADIUS_PX * Math.SQRT1_2 + 30;
+    const cx = clampNum(center.x, reach, Math.max(reach, window.innerWidth - reach));
+    const cy = clampNum(center.y, reach, Math.max(reach, window.innerHeight - reach));
+    for (const f of facingButtons) {
+      const a = assigned.find((x) => x.slot === f.slot)!;
+      const angle = SLOT_ANGLES[f.slot];
+      const x = cx + Math.cos(angle) * FACING_RADIUS_PX;
+      const y = cy + Math.sin(angle) * FACING_RADIUS_PX;
+      f.button.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
+      f.button.dataset.direction = a.direction;
+      f.button.classList.toggle('selected', a.direction === facing.selected);
+      f.button.setAttribute('aria-pressed', String(a.direction === facing.selected));
+      // 矢印は、その向きの実際の方向（画面上の角度）を指す
+      f.arrow.style.transform = `rotate(${a.angle}rad)`;
+    }
+  };
+
+  root.append(facingPad, top, preview, bottom, result);
 
   let infoState = { name: '', mapName: TEXT.mapNames[mapId] ?? mapId };
 
@@ -267,6 +330,20 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
       note.textContent = TEXT.spellPreview.note;
       preview.append(list, note);
     },
+    setUndoMove(onClick) {
+      undoArea.innerHTML = '';
+      if (!onClick) return;
+      const b = button('↩', TEXT.buttons.undoMove, onClick, 'hud-button action undo-move');
+      undoArea.append(b);
+    },
+    showFacingPad(unitId, selected, onPick) {
+      facing = unitId ? { unitId, selected, onPick } : undefined;
+      facingPad.hidden = !facing;
+      placeFacingPad();
+    },
+    update() {
+      placeFacingPad();
+    },
     showResult(winner, turns, onRetry) {
       result.hidden = !winner;
       if (!winner) return;
@@ -281,6 +358,62 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
       result.append(box);
     },
   };
+}
+
+/** 向きのボタンの置き場所（画面上の右上・右下・左下・左上） */
+type FacingSlot = 'upRight' | 'downRight' | 'downLeft' | 'upLeft';
+const FACING_SLOTS: readonly FacingSlot[] = ['upRight', 'downRight', 'downLeft', 'upLeft'];
+/** 置き場所の画面上の角度（右が 0、下が +。ラジアン） */
+const SLOT_ANGLES: Record<FacingSlot, number> = {
+  upRight: -Math.PI / 4,
+  downRight: Math.PI / 4,
+  downLeft: (3 * Math.PI) / 4,
+  upLeft: (5 * Math.PI) / 4,
+};
+/**
+ * ユニットの中心から向きのボタンまでの距離（px）。隣り合うボタンの中心の間は約 90px になり、
+ * 48px のボタンどうしが重ならない（以前の 3D の矢印は、見る角度によって重なって押しにくかった）。
+ */
+const FACING_RADIUS_PX = 64;
+const ARROW_SVG =
+  '<svg viewBox="-12 -12 24 24" width="26" height="26" aria-hidden="true"><path d="M11 0 L0 -9 L0 -4 L-10 -4 L-10 4 L0 4 L0 9 Z" fill="currentColor"/></svg>';
+
+/**
+ * 4つの向きを、画面上の4つの置き場所（右上・右下・左下・左上）に割り振る。
+ * 画面上でその向きに 1 マス進んだ点の角度を求め、並び順（時計回り）を保ったまま、置き場所とのずれが最も小さい割り振りにする。
+ * 斜めから見下ろすカメラでは、4つの向きはいつも画面の斜め4方向に見えるので、それぞれのボタンはその向きの側に来る。
+ */
+export function assignFacingSlots(
+  center: { x: number; y: number },
+  dirs: Record<Direction, { x: number; y: number }>,
+): { direction: Direction; slot: FacingSlot; angle: number }[] {
+  const list = (Object.keys(dirs) as Direction[])
+    .map((direction) => ({ direction, angle: Math.atan2(dirs[direction].y - center.y, dirs[direction].x - center.x) }))
+    .sort((a, b) => a.angle - b.angle);
+  const slots = [...FACING_SLOTS].sort((a, b) => normalizeAngle(SLOT_ANGLES[a]) - normalizeAngle(SLOT_ANGLES[b]));
+  let best = 0;
+  let bestCost = Infinity;
+  for (let offset = 0; offset < 4; offset++) {
+    const cost = list.reduce((sum, d, i) => sum + angleGap(d.angle, SLOT_ANGLES[slots[(i + offset) % 4]!]), 0);
+    if (cost < bestCost) {
+      bestCost = cost;
+      best = offset;
+    }
+  }
+  return list.map((d, i) => ({ ...d, slot: slots[(i + best) % 4]! }));
+}
+
+/** 角度を -π〜π に直す */
+function normalizeAngle(a: number): number {
+  return Math.atan2(Math.sin(a), Math.cos(a));
+}
+
+function angleGap(a: number, b: number): number {
+  return Math.abs(normalizeAngle(a - b));
+}
+
+function clampNum(v: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, v));
 }
 
 /**
