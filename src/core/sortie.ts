@@ -1,8 +1,8 @@
 /**
  * 出撃: 部隊（Roster）と、戦場の定義（マップ・味方の配置・敵の強さの段階）から、1戦ぶんの定義を組み立てる。
  *
- * - 味方は、部隊の並び順に、戦場の味方の配置へ置く。能力値・使えるアビリティは部隊の育成の状態から決まる。
- * - 敵は、選んだ段階で決まったレベル・成長値・習得済みアビリティを持つ（プレイヤーのレベルに合わせて変えない）。
+ * - 味方は、部隊の並び順に、戦場の味方の配置へ置く。能力値・使えるアビリティ・付けている受動的なアビリティは、部隊の育成の状態から決まる。
+ * - 敵は、選んだ段階で決まったレベル・成長値・習得済みアビリティ・受動的なアビリティを持つ（プレイヤーのレベルに合わせて変えない）。
  * - 並び順（行動順が同時になった時の順番）は、味方と敵を1体ずつ組にして、組ごとに先になる側を入れ替える
  *   （味方1, 敵1, 敵2, 味方2, 味方3, 敵3, ...）。どちらかの陣営を先にまとめると、同じ素早さのユニットどうしでは
  *   常にその陣営が先に動いてしまうため。
@@ -10,7 +10,7 @@
 import type { BattleSetup, UnitPlacement } from './battleTypes';
 import type { Direction } from './geometry';
 import type { MapDefinition } from './map';
-import { unitCommands, type GameCatalog, type Roster } from './progression';
+import { equippedPassives, unitCommands, type GameCatalog, type Roster } from './progression';
 
 /** 配置の場所 */
 export interface Slot {
@@ -54,6 +54,7 @@ export function buildSortie(
     level: u.level,
     growth: u.growth,
     commands: unitCommands(u, catalog),
+    passives: equippedPassives(u),
   }));
   const enemies: UnitPlacement[] = tier.units.map((u) => ({ ...u, team: 'enemy' }));
   return { id: `${site.id}:${tier.id}`, map: site.map, units: interleaveTeams(players, enemies) };

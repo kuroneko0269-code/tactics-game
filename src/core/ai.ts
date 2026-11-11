@@ -16,6 +16,12 @@
  *   ただし、どちらの軍も一定の手番数のあいだ攻撃や魔法を行っていなければ、前進に切り替える（にらみ合いを防ぐ）。
  * - 癒し手は、攻撃が届かない位置を保つ（にらみ合いの時も前に出ない。ただし癒し手しか残っていなければ前進する）。
  * - 攻撃や魔法の後には移動しない。最後は、最も近い相手の方を向いて手番を終える。
+ * - 突き飛ばし: 落下ダメージが見込める時と、詠唱中の相手を中断できる時に優先する（通常攻撃で倒せる相手は除く）。
+ * - 足止めの矢: 鈍足の付いていない相手には、鈍足の値打ち（slowValue）を足して通常攻撃と比べる。
+ * - 封じ（魔術師）: 魔法を使う相手（詠唱中なら最優先）に、相手の攻撃が届かない位置から使う。
+ *   2体以上を巻き込める攻撃魔法がある時は、そちらを優先する。
+ * - 守りの祈り（癒し手）: 回復が要らない時、相手の攻撃が届く位置にいる味方を2体以上（protectMinAllies）守れるなら使う。
+ * - 反撃を付けた相手には、反撃で倒されてしまう攻撃はしない（その攻撃で相手を倒せる時を除く）。
  *
  * 味方側のユニットにも同じ思考を使える（テストやバランス確認で AI 同士を戦わせるため）。
  */
@@ -30,8 +36,9 @@ import type {
   UnitState,
 } from './battleTypes';
 import { attackableTargets, attackRangeTiles, previewAttack, weaponFits } from './combat';
+import { hasStatus, statusTurns } from './effects';
 import { DIRECTION_VECTORS, DIRECTIONS, directionToward, manhattan, type Coord, type Direction, type RelativeSide } from './geometry';
-import { canCast, chargeArea, previewSpellAt, spellRangeTiles } from './magic';
+import { canCast, chargeArea, hasMpFor, previewSpellAt, spellRangeTiles } from './magic';
 import { getTile } from './map';
 import { canStep, isAlive, reachableTiles, unitAt } from './movement';
 
@@ -53,6 +60,10 @@ export interface AiConfig {
    * - hold: 攻撃できない時は、その場から動かない
    */
   readonly stance?: 'normal' | 'advance' | 'hold';
+  /** 足止めの矢を選ぶ時に、鈍足を付けることを何ダメージぶんの値打ちとみなすか */
+  readonly slowValue: number;
+  /** 守りの祈りを使う目安。相手の攻撃が届く位置にいて、まだ守りの付いていない味方を、この数以上守れる時に使う */
+  readonly protectMinAllies: number;
 }
 
 /** 陣営ごとの AI の設定 */
@@ -113,6 +124,7 @@ export function chooseAttack(
   unit: UnitState,
   canMove: boolean,
   safeOnly = false,
+  config?: AiConfig,
 ): AttackPlan | undefined {
   const threat = threatMap(state, unit.team);
   let best: { plan: AttackPlan; score: number[] } | undefined;
@@ -121,8 +133,11 @@ export function chooseAttack(
     if (safeOnly && danger > 0) continue;
     for (const target of attackableTargets(state, unit, pos)) {
       const preview = previewAttack(state, unit, target, pos);
+      // 反撃で倒されてしまう攻撃は避ける（その攻撃で相手を倒せる時を除く）
+      const lethalCounter = preview.counter && preview.counter.damage >= unit.hp && preview.damage < target.hp ? 1 : 0;
       // 小さいほど良い。先頭の項目から順に比べる
       const score = [
+        lethalCounter,
         target.charging ? 0 : 1,
         SIDE_RANK[preview.side],
         -heightOf(state, pos),
@@ -137,18 +152,49 @@ export function chooseAttack(
     }
   }
   if (!best) return undefined;
-  return withBestStrike(state, unit, best.plan);
+  return withBestStrike(state, unit, best.plan, config);
+}
+
+/**
+ * 突き飛ばしを優先する場面を探す: 落下ダメージが見込める時と、詠唱中の相手を中断できる時。
+ * 通常攻撃で倒せる相手と、反撃で倒されてしまう相手は除く。
+ * 詠唱の中断 → 「命中率 ×（ダメージ + 落下・追加のダメージ）」の大きい順 → 攻撃の届かない位置 → 移動の少ない位置 で選ぶ。
+ */
+export function chooseKnockback(state: BattleState, unit: UnitState, canMove: boolean): AttackPlan | undefined {
+  const strike = unit.strikes.find((s) => s.knockback && weaponFits(s.weapons, unit.weapon));
+  if (!strike) return undefined;
+  const threat = threatMap(state, unit.team);
+  let best: { plan: AttackPlan; score: number[] } | undefined;
+  for (const pos of candidatePositions(state, unit, canMove)) {
+    const danger = threat.get(keyOf(state, pos)) ?? 0;
+    for (const target of attackableTargets(state, unit, pos)) {
+      if (manhattan(pos, target) !== 1) continue;
+      if (previewAttack(state, unit, target, pos).damage >= target.hp) continue;
+      const p = previewAttack(state, unit, target, pos, strike);
+      const fall = p.knockback?.to && p.knockback.damage > 0 ? p.knockback.damage : 0;
+      if (!p.interrupts && fall === 0) continue;
+      if (p.counter && p.counter.damage >= unit.hp) continue;
+      const expected = p.hitPercent * Math.min(target.hp, p.damage + (p.knockback?.damage ?? 0));
+      const score = [p.interrupts ? 0 : 1, -expected, danger, pos.steps, tieBreak(state, pos.x, pos.z, target.x, target.z)];
+      if (!best || compareScores(score, best.score) < 0) {
+        best = { plan: { position: { x: pos.x, z: pos.z }, targetId: target.id, abilityId: strike.id }, score };
+      }
+    }
+  }
+  return best?.plan;
 }
 
 /**
  * 攻撃する位置と相手が決まった後で、通常攻撃と技（強打など）のどちらで攻撃するかを決める。
- * 「命中率 × 与えるダメージ（相手の残り HP まで）」が大きい方。同じなら通常攻撃
+ * 「命中率 × 与えるダメージ（相手の残り HP まで。突き飛ばしは落下・追加のダメージも含む）」が大きい方。同じなら通常攻撃。
+ * 鈍足を付ける技は、鈍足の付いていない相手なら、鈍足の値打ち（config.slowValue）をダメージに足して比べる
  */
-function withBestStrike(state: BattleState, unit: UnitState, plan: AttackPlan): AttackPlan {
+function withBestStrike(state: BattleState, unit: UnitState, plan: AttackPlan, config?: AiConfig): AttackPlan {
   const target = state.units.find((u) => u.id === plan.targetId)!;
   const expected = (strike?: UnitState['strikes'][number]) => {
     const p = previewAttack(state, unit, target, plan.position, strike);
-    return p.hitPercent * Math.min(p.damage, target.hp);
+    const slow = strike?.inflicts === 'slow' && !hasStatus(target, 'slow') ? (config?.slowValue ?? 0) : 0;
+    return p.hitPercent * (Math.min(p.damage + (p.knockback?.damage ?? 0), target.hp) + slow);
   };
   let best: { abilityId?: string; value: number } = { value: expected() };
   for (const strike of unit.strikes) {
@@ -178,11 +224,20 @@ function targetFor(state: BattleState, center: Coord, followTeam: Team): SpellTa
  * 詠唱の速さより与えるダメージの大きさを優先する（遅くて強い魔法「雷」を使う場面）。
  */
 export function chooseDamageSpell(state: BattleState, unit: UnitState, canMove: boolean): SpellPlan | undefined {
+  return damageSpellChoice(state, unit, canMove)?.plan;
+}
+
+/** chooseDamageSpell の中身。巻き込む敵の数 − 味方の数（net）も返す */
+function damageSpellChoice(
+  state: BattleState,
+  unit: UnitState,
+  canMove: boolean,
+): { plan: SpellPlan; net: number } | undefined {
   const spells = unit.spells.filter((s) => s.effect === 'damage' && canCast(unit, s));
   if (spells.length === 0) return undefined;
   const opponent: Team = unit.team === 'player' ? 'enemy' : 'player';
   const threat = threatMap(state, unit.team);
-  let best: { plan: SpellPlan; score: number[] } | undefined;
+  let best: { plan: SpellPlan; score: number[]; net: number } | undefined;
   for (const pos of candidatePositions(state, unit, canMove)) {
     const self = { ...unit, x: pos.x, z: pos.z };
     const danger = (threat.get(keyOf(state, pos)) ?? 0) > 0 ? 1 : 0;
@@ -217,6 +272,98 @@ export function chooseDamageSpell(state: BattleState, unit: UnitState, canMove: 
         const target = targetFor(state, center, opponent);
         const follows = target.kind === 'unit' ? 0 : 1;
         const score = [danger, -net, -priority, single, speed, follows, -damage, spell.mpCost, pos.steps, tieBreak(state, pos.x, pos.z, center.x, center.z)];
+        if (!best || compareScores(score, best.score) < 0) {
+          best = { plan: { position: { x: pos.x, z: pos.z }, spellId: spell.id, target }, score, net };
+        }
+      }
+    }
+  }
+  return best && { plan: best.plan, net: best.net };
+}
+
+/** 魔法を使う相手か（MP の足りる魔法を持っている） */
+const usesMagic = (u: UnitState) => u.spells.some((s) => s.kind === 'magic' && s.effect !== 'status' && hasMpFor(u, s));
+
+/**
+ * 封じ（沈黙を付ける魔法）を使う位置・魔法・狙い先を選ぶ。相手の攻撃が届かない位置からだけ使う。
+ * 魔法を使う相手で、沈黙が付いておらず、味方の封じがまだ向かっていない相手を狙う。
+ * 魔法を詠唱中の相手（中断できる）→ 回復魔法を使う相手 → 移動の少ない位置 の順に選ぶ。狙いは相手を追いかける
+ */
+export function chooseSealSpell(state: BattleState, unit: UnitState, canMove: boolean): SpellPlan | undefined {
+  const spells = unit.spells.filter((s) => s.effect === 'status' && s.inflicts === 'silence' && canCast(unit, s));
+  if (spells.length === 0) return undefined;
+  const pending = new Set<string>();
+  for (const u of state.units) {
+    if (u.team !== unit.team || !u.charging || u.charging.target.kind !== 'unit') continue;
+    const sp = u.spells.find((x) => x.id === u.charging!.spellId);
+    if (sp?.inflicts === 'silence') pending.add(u.charging.target.unitId);
+  }
+  const targets = state.units.filter(
+    (o) => isAlive(o) && o.team !== unit.team && usesMagic(o) && !hasStatus(o, 'silence') && !pending.has(o.id),
+  );
+  if (targets.length === 0) return undefined;
+  const threat = threatMap(state, unit.team);
+  let best: { plan: SpellPlan; score: number[] } | undefined;
+  for (const pos of candidatePositions(state, unit, canMove)) {
+    if ((threat.get(keyOf(state, pos)) ?? 0) > 0) continue;
+    for (const spell of spells) {
+      for (const o of targets) {
+        const d = manhattan(pos, o);
+        if (d < (spell.minRange ?? 0) || d > spell.range) continue;
+        const chargingMagic = o.charging && o.spells.find((x) => x.id === o.charging!.spellId)?.kind === 'magic';
+        const healer = o.spells.some((x) => x.effect === 'heal');
+        const score = [chargingMagic ? 0 : 1, healer ? 0 : 1, pos.steps, tieBreak(state, pos.x, pos.z, o.x, o.z)];
+        if (!best || compareScores(score, best.score) < 0) {
+          best = { plan: { position: { x: pos.x, z: pos.z }, spellId: spell.id, target: { kind: 'unit', unitId: o.id } }, score };
+        }
+      }
+    }
+  }
+  return best?.plan;
+}
+
+/**
+ * 守りの祈り（守りを付ける範囲の魔法）を使う位置・魔法・狙い先を選ぶ。
+ * 相手の攻撃が届く位置にいて、守りが付いていない（残り 1 手番以下を含む）味方を protectMinAllies 体以上守れる時だけ。
+ * 相手を巻き込む場所は選ばない。守れる味方が多い → 攻撃の届かない位置 → 移動の少ない位置 の順。
+ * 味方の守りの祈りがすでに届く予定の味方は数えない。
+ */
+export function chooseProtectSpell(
+  state: BattleState,
+  unit: UnitState,
+  canMove: boolean,
+  config: AiConfig,
+): SpellPlan | undefined {
+  const spells = unit.spells.filter((s) => s.effect === 'status' && s.inflicts === 'protect' && canCast(unit, s));
+  if (spells.length === 0) return undefined;
+  const covered = new Set<string>();
+  for (const caster of state.units) {
+    if (caster.team !== unit.team || !caster.charging) continue;
+    const spell = caster.spells.find((s) => s.id === caster.charging!.spellId);
+    if (spell?.inflicts !== 'protect') continue;
+    const area = chargeArea(state, caster);
+    for (const u of state.units) if (area.some((t) => t.x === u.x && t.z === u.z)) covered.add(u.id);
+  }
+  const threat = threatMap(state, unit.team);
+  const needs = (u: UnitState) =>
+    u.team === unit.team && statusTurns(u, 'protect') <= 1 && !covered.has(u.id) && (threat.get(keyOf(state, u)) ?? 0) > 0;
+  let best: { plan: SpellPlan; score: number[] } | undefined;
+  for (const pos of candidatePositions(state, unit, canMove)) {
+    const self = { ...unit, x: pos.x, z: pos.z };
+    const danger = (threat.get(keyOf(state, pos)) ?? 0) > 0 ? 1 : 0;
+    for (const spell of spells) {
+      for (const center of spellRangeTiles(state.map, spell, pos)) {
+        const preview = previewSpellAt(state, unit, spell, center, self);
+        let allies = 0;
+        let enemies = 0;
+        for (const r of preview.results) {
+          const u = r.unitId === unit.id ? self : state.units.find((x) => x.id === r.unitId)!;
+          if (u.team !== unit.team) enemies++;
+          else if (needs(u)) allies++;
+        }
+        if (enemies > 0 || allies < config.protectMinAllies) continue;
+        const target = targetFor(state, center, unit.team);
+        const score = [-allies, danger, target.kind === 'unit' ? 0 : 1, pos.steps, tieBreak(state, pos.x, pos.z, center.x, center.z)];
         if (!best || compareScores(score, best.score) < 0) {
           best = { plan: { position: { x: pos.x, z: pos.z }, spellId: spell.id, target }, score };
         }
@@ -354,13 +501,21 @@ function choosePlan(state: BattleState, unit: UnitState, canMove: boolean, confi
   if (isHealer(unit)) {
     const heal = chooseHealSpell(state, unit, canMove, config);
     if (heal) return { kind: 'cast', ...heal };
+    const protect = chooseProtectSpell(state, unit, canMove, config);
+    if (protect) return { kind: 'cast', ...protect };
     // 癒し手は、相手の攻撃が届かない位置からだけ殴る（癒し手しか残っていなければ、どこからでも）
-    const attack = chooseAttack(state, unit, canMove, !onlyHealersLeft(state, unit));
+    const attack = chooseAttack(state, unit, canMove, !onlyHealersLeft(state, unit), config);
     return attack && { kind: 'attack', ...attack };
   }
-  const spell = chooseDamageSpell(state, unit, canMove);
-  if (spell) return { kind: 'cast', ...spell };
-  const attack = chooseAttack(state, unit, canMove);
+  // 2体以上を巻き込める攻撃魔法 → 封じ → 1体を狙う攻撃魔法 の順
+  const spell = damageSpellChoice(state, unit, canMove);
+  if (spell && spell.net >= 2) return { kind: 'cast', ...spell.plan };
+  const seal = chooseSealSpell(state, unit, canMove);
+  if (seal) return { kind: 'cast', ...seal };
+  if (spell) return { kind: 'cast', ...spell.plan };
+  const knock = chooseKnockback(state, unit, canMove);
+  if (knock) return { kind: 'attack', ...knock };
+  const attack = chooseAttack(state, unit, canMove, false, config);
   return attack && { kind: 'attack', ...attack };
 }
 

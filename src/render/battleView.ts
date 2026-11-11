@@ -44,6 +44,8 @@ export interface BattleView {
   animateMove(unitId: string, path: readonly Coord[]): Promise<void>;
   /** 攻撃の動き。当たった（または外れた）瞬間に onImpact を呼ぶ */
   animateAttack(event: Extract<BattleEvent, { type: 'attacked' }>, onImpact: () => void): Promise<void>;
+  /** 突き飛ばしで押し出される動き（押し出せない時は、その場で揺れる）。止まった瞬間に onImpact を呼ぶ */
+  animateKnockback(event: Extract<BattleEvent, { type: 'knockedBack' }>, onImpact: () => void): Promise<void>;
   animateDefeat(unitId: string): Promise<void>;
   wait(seconds: number): Promise<void>;
   /** 各ユニットの頭上の画面座標（px） */
@@ -433,6 +435,35 @@ export function createBattleView(options: {
       }
       attacker.puppet.body.position.set(0, 0, 0);
       target.puppet.body.position.set(0, 0, 0);
+    },
+    async animateKnockback(event, onImpact) {
+      const v = visual(event.unitId);
+      if (!event.to) {
+        // 押し出せない: 壁やユニットにぶつかったように揺れる
+        onImpact();
+        await tweens.play(0.3, (t) => {
+          v.puppet.setFlash(1 - t);
+          v.puppet.body.position.x = Math.sin(t * Math.PI * 8) * 0.07 * (1 - t);
+        });
+        v.puppet.body.position.x = 0;
+        return;
+      }
+      const from = mapView.tileTop(event.from.x, event.from.z);
+      const to = mapView.tileTop(event.to.x, event.to.z);
+      const drop = Math.max(0, from.y - to.y);
+      // 横へ滑ってから、低ければ落ちる
+      await tweens.play(0.22 + drop * 0.06, (t) => {
+        const k = easeOutCubic(Math.min(1, t * 1.6));
+        v.puppet.group.position.x = from.x + (to.x - from.x) * k;
+        v.puppet.group.position.z = from.z + (to.z - from.z) * k;
+        const fall = t < 0.5 ? 0 : ((t - 0.5) / 0.5) ** 2;
+        v.puppet.group.position.y = from.y + 0.08 * Math.sin(Math.PI * Math.min(1, t * 2)) - (from.y - to.y) * fall;
+      });
+      place(v, event.to);
+      onImpact();
+      if (event.damage > 0) {
+        await tweens.play(0.25, (t) => v.puppet.setFlash(1 - t));
+      }
     },
     async animateDefeat(unitId) {
       const v = visual(unitId);

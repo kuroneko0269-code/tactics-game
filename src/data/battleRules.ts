@@ -12,4 +12,21 @@ export const battleRules: BattleRules = {
   heightDamagePercentCap: 20,
   minimumDamage: 1,
   chargingDamagePercent: 125,
+  /**
+   * 状態変化。turns は持続（付いたユニットの手番の回数。手番が終わるたびに 1 減る）。
+   * harmful は付けられた側に不利な効果か（経験値の計算で、味方に使った行動かを見分ける）
+   */
+  status: {
+    /** 守り: 受けるダメージ -25%（倍率 75%、切り捨て）。3手番 */
+    protect: { harmful: false, turns: 3, damageTakenPercent: 75 },
+    /** 鈍足: 移動力 -2（最低 1）。2手番 */
+    slow: { harmful: true, turns: 2, movePenalty: 2, minMove: 1 },
+    /** 沈黙: 魔法を使えない。付いた時に魔法を詠唱中なら、詠唱が中断される。2手番 */
+    silence: { harmful: true, turns: 2 },
+  },
+  /**
+   * 突き飛ばし。ダメージは押し出された相手の最大 HP に対する割合（切り捨て、最小 1）。守りが付いていれば減る。
+   * 落下: 高さの差 1 につき 8%（高さの差 2 なら 16%）。押し出せない時（マップの外・ほかのユニット・登れない段差）: 8%
+   */
+  knockback: { fallDamagePercentPerHeight: 8, blockedDamagePercent: 8 },
 };

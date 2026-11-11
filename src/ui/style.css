@@ -1154,11 +1154,36 @@ body {
   border: 2px solid rgba(242, 193, 78, 0.5);
 }
 
-/* アビリティの習得 */
-.learn-job {
+/* アビリティの習得（行動・リアクション・サポート・ムーブに分ける） */
+.learn-job,
+.learn-group {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.learn-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 13px;
+  opacity: 0.85;
+}
+
+.learn-info .sub.learn-cost {
+  opacity: 1;
+  color: #ffd98a;
+}
+
+/* ジョブのレベルが足りないもの */
+.learn-info .sub.learn-cost.locked {
+  color: #ff9a8a;
+}
+
+.ability-slots dd .sub {
+  display: block;
+  font-size: 12px;
+  opacity: 0.75;
 }
 
 .learn-row {
@@ -1255,4 +1280,103 @@ body {
 
 .element-text-none {
   color: #eeeeee;
+}
+
+/* ---- 状態変化と受動的なアビリティ（フェーズ2-1b） ---- */
+
+/* 頭上の状態変化の目印（HP の上に1文字ずつ） */
+.unit-label-status {
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 16px));
+  display: flex;
+  gap: 1px;
+  white-space: nowrap;
+}
+
+.unit-label-status[hidden] {
+  display: none;
+}
+
+.status-badge {
+  display: inline-block;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 1px;
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 14px;
+  font-weight: 900;
+  text-align: center;
+  color: #10131a;
+}
+
+.status-badge.status-protect {
+  background: #ffe56b;
+}
+
+.status-badge.status-slow {
+  background: #8fd0ff;
+}
+
+.status-badge.status-silence {
+  background: #c9a2ff;
+}
+
+/* 情報の欄の、状態変化と受動的なアビリティ */
+.info-status {
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.info-status.status-protect {
+  color: #ffe56b;
+}
+
+.info-status.status-slow {
+  color: #8fd0ff;
+}
+
+.info-status.status-silence {
+  color: #c9a2ff;
+}
+
+.info-passives {
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+/* リアクションが発動した時の名前 */
+.popup.reaction {
+  top: -48px;
+  color: #ffd25a;
+  font-size: 16px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: rgba(10, 14, 22, 0.75);
+  text-shadow: none;
+}
+
+/* 攻撃の予測: 反撃の見込みと、補正の内訳 */
+.preview-table dd.counter {
+  color: #ff9a8a;
+}
+
+.preview-notes {
+  margin: 4px 0 0;
+  padding-left: 1.2em;
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+/* スマホ横向き: 予測欄が下のボタンに重ならないよう、注記を省いて文字を小さくする */
+@media (max-height: 500px) and (orientation: landscape) {
+  .info-passives,
+  .preview-notes {
+    display: none;
+  }
+
+  .preview .preview-table {
+    font-size: 12px;
+    line-height: 1.3;
+  }
 }

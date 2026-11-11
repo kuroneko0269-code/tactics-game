@@ -6,9 +6,11 @@
  * - 味方のいるマスは通過できるが、止まれない。
  * - 敵のいるマスは通過もできない。
  * - 戦闘不能のユニットは邪魔にならない。
+ * - 鈍足が付いていると、移動力が下がる（effects.ts）。
  */
 import type { BattleState, UnitState } from './battleTypes';
 import { DIRECTION_VECTORS, DIRECTIONS, type Coord } from './geometry';
+import { effectiveMove } from './effects';
 import { getTile } from './map';
 
 export interface ReachableTile extends Coord {
@@ -43,7 +45,8 @@ export function reachableTiles(state: BattleState, unit: UnitState): ReachableTi
   const paths = new Map<number, Coord[]>([[key(start), [start]]]);
   let frontier: Coord[] = [start];
 
-  for (let step = 0; step < unit.stats.move; step++) {
+  const move = effectiveMove(unit, state.rules);
+  for (let step = 0; step < move; step++) {
     const next: Coord[] = [];
     for (const from of frontier) {
       for (const dir of DIRECTIONS) {

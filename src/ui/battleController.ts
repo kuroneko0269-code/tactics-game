@@ -10,12 +10,13 @@ import type {
   SpellTarget,
   UnitState,
 } from '../core/battleTypes';
-import { attackableTargets, attackRangeTiles, previewAttack, strikeOf, weaponFits } from '../core/combat';
+import { attackableTargets, attackRangeTiles, previewAttack, strikeOf, weaponFits, type AttackPreview } from '../core/combat';
+import { isSilencedFor, mpCostOf, passiveIdOf } from '../core/effects';
 import { directionToward, type Coord, type Direction } from '../core/geometry';
 import { chargeArea, hasMpFor, inSpellRange, previewSpellAt, spellOf, spellRangeTiles, targetCenter } from '../core/magic';
 import { reachableTiles, unitAt } from '../core/movement';
 import { predictTimeline } from '../core/turnOrder';
-import type { BattleHud, HudAction, TurnOrderEntry } from './hud';
+import type { AttackPreviewView, BattleHud, HudAction, TurnOrderEntry } from './hud';
 import { TEXT, unitName } from './text';
 import type { UnitLabels } from './unitLabels';
 
@@ -25,7 +26,7 @@ import type { UnitLabels } from './unitLabels';
  *
  * 3D 表示（src/render）には直接依存せず、main.ts から渡される BattleViewPort を通して動かす。
  */
-export type MarkKind = 'move' | 'attack' | 'target' | 'selected' | 'spellRange' | 'spellArea';
+export type MarkKind = 'move' | 'attack' | 'target' | 'selected' | 'spellRange' | 'spellArea' | 'push';
 
 export interface BattleViewPort {
   sync(state: BattleState): void;
@@ -37,6 +38,8 @@ export interface BattleViewPort {
   turnTo(unitId: string, facing: Direction): Promise<void>;
   animateMove(unitId: string, path: readonly Coord[]): Promise<void>;
   animateAttack(event: Extract<BattleEvent, { type: 'attacked' }>, onImpact: () => void): Promise<void>;
+  /** 突き飛ばしで押し出される（押し出せない時は、その場で揺れる）。止まった瞬間に onImpact を呼ぶ */
+  animateKnockback(event: Extract<BattleEvent, { type: 'knockedBack' }>, onImpact: () => void): Promise<void>;
   animateCast(event: Extract<BattleEvent, { type: 'castStarted' }>, element: SpellElement): Promise<void>;
   animateSpell(event: Extract<BattleEvent, { type: 'spellResolved' }>, onImpact: () => void): Promise<void>;
   animateDefeat(unitId: string): Promise<void>;
@@ -185,8 +188,58 @@ export function createBattleController(start: ActionResult, deps: BattleControll
     if (!weaponFits(weapons, unit.weapon)) {
       return { disabled: true, detail: TEXT.abilityBlocked.weapon(weapons!.map((w) => TEXT.weapons[w]).join('・')) };
     }
-    if (spell) return { disabled: !hasMpFor(unit, spell), detail: spell.mpCost > 0 ? `${TEXT.mp} ${spell.mpCost}` : undefined };
+    if (spell && isSilencedFor(unit, spell)) return { disabled: true, detail: TEXT.abilityBlocked.silence };
+    if (spell) {
+      const cost = mpCostOf(unit, spell);
+      return { disabled: !hasMpFor(unit, spell), detail: cost > 0 ? `${TEXT.mp} ${cost}` : undefined };
+    }
     return { disabled: false };
+  };
+
+  /** 攻撃の予測を、予測欄の表示の形にする（補正の内訳、押し出し、合計、反撃） */
+  const attackPreviewView = (title: string, attacker: UnitState, target: UnitState, p: AttackPreview): AttackPreviewView => {
+    const extraRows: { label: string; value: string; className?: string }[] = [];
+    const notes: string[] = [];
+    if (p.focusBonus > 0) notes.push(TEXT.preview.focus(abilityName(passiveIdOf(attacker, 'weaponHitBonus') ?? ''), p.focusBonus));
+    if (p.evadePenalty > 0) notes.push(TEXT.preview.evade(abilityName(passiveIdOf(target, 'evade') ?? ''), p.evadePenalty));
+    if (p.protectPercent !== 100) notes.push(TEXT.preview.protect(p.protectPercent));
+    if (p.interrupts) notes.push(TEXT.preview.interrupts);
+    if (p.inflicts) notes.push(TEXT.preview.inflicts(TEXT.statuses[p.inflicts]));
+    if (p.knockback) {
+      const kb = p.knockback;
+      extraRows.push({
+        label: TEXT.preview.knockback,
+        value: kb.to
+          ? TEXT.preview.knockbackTo(kb.damage)
+          : TEXT.preview.knockbackBlocked(TEXT.preview.knockbackReasons[kb.blockedBy ?? 'edge'] ?? '', kb.damage),
+        className: kb.damage > 0 ? 'up' : '',
+      });
+      if (kb.damage > 0) {
+        const total = p.damage + kb.damage;
+        extraRows.push({ label: '', value: TEXT.preview.total(total, Math.max(0, target.hp - total)) });
+      }
+    }
+    if (p.counter) {
+      extraRows.push({
+        label: TEXT.preview.counter,
+        value: TEXT.preview.counterDetail(p.counter.damage, p.counter.hitPercent),
+        className: 'counter',
+      });
+      notes.push(`${TEXT.preview.counter}: ${TEXT.preview.counterNote}`);
+    }
+    return {
+      title,
+      targetName: unitName(target.id, target.jobId),
+      side: p.side,
+      hitPercent: p.hitPercent,
+      damage: p.damage,
+      heightPercent: p.heightPercent,
+      chargingPercent: p.chargingPercent,
+      targetHp: target.hp,
+      targetMaxHp: target.stats.maxHp,
+      extraRows,
+      notes,
+    };
   };
 
   /** 今のモードに合わせて、マスの色分け・ボタン・案内文を出し直す */
@@ -262,9 +315,12 @@ export function createBattleController(start: ActionResult, deps: BattleControll
           z: u.z,
           kind: mode.kind === 'confirm' && mode.targetId === u.id ? ('selected' as const) : ('target' as const),
         }));
-        view.setMarks([...range, ...targetMarks]);
         const abilityId = mode.abilityId;
         const strike = abilityId === null ? undefined : strikeOf(unit, abilityId);
+        // 突き飛ばしは、押し出す先もマップ上に示す
+        const pushTo =
+          mode.kind === 'confirm' ? previewAttack(state, unit, getUnit(state, mode.targetId), unit, strike).knockback?.to : undefined;
+        view.setMarks([...range, ...targetMarks, ...(pushTo ? [{ ...pushTo, kind: 'push' as const }] : [])]);
         const backFromTargeting = (): Mode =>
           abilityId === null ? { kind: 'main' } : { kind: 'abilityMenu', command: commandIndexOf(unit, abilityId) };
         if (mode.kind === 'targeting') {
@@ -276,17 +332,9 @@ export function createBattleController(start: ActionResult, deps: BattleControll
           const target = getUnit(state, mode.targetId);
           const p = previewAttack(state, unit, target, unit, strike);
           hud.setHint('');
-          hud.showPreview({
-            title: strike ? TEXT.preview.strikeTitle(abilityName(strike.id)) : TEXT.preview.title,
-            targetName: unitName(target.id, target.jobId),
-            side: p.side,
-            hitPercent: p.hitPercent,
-            damage: p.damage,
-            heightPercent: p.heightPercent,
-            chargingPercent: p.chargingPercent,
-            targetHp: target.hp,
-            targetMaxHp: target.stats.maxHp,
-          });
+          hud.showPreview(
+            attackPreviewView(strike ? TEXT.preview.strikeTitle(abilityName(strike.id)) : TEXT.preview.title, unit, target, p),
+          );
           const action: BattleAction =
             abilityId === null ? { type: 'attack', targetId: target.id } : { type: 'attack', targetId: target.id, abilityId };
           hud.setActions([
@@ -358,10 +406,11 @@ export function createBattleController(start: ActionResult, deps: BattleControll
         const affected = preview.results.map((r) => ({ ...r, unit: getUnit(state, r.unitId) }));
         const allies = affected.filter((r) => r.unit.team === unit.team).length;
         const enemies = affected.length - allies;
+        const harmful = spell.effect === 'damage' || (spell.effect === 'status' && state.rules.status[spell.inflicts!].harmful);
         const warning =
-          spell.effect === 'damage' && allies > 0
+          harmful && allies > 0
             ? TEXT.spellPreview.allyWarning(allies)
-            : spell.effect === 'heal' && enemies > 0
+            : !harmful && enemies > 0
               ? TEXT.spellPreview.enemyHealWarning(enemies)
               : '';
         const target = mode.target;
@@ -374,14 +423,32 @@ export function createBattleController(start: ActionResult, deps: BattleControll
               ? TEXT.spellPreview.targetUnit(unitName(target.unitId, getUnit(state, target.unitId).jobId))
               : TEXT.spellPreview.targetTile,
           timing,
-          mpText: spell.mpCost > 0 ? TEXT.spellPreview.mp(spell.mpCost, unit.mp) : '',
-          results: affected.map((r) => ({
-            name: unitName(r.unitId, r.unit.jobId),
-            team: r.unit.team,
-            amount: r.amount,
-            hp: r.hp,
-            maxHp: r.unit.stats.maxHp,
-          })),
+          mpText: mpCostOf(unit, spell) > 0 ? TEXT.spellPreview.mp(mpCostOf(unit, spell), unit.mp) : '',
+          results: affected.map((r) => {
+            const u = r.unit;
+            const reducedBy = [
+              ...(spell.effect === 'damage' && u.statuses.some((x) => x.id === 'protect') ? [TEXT.statuses.protect] : []),
+              ...(spell.effect === 'damage' && spell.kind === 'magic' && passiveIdOf(u, 'magicShell')
+                ? [abilityName(passiveIdOf(u, 'magicShell')!)]
+                : []),
+            ];
+            const interrupts =
+              spell.inflicts === 'silence' && u.id !== unit.id && u.charging && spellOf(u, u.charging.spellId).kind === 'magic';
+            return {
+              name: unitName(r.unitId, u.jobId),
+              team: u.team,
+              amount: r.amount,
+              hp: r.hp,
+              maxHp: u.stats.maxHp,
+              statusText: spell.effect === 'status' ? TEXT.spellPreview.status(TEXT.statuses[spell.inflicts!]) : undefined,
+              note:
+                [
+                  r.side ? TEXT.spellPreview.angle(TEXT.sides[r.side], TEXT.preview.heightPercent(r.heightPercent ?? 0)) : '',
+                  interrupts ? TEXT.spellPreview.interrupt : '',
+                  reducedBy.length > 0 ? TEXT.spellPreview.reduced(reducedBy.join('・')) : '',
+                ].join('') || undefined,
+            };
+          }),
           warning,
         });
         showTurnOrder(spell.id);
@@ -427,6 +494,12 @@ export function createBattleController(start: ActionResult, deps: BattleControll
     refresh();
   };
 
+  /**
+   * 再生中の出来事の時点で付いている状態変化。出来事は1つの行動の分をまとめて受け取るので、
+   * 最終的な状態から、その出来事の後の様子を近似する（付いた・消えた順に頭上の目印を更新する）
+   */
+  const statusesAfter = (unitId: string) => getUnit(state, unitId).statuses.map((x) => x.id);
+
   /** 出来事を順に再生する */
   const play = async (events: readonly BattleEvent[]) => {
     for (const ev of events) {
@@ -455,6 +528,33 @@ export function createBattleController(start: ActionResult, deps: BattleControll
             else labels.popMiss(ev.targetId);
             labels.setHp(ev.targetId, ev.targetHp, target.stats.maxHp);
           });
+          break;
+        }
+        case 'knockedBack': {
+          const target = getUnit(state, ev.unitId);
+          await view.animateKnockback(ev, () => {
+            if (ev.damage > 0) labels.popDamage(ev.unitId, ev.damage);
+            labels.setHp(ev.unitId, ev.hp, target.stats.maxHp);
+          });
+          showReserved();
+          break;
+        }
+        case 'statusAdded':
+          labels.popText(ev.unitId, TEXT.statuses[ev.status]);
+          labels.setStatuses(ev.unitId, statusesAfter(ev.unitId));
+          await view.wait(0.25);
+          break;
+        case 'statusExpired':
+          labels.setStatuses(ev.unitId, statusesAfter(ev.unitId));
+          break;
+        case 'reaction':
+          // リアクションが発動した時は、アビリティの名前を短く表示する
+          labels.popText(ev.unitId, abilityName(ev.abilityId), 'reaction');
+          await view.wait(0.35);
+          break;
+        case 'mpRestored': {
+          const u = getUnit(state, ev.unitId);
+          labels.setMp(ev.unitId, ev.mp, u.stats.maxMp);
           break;
         }
         case 'castStarted': {
@@ -494,6 +594,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
           await view.wait(0.4);
           break;
         case 'defeated':
+          labels.setStatuses(ev.unitId, []);
           await view.animateDefeat(ev.unitId);
           break;
         case 'turnEnded':
@@ -572,7 +673,10 @@ export function createBattleController(start: ActionResult, deps: BattleControll
         await view.wait(ENEMY_PAUSE.beforeMove);
       } else if (action.type === 'attack') {
         const target = getUnit(state, action.targetId);
-        view.setMarks([{ x: target.x, z: target.z, kind: 'target' }]);
+        const strike = action.abilityId === undefined ? undefined : strikeOf(actor(), action.abilityId);
+        // 敵の突き飛ばしも、押し出す先を見せてから行う
+        const pushTo = previewAttack(state, actor(), target, actor(), strike).knockback?.to;
+        view.setMarks([{ x: target.x, z: target.z, kind: 'target' }, ...(pushTo ? [{ ...pushTo, kind: 'push' as const }] : [])]);
         await view.focusTiles([actor(), target]);
         await view.wait(ENEMY_PAUSE.beforeAttack);
       } else if (action.type === 'cast') {
@@ -599,6 +703,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
     for (const u of state.units) {
       labels.setHp(u.id, u.hp, u.stats.maxHp);
       labels.setMp(u.id, u.mp, u.stats.maxMp);
+      labels.setStatuses(u.id, u.statuses.map((x) => x.id));
     }
     hud.showResult(undefined, 0);
     mode = { kind: 'busy' };

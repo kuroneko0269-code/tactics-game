@@ -1,4 +1,4 @@
-import type { UnitStats } from '../core/battleTypes';
+import type { JobAbility, JobDefinition, PassiveSlot, UnitStats } from '../core/battleTypes';
 import {
   changeJob,
   expToNext,
@@ -15,8 +15,11 @@ import {
   learnedAbilities,
   learnRefusal,
   nextJobLevelJp,
+  PASSIVE_SLOTS,
+  passiveChoices,
   replaceUnit,
   secondaryChoices,
+  setPassive,
   setSecondary,
   statsWithGrowth,
   unitStats,
@@ -30,7 +33,9 @@ import { TEXT, unitName } from './text';
 
 /**
  * 編成の画面。部隊の一覧と、ユニットごとの詳しい画面（能力値・成長値・成長率・アビリティ）。
- * ジョブチェンジ（変える前に能力値の変化と成長率の違いを見られる）、アビリティの習得、副コマンドの付け替えができる。
+ * ジョブチェンジ（変える前に能力値の変化と成長率の違いを見られる）、アビリティの習得、副コマンドの付け替え、
+ * 受動的なアビリティ（リアクション・サポート・ムーブ）の付け替えができる。
+ * 習得の一覧は、行動・リアクション・サポート・ムーブに分けて、効果の説明・必要な JP・必要なジョブのレベルを出す。
  * 育成の計算は core（progression.ts）に任せ、ここは表示と、押されたボタンを core の関数に渡すだけ。
  */
 export interface RosterScreenDeps {
@@ -51,7 +56,8 @@ type View =
   | { kind: 'detail'; unitId: string }
   | { kind: 'jobs'; unitId: string; previewJobId?: string }
   | { kind: 'learn'; unitId: string }
-  | { kind: 'sub'; unitId: string };
+  | { kind: 'sub'; unitId: string }
+  | { kind: 'passive'; unitId: string; slot: PassiveSlot };
 
 export function createRosterScreen(root: HTMLElement, deps: RosterScreenDeps): RosterScreen {
   const { catalog, rules } = deps;
@@ -169,12 +175,21 @@ export function createRosterScreen(root: HTMLElement, deps: RosterScreenDeps): R
       el('dt', undefined, TEXT.roster.subCommand),
       el('dd', 'sub-command', commandText(u, u.slots.secondary)),
     );
+    for (const slot of PASSIVE_SLOTS) {
+      const id = u.slots[slot];
+      const dd = el('dd', `passive-slot slot-${slot}`, id ? abilityName(id) : TEXT.roster.none);
+      if (id) dd.append(el('span', 'sub', TEXT.abilityHelp[id] ?? ''));
+      abilities.append(el('dt', undefined, TEXT.passiveSlots[slot]), dd);
+    }
     box.append(abilities);
     const menu = el('div', 'screen-menu');
     menu.append(
       screenButton(TEXT.roster.changeJob, () => go({ kind: 'jobs', unitId: u.id })),
       screenButton(TEXT.roster.learn, () => go({ kind: 'learn', unitId: u.id })),
       screenButton(TEXT.roster.changeSub, () => go({ kind: 'sub', unitId: u.id })),
+      ...PASSIVE_SLOTS.map((slot) =>
+        screenButton(TEXT.roster.changePassive(TEXT.passiveSlots[slot]), () => go({ kind: 'passive', unitId: u.id, slot })),
+      ),
     );
     box.append(menu);
   };
@@ -246,43 +261,88 @@ export function createRosterScreen(root: HTMLElement, deps: RosterScreenDeps): R
     requestAnimationFrame(() => preview.scrollIntoView({ block: 'nearest' }));
   };
 
+  /** 受動的なアビリティの枠の種類 */
+  const slotOf = (id: string): PassiveSlot | undefined => catalog.passives.find((p) => p.id === id)?.slot;
+
   const renderLearn = (box: HTMLElement, u: RosterUnit) => {
     box.append(header(TEXT.roster.learnTitle, () => go({ kind: 'detail', unitId: u.id })));
     box.append(el('p', 'screen-note', `${unitName(u.id, u.jobId)} ・ ${TEXT.roster.learnHelp}`));
-    // 今のジョブを先頭に
-    const jobsInOrder = [findJob(catalog, u.jobId), ...catalog.jobs.filter((j) => j.id !== u.jobId)];
+    // 今のジョブを先頭に。解放されていないジョブは出さない
+    const jobsInOrder = [findJob(catalog, u.jobId), ...catalog.jobs.filter((j) => j.id !== u.jobId)].filter((j) =>
+      isJobUnlocked(u, j, rules),
+    );
+    // ジョブごとのレベルと JP（どのジョブの JP で覚えるかが分かるように）
+    const summary = el('div', 'learn-summary');
     for (const job of jobsInOrder) {
-      if (!isJobUnlocked(u, job, rules) || (job.abilities ?? []).length === 0) continue;
-      const section = el('section', 'learn-job');
-      section.dataset.jobId = job.id;
-      section.append(
-        el(
-          'h2',
-          'screen-subtitle',
-          `${TEXT.commands[job.id] ?? job.id}（${TEXT.roster.jobLevel(jobName(job.id), jobLevel(u, job.id, rules))} ・ ${TEXT.roster.jp(jobProgress(u, job.id).jp)}）`,
-        ),
+      summary.append(
+        el('span', 'learn-jp', `${TEXT.roster.jobLevel(jobName(job.id), jobLevel(u, job.id, rules))} ・ ${TEXT.roster.jp(jobProgress(u, job.id).jp)}`),
       );
-      for (const a of job.abilities ?? []) {
-        const row = el('div', 'learn-row');
-        row.dataset.abilityId = a.id;
-        const info = el('div', 'learn-info');
-        info.append(el('strong', undefined, abilityName(a.id)), el('span', 'sub', TEXT.abilityHelp[a.id] ?? ''));
-        row.append(info);
-        const refusal = learnRefusal(u, job.id, a.id, catalog, rules);
-        if (refusal === 'alreadyLearned') {
-          row.append(el('span', 'learned', TEXT.roster.learned));
-        } else {
-          const b = screenButton(
-            TEXT.roster.learnButton(a.jpCost),
-            () => edit(u.id, (x) => learnAbility(x, job.id, a.id, catalog, rules), { kind: 'learn', unitId: u.id }),
-            { className: 'learn-button', disabled: refusal !== null, sub: refusal ? TEXT.roster.refusal[refusal] : undefined },
+    }
+    box.append(summary);
+    const groups: { id: string; entries: (job: JobDefinition) => readonly JobAbility[] }[] = [
+      { id: 'action', entries: (job) => job.abilities ?? [] },
+      ...PASSIVE_SLOTS.map((slot) => ({
+        id: slot as string,
+        entries: (job: JobDefinition) => (job.passives ?? []).filter((a) => slotOf(a.id) === slot),
+      })),
+    ];
+    for (const group of groups) {
+      const section = el('section', 'learn-group');
+      section.dataset.group = group.id;
+      section.append(el('h2', 'screen-subtitle', TEXT.roster.learnGroups[group.id] ?? group.id));
+      for (const job of jobsInOrder) {
+        for (const a of group.entries(job)) {
+          const row = el('div', 'learn-row');
+          row.dataset.abilityId = a.id;
+          row.dataset.jobId = job.id;
+          const refusal = learnRefusal(u, job.id, a.id, catalog, rules);
+          const needLevel = a.jobLevel ?? 1;
+          const info = el('div', 'learn-info');
+          const cost = [
+            jobName(job.id),
+            ...(a.starter ? [] : [TEXT.roster.jpCost(a.jpCost)]),
+            ...(needLevel > 1 ? [TEXT.roster.needJobLevel(jobName(job.id), needLevel)] : []),
+          ].join(' ・ ');
+          info.append(
+            el('strong', undefined, abilityName(a.id)),
+            el('span', `sub learn-cost${refusal === 'jobLevelTooLow' ? ' locked' : ''}`, cost),
+            el('span', 'sub', TEXT.abilityHelp[a.id] ?? ''),
           );
-          row.append(b);
+          row.append(info);
+          if (refusal === 'alreadyLearned') {
+            row.append(el('span', 'learned', TEXT.roster.learned));
+          } else {
+            const reason =
+              refusal === 'jobLevelTooLow' ? TEXT.roster.needJobLevelShort(needLevel) : refusal ? TEXT.roster.refusal[refusal] : undefined;
+            const b = screenButton(
+              TEXT.roster.learnButton(a.jpCost),
+              () => edit(u.id, (x) => learnAbility(x, job.id, a.id, catalog, rules), { kind: 'learn', unitId: u.id }),
+              { className: 'learn-button', disabled: refusal !== null, sub: reason },
+            );
+            row.append(b);
+          }
+          section.append(row);
         }
-        section.append(row);
       }
       box.append(section);
     }
+  };
+
+  const renderPassive = (box: HTMLElement, u: RosterUnit, slot: PassiveSlot) => {
+    const slotName = TEXT.passiveSlots[slot];
+    box.append(header(TEXT.roster.passiveTitle(slotName), () => go({ kind: 'detail', unitId: u.id })));
+    box.append(el('p', 'screen-note', `${unitName(u.id, u.jobId)} ・ ${TEXT.roster.passiveHelp}`));
+    const list = el('div', 'screen-menu');
+    const choose = (id: string | null) => edit(u.id, (x) => setPassive(x, slot, id, catalog), { kind: 'detail', unitId: u.id });
+    list.append(screenButton(TEXT.roster.passiveNone, () => choose(null), { pressed: u.slots[slot] === null }));
+    const choices = passiveChoices(u, slot, catalog);
+    for (const id of choices) {
+      const b = screenButton(abilityName(id), () => choose(id), { sub: TEXT.abilityHelp[id], pressed: u.slots[slot] === id });
+      b.dataset.abilityId = id;
+      list.append(b);
+    }
+    box.append(list);
+    if (choices.length === 0) box.append(el('p', 'screen-note', TEXT.roster.noPassiveChoices(slotName)));
   };
 
   const renderSub = (box: HTMLElement, u: RosterUnit) => {
@@ -319,11 +379,12 @@ export function createRosterScreen(root: HTMLElement, deps: RosterScreenDeps): R
       if (view.kind === 'detail') renderDetail(box, u);
       else if (view.kind === 'jobs') renderJobs(box, u, view.previewJobId);
       else if (view.kind === 'learn') renderLearn(box, u);
+      else if (view.kind === 'passive') renderPassive(box, u, view.slot);
       else renderSub(box, u);
     }
     root.append(box);
     // 別の画面へ移った時だけ、いちばん上から見せる（習得のボタンを押した後などは、位置をそのままに）
-    const place = `${view.kind}:${'unitId' in view ? view.unitId : ''}`;
+    const place = `${view.kind}:${'unitId' in view ? view.unitId : ''}:${'slot' in view ? view.slot : ''}`;
     if (place !== lastPlace) root.scrollTop = 0;
     lastPlace = place;
   };

@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { BattleState, GrowthValues, JobDefinition } from './battleTypes';
 import {
+  actionExp,
   addGrowth,
   applyBattleResult,
+  equippedPassives,
+  passiveChoices,
+  setPassive,
+  expLevelPercent,
   changeJob,
   expToNext,
   gainExp,
@@ -26,17 +31,22 @@ import {
   type Roster,
   type RosterUnit,
 } from './progression';
-import { makeState, testArcher, testHealer, testMage, testSpells, testStrikes, testWarrior } from './testSupport';
+import { makeState, testArcher, testHealer, testMage, testPassives, testSpells, testStrikes, testWarrior } from './testSupport';
 
 /** HP がよく伸びるジョブ（成長率 HP 3.0、攻撃力 0.6） */
 const sturdy: JobDefinition = {
   ...testWarrior,
   abilities: [{ id: 'powerStrike', jpCost: 100 }],
+  passives: [
+    { id: 'counter', jpCost: 150, jobLevel: 3 },
+    { id: 'quickStep', jpCost: 80 },
+  ],
   growth: { maxHp: 300, maxMp: 0, attack: 60, magic: 10, speed: 4 },
 };
 /** 魔力と MP がよく伸び、HP は伸びにくいジョブ */
 const scholar: JobDefinition = {
   ...testMage,
+  passives: [{ id: 'magicShell', jpCost: 50 }],
   growth: { maxHp: 150, maxMp: 120, attack: 20, magic: 70, speed: 4 },
 };
 /** ほかのジョブのレベルで解放されるジョブ */
@@ -50,6 +60,7 @@ const catalog: GameCatalog = {
   jobs: [sturdy, { ...testArcher, abilities: [{ id: 'aimedShot', jpCost: 120 }] }, scholar, testHealer, knight],
   spells: testSpells,
   strikes: testStrikes,
+  passives: testPassives,
 };
 
 const rules: ProgressionRules = {
@@ -57,6 +68,10 @@ const rules: ProgressionRules = {
   expBase: 100,
   expPerLevel: 10,
   expPerAction: 10,
+  expPerSupportAction: 15,
+  expVictory: 20,
+  expLevelOffset: 10,
+  expLevelPercentMax: 200,
   jpPerAction: 20,
   jpVictoryBonus: 50,
   jobLevelJp: [100, 250, 450, 700, 1000, 1350, 1750],
@@ -194,35 +209,66 @@ describe('JP とジョブのレベル', () => {
     expect(learnRefusal(gainJp(u, 'archer', 500), 'archer', 'aimedShot', catalog, rules)).toBeNull();
   });
 
-  it('戦闘の結果: 行動の回数ぶんの経験値と JP、勝てば全員に追加の JP。負けても得た分は持ち帰れる', () => {
+  it('戦闘の結果: 行動ごとの経験値と JP、勝てば倒れたユニットを含む全員に追加の経験値と JP。負けても得た分は持ち帰れる', () => {
     const roster: Roster = { units: [recruit(), { ...recruit('archer'), id: 'u2', jobs: { archer: { jp: 0, jpTotal: 0, learned: [] } } }] };
     const battle = (winner: 'player' | 'enemy'): BattleState => {
       const s = makeState({
         heights: [[0, 0, 0, 0]],
         units: [
           { id: 'u1', team: 'player', x: 0, z: 0 },
-          { id: 'u2', team: 'player', job: testArcher, x: 1, z: 0 },
+          { id: 'u2', team: 'player', job: testArcher, x: 1, z: 0, hp: 0 },
           { id: 'e', team: 'enemy', x: 3, z: 0 },
         ],
       });
-      const counts: Record<string, number> = { u1: 12, u2: 3, e: 9 };
-      return { ...s, winner, turn: null, units: s.units.map((u) => ({ ...u, actionCount: counts[u.id]! })) };
+      // u1 は同じレベル（Lv 1）の相手に 12 回、u2 は倒れる前に 3 回
+      const acts = (n: number) => Array.from({ length: n }, () => ({ targetLevel: 1, ally: false }));
+      const records: Record<string, ReturnType<typeof acts>> = { u1: acts(12), u2: acts(3), e: acts(9) };
+      return { ...s, winner, turn: null, units: s.units.map((u) => ({ ...u, actions: records[u.id]! })) };
     };
     const won = applyBattleResult(roster, battle('player'), catalog, rules);
     expect(won.report.victory).toBe(true);
     const u1 = won.roster.units[0]!;
+    // 経験値 12 × 10 + 勝利 20 = 140 → Lv 2（必要 100）で 40 残る
     expect(u1.level).toBe(2);
-    expect(u1.exp).toBe(20);
+    expect(u1.exp).toBe(40);
     expect(u1.jobs.warrior).toEqual({ jp: 12 * 20 + 50, jpTotal: 290, learned: [] });
-    expect(won.report.units[0]).toMatchObject({ unitId: 'u1', actions: 12, exp: 120, jp: 290, levelBefore: 1, levelAfter: 2, jobLevelBefore: 1, jobLevelAfter: 3 });
-    expect(won.roster.units[1]!.jobs.archer!.jp).toBe(3 * 20 + 50);
+    expect(won.report.units[0]).toMatchObject({ unitId: 'u1', actions: 12, exp: 140, jp: 290, levelBefore: 1, levelAfter: 2, jobLevelBefore: 1, jobLevelAfter: 3 });
+    // 倒れていた u2 にも勝利の経験値と JP が入る
+    expect(won.report.units[1]).toMatchObject({ unitId: 'u2', exp: 3 * 10 + 20, jp: 3 * 20 + 50 });
 
     const lost = applyBattleResult(roster, battle('enemy'), catalog, rules);
     expect(lost.report.victory).toBe(false);
+    expect(lost.report.units[0]!.exp).toBe(120);
     expect(lost.roster.units[0]!.level).toBe(2);
     expect(lost.roster.units[0]!.jobs.warrior!.jp).toBe(12 * 20);
     // 敵のユニットは部隊に入らない
     expect(lost.roster.units.map((u) => u.id)).toEqual(['u1', 'u2']);
+  });
+
+  it('経験値は相手のレベルによって増減する。高い相手ほど多く、低い相手ほど少なく、最低でも 1。上限あり', () => {
+    // 倍率 =（相手 + 10）× 100 ÷（自分 + 10）
+    expect(expLevelPercent(1, 1, rules)).toBe(100);
+    expect(expLevelPercent(1, 8, rules)).toBe(163);
+    expect(expLevelPercent(30, 18, rules)).toBe(70);
+    expect(expLevelPercent(1, 50, rules)).toBe(200);
+    expect(actionExp({ targetLevel: 8, ally: false }, 1, rules)).toBe(16);
+    expect(actionExp({ targetLevel: 1, ally: false }, 50, rules)).toBe(1);
+    // 味方に使った行動は、元の量が expPerSupportAction（その味方のレベルで増減）
+    expect(actionExp({ targetLevel: 5, ally: true }, 5, rules)).toBe(15);
+    expect(actionExp({ targetLevel: 15, ally: true }, 5, rules)).toBe(Math.floor((15 * 166) / 100));
+
+    // 勝利の経験値は、敵の最も高いレベルで増減する
+    const roster: Roster = { units: [recruit()] };
+    const s = makeState({
+      heights: [[0, 0, 0, 0]],
+      units: [
+        { id: 'u1', team: 'player', x: 0, z: 0 },
+        { id: 'e1', team: 'enemy', x: 2, z: 0, level: 8 },
+        { id: 'e2', team: 'enemy', x: 3, z: 0, level: 3, hp: 0 },
+      ],
+    });
+    const result = applyBattleResult(roster, { ...s, winner: 'player', turn: null }, catalog, rules);
+    expect(result.report.units[0]!.exp).toBe(Math.floor((20 * 163) / 100));
   });
 });
 
@@ -261,6 +307,50 @@ describe('ジョブチェンジと副コマンド', () => {
   });
 });
 
+describe('受動的なアビリティ（リアクション・サポート・ムーブ）', () => {
+  it('JP で習得する。そのジョブのレベルが足りないものは習得できない', () => {
+    const u = gainJp(recruit(), 'warrior', 200);
+    // 累計 200 JP はジョブのレベル 2。反撃はレベル 3 が必要
+    expect(jobLevel(u, 'warrior', rules)).toBe(2);
+    expect(learnRefusal(u, 'warrior', 'counter', catalog, rules)).toBe('jobLevelTooLow');
+    expect(learnRefusal(u, 'warrior', 'quickStep', catalog, rules)).toBeNull();
+    const enough = gainJp(u, 'warrior', 100);
+    expect(learnRefusal(enough, 'warrior', 'counter', catalog, rules)).toBeNull();
+    const learned = learnAbility(enough, 'warrior', 'counter', catalog, rules);
+    expect(learned.jobs.warrior).toEqual({ jp: 300 - 150, jpTotal: 300, learned: ['counter'] });
+    // 受動的なアビリティは、コマンド（行動アビリティ）には入らない
+    expect(unitCommands(learned, catalog)).toEqual([{ jobId: 'warrior', abilityIds: [] }]);
+  });
+
+  it('習得したものは、ジョブを問わず、種類ごとの枠に1つずつ付けられる。戦闘には付けたものだけが出る', () => {
+    let u = gainJp(recruit(), 'warrior', 400);
+    u = learnAbility(learnAbility(u, 'warrior', 'counter', catalog, rules), 'warrior', 'quickStep', catalog, rules);
+    u = changeJob(u, 'mage', catalog, rules);
+    u = learnAbility(gainJp(u, 'mage', 50), 'mage', 'magicShell', catalog, rules);
+    expect(passiveChoices(u, 'reaction', catalog)).toEqual(['counter', 'magicShell']);
+    expect(passiveChoices(u, 'movement', catalog)).toEqual(['quickStep']);
+    expect(passiveChoices(u, 'support', catalog)).toEqual([]);
+    // 魔術師のまま、戦士で覚えた反撃と早足を付ける
+    u = setPassive(setPassive(u, 'reaction', 'counter', catalog), 'movement', 'quickStep', catalog);
+    expect(equippedPassives(u)).toEqual(['counter', 'quickStep']);
+    // 付け替えると前のものは外れる。null で外す
+    u = setPassive(u, 'reaction', 'magicShell', catalog);
+    expect(u.slots.reaction).toBe('magicShell');
+    expect(() => setPassive(u, 'support', 'counter', catalog)).toThrow();
+    expect(() => setPassive(recruit(), 'reaction', 'counter', catalog)).toThrow();
+    expect(validateRoster({ units: [u] }, catalog, rules)).toEqual([]);
+    expect(setPassive(u, 'movement', null, catalog).slots.movement).toBeNull();
+  });
+
+  it('習得していないもの・枠の種類が違うものを付けた部隊は、誤りとして見つける', () => {
+    const bad = recruit('warrior', { slots: { secondary: null, reaction: 'quickStep', support: 'counter', movement: null } });
+    expect(validateRoster({ units: [bad] }, catalog, rules)).toEqual([
+      { kind: 'badPassive', unitId: 'u1', slot: 'reaction', abilityId: 'quickStep' },
+      { kind: 'badPassive', unitId: 'u1', slot: 'support', abilityId: 'counter' },
+    ]);
+  });
+});
+
 describe('編成の検証', () => {
   it('正しい部隊なら誤りはない', () => {
     let u = changeJob(recruit(), 'mage', catalog, rules);
@@ -295,7 +385,7 @@ describe('編成の検証', () => {
         'badJp',
         'unknownAbility',
         'badSecondary',
-        'slotNotAvailable',
+        'badPassive',
         'duplicateUnit',
       ]),
     );

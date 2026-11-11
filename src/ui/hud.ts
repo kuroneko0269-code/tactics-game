@@ -70,7 +70,17 @@ export interface SpellPreviewView {
   readonly timing: number;
   /** 消費 MP の説明（MP を使わない技なら空） */
   readonly mpText: string;
-  readonly results: readonly { readonly name: string; readonly team: Team; readonly amount: number; readonly hp: number; readonly maxHp: number }[];
+  readonly results: readonly {
+    readonly name: string;
+    readonly team: Team;
+    readonly amount: number;
+    readonly hp: number;
+    readonly maxHp: number;
+    /** 状態変化を付ける魔法の時の説明（例: 「沈黙を付ける」）。あれば数値の代わりに出す */
+    readonly statusText?: string;
+    /** 補足（詠唱の中断、魔力の殻・守りでの軽減など） */
+    readonly note?: string;
+  }[];
   /** 味方を巻き込む（回復なら敵も回復する）時の警告。なければ空 */
   readonly warning: string;
 }
@@ -87,6 +97,10 @@ export interface AttackPreviewView {
   readonly chargingPercent: number;
   readonly targetHp: number;
   readonly targetMaxHp: number;
+  /** 表に足す行（押し出し・合計・反撃など） */
+  readonly extraRows: readonly { readonly label: string; readonly value: string; readonly className?: string }[];
+  /** 補正の内訳などの注記（相手の「身かわし」で命中 -20 など） */
+  readonly notes: readonly string[];
 }
 
 export interface HudHandlers {
@@ -250,6 +264,20 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
         charging.textContent = TEXT.chargingInfo(TEXT.abilities[unit.charging.spellId] ?? unit.charging.spellId);
         info.append(charging);
       }
+      // 状態変化（残りの手番数つき）
+      for (const st of unit.statuses) {
+        const line = el('div', `info-status status-${st.id}`);
+        line.textContent = TEXT.statusInfo(TEXT.statuses[st.id], TEXT.statusHelp[st.id], st.turns);
+        info.append(line);
+      }
+      // 付けている受動的なアビリティ（敵のユニットも見られる）
+      if (unit.passives.length > 0) {
+        const line = el('div', 'info-passives');
+        line.textContent = unit.passives
+          .map((p) => TEXT.passiveInfo(TEXT.passiveSlots[p.slot], TEXT.abilities[p.id] ?? p.id))
+          .join(' ・ ');
+        info.append(line);
+      }
     },
     setHint(text) {
       hint.textContent = text;
@@ -298,8 +326,18 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
         TEXT.preview.heightPercent(p.heightPercent),
         p.heightPercent > 0 ? 'up' : p.heightPercent < 0 ? 'down' : '',
       );
+      for (const r of p.extraRows) row(r.label, r.value, r.className ?? '');
       body.append(table);
       preview.append(title, body);
+      if (p.notes.length > 0) {
+        const notes = el('ul', 'preview-notes');
+        for (const n of p.notes) {
+          const li = el('li');
+          li.textContent = n;
+          notes.append(li);
+        }
+        preview.append(notes);
+      }
     },
     showSpellPreview(p) {
       preview.hidden = !p;
@@ -326,7 +364,9 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
         const li = el('li', `team-text-${r.team}`);
         const sign = p.effect === 'heal' ? '+' : '-';
         const before = p.effect === 'heal' ? r.hp - r.amount : r.hp + r.amount;
-        li.textContent = `${r.name}: ${p.effect === 'heal' ? TEXT.spellPreview.heal : TEXT.spellPreview.damage} ${sign}${r.amount}（${TEXT.hp} ${before} → ${r.hp}）`;
+        li.textContent = r.statusText
+          ? `${r.name}: ${r.statusText}${r.note ?? ''}`
+          : `${r.name}: ${p.effect === 'heal' ? TEXT.spellPreview.heal : TEXT.spellPreview.damage} ${sign}${r.amount}（${TEXT.hp} ${before} → ${r.hp}）${r.note ?? ''}`;
         list.append(li);
       }
       const note = el('div', 'spell-note');

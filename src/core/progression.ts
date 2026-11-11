@@ -7,16 +7,23 @@
  *   伸びの悪いジョブで下げ、伸びの良いジョブで上げ直すと、差し引きで成長値が増える（意図した裏技。ゲーム内では説明しない）。
  * - 成長値には、能力ごとの上限と、合計の上限がある（合計は能力ごとの重みを掛けた「成長の点数」で数える）。
  * - ジョブのレベル: そのジョブで得た JP の累計で決まる。能力値には影響せず、アビリティの習得と解放条件に使う。
- * - アビリティは、ジョブごとの JP を消費して習得する。
+ * - アビリティは、ジョブごとの JP を消費して習得する。習得にそのジョブのレベルが必要なものもある。
+ *   受動的なアビリティ（リアクション・サポート・ムーブ）は、習得するとジョブを問わず、種類ごとに1つ付けられる。
+ * - 経験値: 行動のたびに、相手（味方に使ったなら、その味方）のレベルによって増減した経験値を得る。
+ *   勝利すると、倒れたユニットを含む全員が、敵のレベルによって増減した経験値を得る。
  *
  * 計算はすべて整数。数値（成長率、必要な経験値など）は src/data から引数で受け取る。
  * 部隊の状態（Roster）は JSON にそのまま変換できる単純なデータにする（セーブにそのまま使うため）。
  */
 import type {
+  ActionRecord,
   BattleState,
   GrowthStat,
   GrowthValues,
+  JobAbility,
   JobDefinition,
+  PassiveDefinition,
+  PassiveSlot,
   SpellDefinition,
   StrikeDefinition,
   UnitCommand,
@@ -35,8 +42,18 @@ export interface ProgressionRules {
   /** レベル L から L+1 に上がるのに必要な経験値 = expBase + expPerLevel × (L − 1) */
   readonly expBase: number;
   readonly expPerLevel: number;
-  /** 攻撃・魔法・技を1回実行するたびに得る経験値 */
+  /** 攻撃・魔法・技を1回実行するたびに得る経験値（相手のレベルによる増減の前） */
   readonly expPerAction: number;
+  /** 味方に使った行動（回復・守りなど）で得る経験値（相手のレベルによる増減の前） */
+  readonly expPerSupportAction: number;
+  /** 勝利した時に、倒れたユニットを含む全員が得る経験値（敵のレベルによる増減の前） */
+  readonly expVictory: number;
+  /**
+   * 相手のレベルによる増減。倍率（%）=（相手のレベル + expLevelOffset）× 100 ÷（自分のレベル + expLevelOffset）（切り捨て）。
+   * 上限は expLevelPercentMax。増減の後は切り捨てで、最低でも 1
+   */
+  readonly expLevelOffset: number;
+  readonly expLevelPercentMax: number;
   /** 攻撃・魔法・技を1回実行するたびに、今のジョブに入る JP */
   readonly jpPerAction: number;
   /** 勝利した時に、全員の今のジョブに入る JP */
@@ -59,13 +76,13 @@ export interface JobProgress {
   readonly jp: number;
   /** 得た JP の累計（ジョブのレベルを決める。習得しても減らない） */
   readonly jpTotal: number;
-  /** 習得済みの行動アビリティの id */
+  /** 習得済みのアビリティ（行動アビリティと受動的なアビリティ）の id */
   readonly learned: readonly string[];
 }
 
 /**
  * アビリティの枠。secondary は副コマンドにするジョブの id。
- * リアクション・サポート・ムーブは、データの構造だけ用意している（中身と画面は次回）。
+ * reaction / support / movement は、付けている受動的なアビリティの id（なければ null）。
  */
 export interface AbilitySlots {
   readonly secondary: string | null;
@@ -98,7 +115,11 @@ export interface GameCatalog {
   readonly jobs: readonly JobDefinition[];
   readonly spells: readonly SpellDefinition[];
   readonly strikes: readonly StrikeDefinition[];
+  readonly passives: readonly PassiveDefinition[];
 }
+
+/** 受動的なアビリティの枠の並び */
+export const PASSIVE_SLOTS: readonly PassiveSlot[] = ['reaction', 'support', 'movement'];
 
 export const EMPTY_SLOTS: AbilitySlots = { secondary: null, reaction: null, support: null, movement: null };
 const EMPTY_PROGRESS: JobProgress = { jp: 0, jpTotal: 0, learned: [] };
@@ -207,6 +228,26 @@ export function levelDown(unit: RosterUnit, catalog: Pick<GameCatalog, 'jobs'>):
   return { ...unit, level: unit.level - 1, exp: 0, growth: subtractGrowth(unit.growth, rates) };
 }
 
+/**
+ * 相手のレベルによる経験値の倍率（%）。相手が自分より高いほど大きく、低いほど小さい。
+ * （相手のレベル + offset）× 100 ÷（自分のレベル + offset）を切り捨て、上限で抑える
+ */
+export function expLevelPercent(ownLevel: number, targetLevel: number, rules: ProgressionRules): number {
+  const percent = Math.floor(((targetLevel + rules.expLevelOffset) * 100) / (ownLevel + rules.expLevelOffset));
+  return Math.min(rules.expLevelPercentMax, percent);
+}
+
+/** 経験値の元の量に、相手のレベルによる増減を掛ける（切り捨て、最低 1） */
+export function scaledExp(base: number, ownLevel: number, targetLevel: number, rules: ProgressionRules): number {
+  return Math.max(1, Math.floor((base * expLevelPercent(ownLevel, targetLevel, rules)) / 100));
+}
+
+/** 1回の行動で得る経験値。味方に使った行動は expPerSupportAction、それ以外は expPerAction が元の量 */
+export function actionExp(record: ActionRecord, ownLevel: number, rules: ProgressionRules): number {
+  const base = record.ally ? rules.expPerSupportAction : rules.expPerAction;
+  return scaledExp(base, ownLevel, record.targetLevel, rules);
+}
+
 /** 経験値を得る。必要な量に達するたびにレベルが上がる。レベルの上限では経験値は貯まらない */
 export function gainExp(
   unit: RosterUnit,
@@ -265,7 +306,52 @@ export function learnedAbilities(unit: RosterUnit, job: JobDefinition): string[]
   return (job.abilities ?? []).filter((a) => learned.includes(a.id)).map((a) => a.id);
 }
 
-export type LearnRefusal = 'unknownAbility' | 'alreadyLearned' | 'notEnoughJp' | 'jobLocked';
+/** ジョブで習得できるアビリティ（行動アビリティと受動的なアビリティ）の一覧の中から、id のもの */
+export function jobAbilityEntry(job: JobDefinition, abilityId: string): JobAbility | undefined {
+  return (job.abilities ?? []).find((a) => a.id === abilityId) ?? (job.passives ?? []).find((a) => a.id === abilityId);
+}
+
+export function findPassive(catalog: Pick<GameCatalog, 'passives'>, id: string): PassiveDefinition {
+  const p = catalog.passives.find((x) => x.id === id);
+  if (!p) throw new Error(`受動的なアビリティ ${id} が見つかりません`);
+  return p;
+}
+
+/**
+ * 習得済みの受動的なアビリティのうち、枠 slot に付けられるもの（どのジョブで習得したものでもよい）。
+ * ジョブの並び順、ジョブの中の一覧の順
+ */
+export function passiveChoices(unit: RosterUnit, slot: PassiveSlot, catalog: Pick<GameCatalog, 'jobs' | 'passives'>): string[] {
+  const result: string[] = [];
+  for (const job of catalog.jobs) {
+    const learned = jobProgress(unit, job.id).learned;
+    for (const a of job.passives ?? []) {
+      if (!learned.includes(a.id) || result.includes(a.id)) continue;
+      if (catalog.passives.find((p) => p.id === a.id)?.slot === slot) result.push(a.id);
+    }
+  }
+  return result;
+}
+
+/** 受動的なアビリティを枠に付ける（null で外す）。習得していない・枠が違う時はエラー */
+export function setPassive(
+  unit: RosterUnit,
+  slot: PassiveSlot,
+  abilityId: string | null,
+  catalog: Pick<GameCatalog, 'jobs' | 'passives'>,
+): RosterUnit {
+  if (abilityId !== null && !passiveChoices(unit, slot, catalog).includes(abilityId)) {
+    throw new Error(`${unit.id} は ${abilityId} を ${slot} の枠に付けられません`);
+  }
+  return { ...unit, slots: { ...unit.slots, [slot]: abilityId } };
+}
+
+/** 戦闘で使う、付けている受動的なアビリティの id（リアクション・サポート・ムーブの順） */
+export function equippedPassives(unit: RosterUnit): string[] {
+  return PASSIVE_SLOTS.map((slot) => unit.slots[slot]).filter((id): id is string => id !== null);
+}
+
+export type LearnRefusal = 'unknownAbility' | 'alreadyLearned' | 'notEnoughJp' | 'jobLocked' | 'jobLevelTooLow';
 
 /** アビリティを習得できるか。できなければ理由を返す */
 export function learnRefusal(
@@ -276,11 +362,12 @@ export function learnRefusal(
   rules: ProgressionRules,
 ): LearnRefusal | null {
   const job = findJob(catalog, jobId);
-  const entry = (job.abilities ?? []).find((a) => a.id === abilityId);
+  const entry = jobAbilityEntry(job, abilityId);
   if (!entry) return 'unknownAbility';
   const p = jobProgress(unit, jobId);
   if (p.learned.includes(abilityId)) return 'alreadyLearned';
   if (!isJobUnlocked(unit, job, rules)) return 'jobLocked';
+  if (jobLevel(unit, jobId, rules) < (entry.jobLevel ?? 1)) return 'jobLevelTooLow';
   if (p.jp < entry.jpCost) return 'notEnoughJp';
   return null;
 }
@@ -295,7 +382,7 @@ export function learnAbility(
 ): RosterUnit {
   const refusal = learnRefusal(unit, jobId, abilityId, catalog, rules);
   if (refusal) throw new Error(`${unit.id} は ${jobId} の ${abilityId} を習得できません（${refusal}）`);
-  const entry = findJob(catalog, jobId).abilities!.find((a) => a.id === abilityId)!;
+  const entry = jobAbilityEntry(findJob(catalog, jobId), abilityId)!;
   const p = jobProgress(unit, jobId);
   return {
     ...unit,
@@ -372,7 +459,7 @@ export type RosterProblem =
   | { readonly kind: 'badJp'; readonly unitId: string; readonly jobId: string }
   | { readonly kind: 'unknownAbility'; readonly unitId: string; readonly jobId: string; readonly abilityId: string }
   | { readonly kind: 'badSecondary'; readonly unitId: string; readonly jobId: string }
-  | { readonly kind: 'slotNotAvailable'; readonly unitId: string; readonly slot: 'reaction' | 'support' | 'movement' };
+  | { readonly kind: 'badPassive'; readonly unitId: string; readonly slot: PassiveSlot; readonly abilityId: string };
 
 /** 部隊の状態がルールどおりかを確かめ、誤りの一覧を返す（正しければ空） */
 export function validateRoster(roster: Roster, catalog: GameCatalog, rules: ProgressionRules): RosterProblem[] {
@@ -403,7 +490,7 @@ export function validateRoster(roster: Roster, catalog: GameCatalog, rules: Prog
       }
       if (!isInt(p.jp) || !isInt(p.jpTotal) || p.jp < 0 || p.jpTotal < p.jp) problems.push({ kind: 'badJp', unitId, jobId });
       for (const abilityId of p.learned) {
-        if (!(def.abilities ?? []).some((a) => a.id === abilityId)) {
+        if (!jobAbilityEntry(def, abilityId)) {
           problems.push({ kind: 'unknownAbility', unitId, jobId, abilityId });
         }
       }
@@ -412,9 +499,12 @@ export function validateRoster(roster: Roster, catalog: GameCatalog, rules: Prog
     if (secondary !== null && (secondary === u.jobId || !secondaryChoices(u, catalog).includes(secondary))) {
       problems.push({ kind: 'badSecondary', unitId, jobId: secondary });
     }
-    // リアクション・サポート・ムーブは、まだ中身がないので空でなければ誤り
-    for (const slot of ['reaction', 'support', 'movement'] as const) {
-      if (u.slots[slot] !== null) problems.push({ kind: 'slotNotAvailable', unitId, slot });
+    // リアクション・サポート・ムーブは、習得済みで、その枠の種類のものだけ
+    for (const slot of PASSIVE_SLOTS) {
+      const abilityId = u.slots[slot];
+      if (abilityId !== null && !passiveChoices(u, slot, catalog).includes(abilityId)) {
+        problems.push({ kind: 'badPassive', unitId, slot, abilityId });
+      }
     }
   }
   return problems;
@@ -443,8 +533,10 @@ export interface BattleReport {
 }
 
 /**
- * 戦闘で得た経験値と JP を部隊に反映する。負けても、その戦闘で得た分は持ち帰れる（勝利の追加 JP だけ入らない）。
+ * 戦闘で得た経験値と JP を部隊に反映する。負けても、その戦闘で得た分は持ち帰れる（勝利の追加の経験値と JP だけ入らない）。
  * battle の味方のユニットのうち、部隊にいるユニット（id が同じ）に反映する。
+ * 経験値: 行動ごとに、相手のレベルによって増減した量（actionExp）。勝利すると、倒れたユニットを含む全員に、
+ * 敵の最も高いレベルによって増減した expVictory。レベルの増減は、戦闘の開始時の自分のレベルで計算する。
  */
 export function applyBattleResult(
   roster: Roster,
@@ -453,19 +545,21 @@ export function applyBattleResult(
   rules: ProgressionRules,
 ): { roster: Roster; report: BattleReport } {
   const victory = battle.winner === 'player';
+  const enemyLevel = Math.max(1, ...battle.units.filter((u) => u.team === 'enemy').map((u) => u.level));
   const reports: UnitBattleReport[] = [];
   let next = roster;
   for (const u of battle.units) {
     if (u.team !== 'player') continue;
     const before = next.units.find((r) => r.id === u.id);
     if (!before) continue;
-    const exp = u.actionCount * rules.expPerAction;
-    const jp = u.actionCount * rules.jpPerAction + (victory ? rules.jpVictoryBonus : 0);
+    const actionTotal = u.actions.reduce((sum, a) => sum + actionExp(a, u.level, rules), 0);
+    const exp = actionTotal + (victory ? scaledExp(rules.expVictory, u.level, enemyLevel, rules) : 0);
+    const jp = u.actions.length * rules.jpPerAction + (victory ? rules.jpVictoryBonus : 0);
     const jobId = before.jobId;
     const after = gainJp(gainExp(before, exp, catalog, rules), jobId, jp);
     reports.push({
       unitId: u.id,
-      actions: u.actionCount,
+      actions: u.actions.length,
       exp,
       jp,
       jobId,

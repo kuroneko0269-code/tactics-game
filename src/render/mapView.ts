@@ -41,8 +41,8 @@ const SIDE_COLORS: Record<Terrain, number> = {
   water: 0x3a6a9a,
 };
 
-/** マスの色分けの種類（spellRange: 魔法の射程、spellArea: 魔法の範囲） */
-export type TileMarkKind = 'move' | 'attack' | 'target' | 'selected' | 'spellRange' | 'spellArea';
+/** マスの色分けの種類（spellRange: 魔法の射程、spellArea: 魔法の範囲、push: 突き飛ばしで押し出す先） */
+export type TileMarkKind = 'move' | 'attack' | 'target' | 'selected' | 'spellRange' | 'spellArea' | 'push';
 
 export interface TileMark extends TileCoord {
   readonly kind: TileMarkKind;
@@ -60,6 +60,7 @@ const MARK_STYLE: Record<TileMarkKind, { color: number; opacity: number; pulse: 
   selected: { color: 0xffe14d, opacity: 0.75, pulse: 0.15 },
   spellRange: { color: 0xa45bff, opacity: 0.3, pulse: 0.06 },
   spellArea: { color: 0xff3df0, opacity: 0.7, pulse: 0.2 },
+  push: { color: 0xffa21f, opacity: 0.8, pulse: 0.25 },
 };
 /** 予約されている範囲の濃さ */
 const RESERVED_OPACITY = 0.3;

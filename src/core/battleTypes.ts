@@ -42,8 +42,94 @@ export type GrowthStat = 'maxHp' | 'maxMp' | 'attack' | 'magic' | 'speed';
  */
 export type GrowthValues = Readonly<Record<GrowthStat, number>>;
 
-/** 魔法の効果の種類 */
-export type SpellEffect = 'damage' | 'heal';
+/** 魔法の効果の種類。status は状態変化を付けるだけ（ダメージも回復もない） */
+export type SpellEffect = 'damage' | 'heal' | 'status';
+
+/**
+ * 詠唱のある行動アビリティの種類。magic は魔法（沈黙で使えなくなり、魔力の殻で軽くなる）、
+ * skill は狙い撃ちのような溜めのある技（沈黙の影響を受けない）
+ */
+export type SpellKind = 'magic' | 'skill';
+
+/**
+ * 状態変化（一時的な効果）の種類。
+ * - protect（守り）: 受けるダメージが減る
+ * - slow（鈍足）: 移動力が下がる
+ * - silence（沈黙）: 魔法を使えない。付いた時に魔法を詠唱中なら、詠唱が中断される
+ */
+export type StatusId = 'protect' | 'slow' | 'silence';
+
+/** ユニットに付いている状態変化。turns は残りの手番数（そのユニットの手番が終わるたびに 1 減り、0 で消える） */
+export interface StatusState {
+  readonly id: StatusId;
+  readonly turns: number;
+}
+
+/**
+ * 状態変化の数値（src/data に置く）。harmful は、付けられた側に不利な効果か
+ * （経験値の計算で、味方に使った行動かを見分けるために使う）
+ */
+export interface StatusRules {
+  readonly protect: {
+    readonly harmful: boolean;
+    readonly turns: number;
+    /** 受けるダメージの倍率（%）。75 なら 25% 減る */
+    readonly damageTakenPercent: number;
+  };
+  readonly slow: {
+    readonly harmful: boolean;
+    readonly turns: number;
+    /** 移動力から引く値 */
+    readonly movePenalty: number;
+    /** 引いた後の移動力の下限 */
+    readonly minMove: number;
+  };
+  readonly silence: {
+    readonly harmful: boolean;
+    readonly turns: number;
+  };
+}
+
+/** 突き飛ばしの数値（src/data に置く）。ダメージは押し出された相手の最大 HP に対する割合（%） */
+export interface KnockbackRules {
+  /** 押し出した先が低い時、高さの差 1 につき与える落下ダメージ（最大 HP の %） */
+  readonly fallDamagePercentPerHeight: number;
+  /** 押し出せなかった時に与える追加のダメージ（最大 HP の %） */
+  readonly blockedDamagePercent: number;
+}
+
+/** 受動的なアビリティの枠 */
+export type PassiveSlot = 'reaction' | 'support' | 'movement';
+
+/** 受動的なアビリティの効果。数値は src/data の定義に置く */
+export type PassiveEffect =
+  /** 反撃: 隣接するマスから近接攻撃を受けて生き残った時、通常攻撃で反撃する（反撃に対する反撃は起きない） */
+  | { readonly kind: 'counter' }
+  /** 身かわし: 正面と側面からの、武器による攻撃の命中率を下げる */
+  | { readonly kind: 'evade'; readonly hitPenalty: number }
+  /** 魔力の殻: 魔法で受けるダメージの倍率（%） */
+  | { readonly kind: 'magicShell'; readonly damageTakenPercent: number }
+  /** 瞑想: ダメージを受けて生き残った時、MP を回復する */
+  | { readonly kind: 'meditate'; readonly mp: number }
+  /** 重装: 最大 HP の倍率（%） */
+  | { readonly kind: 'maxHpPercent'; readonly percent: number }
+  /** 集中: 武器による攻撃の命中率に足す値 */
+  | { readonly kind: 'weaponHitBonus'; readonly bonus: number }
+  /** 早口: 詠唱の速さの倍率（%） */
+  | { readonly kind: 'castSpeedPercent'; readonly percent: number }
+  /** 節約: 消費 MP の倍率（%。切り捨て） */
+  | { readonly kind: 'mpCostPercent'; readonly percent: number }
+  /** 早足: 移動力に足す値 */
+  | { readonly kind: 'moveBonus'; readonly amount: number }
+  /** 身軽: ジャンプ力に足す値 */
+  | { readonly kind: 'jumpBonus'; readonly amount: number };
+
+/** 受動的なアビリティ（リアクション・サポート・ムーブ）の定義（src/data に置く） */
+export interface PassiveDefinition {
+  readonly id: string;
+  readonly slot: PassiveSlot;
+  readonly effect: PassiveEffect;
+}
 
 /**
  * 詠唱のある行動アビリティ（魔法と、狙い撃ちのような溜めのある技）の定義（src/data に置く）。
@@ -51,10 +137,19 @@ export type SpellEffect = 'damage' | 'heal';
  */
 export interface SpellDefinition {
   readonly id: string;
+  /** 魔法（magic）か、溜めのある技（skill） */
+  readonly kind: SpellKind;
   readonly element: SpellElement;
   readonly effect: SpellEffect;
+  /** effect が status の時に付ける状態変化 */
+  readonly inflicts?: StatusId;
   /** 効果量の元になる能力値。省くと魔力（magic）。狙い撃ちは攻撃力（attack） */
   readonly stat?: 'magic' | 'attack';
+  /**
+   * true なら、ダメージに向き（正面・側面・背面）と高低差の補正が掛かる（狙い撃ち）。必ず当たる点は変わらない。
+   * 向きと高さは、発動した時点の詠唱者と相手の位置・相手の向きで決まる
+   */
+  readonly directional?: boolean;
   /** 威力（%）。ダメージ・回復量 = 元の能力値 × 威力 ÷ 100（切り捨て） */
   readonly power: number;
   /** 消費 MP */
@@ -103,16 +198,22 @@ export interface StrikeDefinition {
   readonly hitBonus: number;
   /** 使うのに必要な武器の種類（どれか1つ）。省くと武器を問わない */
   readonly weapons?: readonly WeaponType[];
+  /** true なら、当たった相手を1マス押し出す（突き飛ばし）。相手が詠唱中なら、詠唱を中断させる */
+  readonly knockback?: boolean;
+  /** 当たった相手に付ける状態変化（足止めの矢の鈍足など） */
+  readonly inflicts?: StatusId;
 }
 
-/** ジョブで習得できる行動アビリティ */
+/** ジョブで習得できるアビリティ（行動アビリティと、受動的なアビリティ） */
 export interface JobAbility {
-  /** 魔法・技の id（spells か strikes の定義から引く） */
+  /** アビリティの id（行動アビリティは spells か strikes、受動的なアビリティは passives の定義から引く） */
   readonly id: string;
   /** 習得に使う JP（そのジョブの JP を消費する） */
   readonly jpCost: number;
   /** true なら、そのジョブに就いた時点で習得済みになる（JP を使わない） */
   readonly starter?: boolean;
+  /** 習得に必要な、そのジョブのレベル。省くと 1（いつでも） */
+  readonly jobLevel?: number;
 }
 
 /** ジョブの解放条件の1つ（ほかのジョブのレベル） */
@@ -130,6 +231,8 @@ export interface JobDefinition {
   readonly weapon?: WeaponType;
   /** 行動アビリティの一覧（このジョブのコマンド） */
   readonly abilities?: readonly JobAbility[];
+  /** 受動的なアビリティ（リアクション・サポート・ムーブ）の一覧。習得すると、ジョブを問わず付けられる */
+  readonly passives?: readonly JobAbility[];
   /** 成長率。このジョブでレベルが上がった時（下がった時）に、成長値がこれだけ増える（減る） */
   readonly growth?: GrowthValues;
   /** 解放条件。すべて満たすと、このジョブに就ける。空なら最初から就ける */
@@ -164,6 +267,10 @@ export interface BattleRules {
   readonly minimumDamage: number;
   /** 詠唱中のユニットが受けるダメージの倍率（%）。通常攻撃にも魔法にも掛かる */
   readonly chargingDamagePercent: number;
+  /** 状態変化の数値 */
+  readonly status: StatusRules;
+  /** 突き飛ばしの数値 */
+  readonly knockback: KnockbackRules;
 }
 
 /** 魔法の狙い先 */
@@ -198,6 +305,22 @@ export interface UnitPlacement {
    * 省くと、ジョブのアビリティすべてを主コマンドとして使える（テスト用）。
    */
   readonly commands?: readonly UnitCommand[];
+  /** 付けている受動的なアビリティの id（リアクション・サポート・ムーブ）。省くとなし */
+  readonly passives?: readonly string[];
+  /**
+   * 能力値の補正（マイナスもある）。成長値を足した後に足す（0 より下にはしない）。
+   * 敵の強さの段階の調整に使う（例: 「やさしい」の敵の癒し手は MP が少ない）
+   */
+  readonly statBonus?: Partial<UnitStats>;
+}
+
+/**
+ * 戦闘中に実行した行動（攻撃・魔法・技）の記録。戦闘の後の経験値の計算に使う。
+ * targetLevel は相手（味方に使ったなら、その味方）のレベル。ally は味方に使った行動か。
+ */
+export interface ActionRecord {
+  readonly targetLevel: number;
+  readonly ally: boolean;
 }
 
 /** 1戦ぶんの定義（src/data に置く） */
@@ -233,8 +356,12 @@ export interface UnitState {
   readonly spells: readonly SpellDefinition[];
   /** すぐに出る技（強打など）。spells と同じく定義データをそのまま持つ */
   readonly strikes: readonly StrikeDefinition[];
-  /** この戦闘で実行した行動（攻撃・魔法・技）の回数。戦闘の後の経験値と JP の計算に使う */
-  readonly actionCount: number;
+  /** 付けている受動的なアビリティ（リアクション・サポート・ムーブ）。定義データをそのまま持つ */
+  readonly passives: readonly PassiveDefinition[];
+  /** 付いている状態変化 */
+  readonly statuses: readonly StatusState[];
+  /** この戦闘で実行した行動（攻撃・魔法・技）の記録。戦闘の後の経験値と JP の計算に使う */
+  readonly actions: readonly ActionRecord[];
   /** 詠唱中の魔法。詠唱していなければ null */
   readonly charging: ChargeState | null;
   /** 直前の自分の手番で移動したか（AI が「動いていない相手」を見分けるため） */
@@ -313,6 +440,33 @@ export type BattleEvent =
       readonly targetHp: number;
       /** 対象が詠唱中だった時の被ダメージ倍率（%）。詠唱中でなければ 100 */
       readonly chargingPercent: number;
+      /** リアクションの「反撃」による攻撃か */
+      readonly counter: boolean;
+    }
+  | {
+      /** 突き飛ばしで押し出された（to が null なら、押し出せずにその場で追加のダメージを受けた） */
+      readonly type: 'knockedBack';
+      readonly unitId: string;
+      readonly from: Coord;
+      readonly to: Coord | null;
+      /** 落下ダメージ、または押し出せなかった時の追加のダメージ（なければ 0） */
+      readonly damage: number;
+      readonly hp: number;
+    }
+  | { readonly type: 'statusAdded'; readonly unitId: string; readonly status: StatusId; readonly turns: number }
+  | { readonly type: 'statusExpired'; readonly unitId: string; readonly status: StatusId }
+  | {
+      /** リアクションが発動した（画面でアビリティの名前を短く表示する） */
+      readonly type: 'reaction';
+      readonly unitId: string;
+      readonly abilityId: string;
+    }
+  | {
+      /** MP が回復した（瞑想） */
+      readonly type: 'mpRestored';
+      readonly unitId: string;
+      readonly amount: number;
+      readonly mp: number;
     }
   | {
       /** 魔法を指定した（詠唱を始めた） */
@@ -349,10 +503,14 @@ export type BattleEvent =
       readonly reason: 'casterDefeated';
     }
   | {
-      /** 詠唱中に自分の手番で移動か行動をしたため、詠唱が中断された（MP は戻らない） */
+      /**
+       * 詠唱が中断された（MP は戻らない）。
+       * reason: acted は自分の手番で移動か行動をした、silenced は沈黙が付いた、knockedBack は突き飛ばしを受けた
+       */
       readonly type: 'castInterrupted';
       readonly casterId: string;
       readonly spellId: string;
+      readonly reason: 'acted' | 'silenced' | 'knockedBack';
     }
   | { readonly type: 'defeated'; readonly unitId: string }
   | { readonly type: 'turnEnded'; readonly unitId: string; readonly facing: Direction; readonly ct: number }
@@ -361,7 +519,7 @@ export type BattleEvent =
 /** 魔法が1体のユニットに与えた結果 */
 export interface SpellUnitResult {
   readonly unitId: string;
-  /** ダメージ（effect が damage）または回復量（effect が heal） */
+  /** ダメージ（effect が damage）または回復量（effect が heal）。状態変化だけの魔法では 0 */
   readonly amount: number;
   /** 効果の後の HP */
   readonly hp: number;

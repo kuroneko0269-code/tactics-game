@@ -53,7 +53,7 @@ describe('行動アビリティ: 強打', () => {
     const { state: after, events } = applyAction(state, { type: 'attack', targetId: 'e', abilityId: 'powerStrike' });
     const attacked = events.find((e) => e.type === 'attacked')!;
     expect(attacked).toMatchObject({ abilityId: 'powerStrike' });
-    expect(getUnit(after, 'w').actionCount).toBe(1);
+    expect(getUnit(after, 'w').actions).toHaveLength(1);
     const plain = applyAction(state, { type: 'attack', targetId: 'e' }).events.find((e) => e.type === 'attacked')!;
     expect(plain).toMatchObject({ abilityId: null });
   });
@@ -93,7 +93,7 @@ describe('行動アビリティ: 狙い撃ち', () => {
     const state = field();
     const expected = Math.floor((testArcher.stats.attack * 150) / 100);
     expect(previewSpellAt(state, state.units[0]!, testAimedShot, { x: 6, z: 0 }).results).toEqual([
-      { unitId: 'e', amount: expected, hp: testWarrior.stats.maxHp - expected },
+      { unitId: 'e', amount: expected, hp: testWarrior.stats.maxHp - expected, side: 'side', heightPercent: 0 },
     ]);
     const cast = applyAction(state, { type: 'cast', spellId: 'aimedShot', target: { kind: 'unit', unitId: 'e' } });
     expect(getUnit(cast.state, 'a').charging?.spellId).toBe('aimedShot');
@@ -102,6 +102,20 @@ describe('行動アビリティ: 狙い撃ち', () => {
     let s = applyAction(cast.state, { type: 'endTurn', facing: 'east' }).state;
     for (let i = 0; i < 10 && getUnit(s, 'a').charging; i++) s = applyAction(s, { type: 'endTurn', facing: 'west' }).state;
     expect(getUnit(s, 'e').hp).toBe(testWarrior.stats.maxHp - expected);
+  });
+
+  it('ダメージには向き（背面 125%）と高低差の補正が掛かる（必ず当たる点は同じ）', () => {
+    const state = makeState({
+      heights: [[2, 0, 0, 0, 0]],
+      units: [
+        { id: 'a', team: 'player', job: testArcher, x: 0, z: 0, commands: [{ jobId: 'archer', abilityIds: ['aimedShot'] }] },
+        // 相手は東を向いている（弓使いに背を向けている）
+        { id: 'e', team: 'enemy', x: 4, z: 0, facing: 'east' },
+      ],
+    });
+    const r = previewSpellAt(state, state.units[0]!, testAimedShot, { x: 4, z: 0 }).results[0]!;
+    // 攻撃力 10 × 背面 125% × 高さ +10% = 13（切り捨て）→ × 150% = 19
+    expect(r).toMatchObject({ side: 'back', heightPercent: 10, amount: Math.floor((Math.floor((10 * 125 * 110) / 10000) * 150) / 100) });
   });
 
   it('弓がなければ使えない', () => {
@@ -205,6 +219,6 @@ describe('敵 AI が新しい行動アビリティを使う', () => {
     expect(decideNextAction(state, testAi)).toEqual({ type: 'attack', targetId: 'p' });
     // 戦士も行動を数える
     const after = run(state, [{ type: 'attack', targetId: 'p' }]);
-    expect(getUnit(after, 'w').actionCount).toBe(1);
+    expect(getUnit(after, 'w').actions).toHaveLength(1);
   });
 });

@@ -7,6 +7,7 @@ import { buildSortie } from '../../core/sortie';
 import type { Roster } from '../../core/progression';
 import { changeJob, gainExp, learnAbility, unitStats, validateRoster } from '../../core/progression';
 import { spells, strikes } from '../abilities';
+import { passives } from '../passives';
 import { aiConfig } from '../aiConfig';
 import { battleRules } from '../battleRules';
 import { jobs } from '../jobs';
@@ -14,9 +15,9 @@ import { progressionRules } from '../progression';
 import { initialRoster } from '../roster';
 import { twinHillsBattle } from './twinHillsBattle';
 
-const catalog = { jobs, spells, strikes };
+const catalog = { jobs, spells, strikes, passives };
 const start = (seed: number, tierId = 'easy', roster: Roster = initialRoster) =>
-  startBattle(buildSortie(twinHillsBattle, tierId, roster, catalog), jobs, battleRules, seed, spells, strikes);
+  startBattle(buildSortie(twinHillsBattle, tierId, roster, catalog), jobs, battleRules, seed, spells, strikes, passives);
 const configs = { player: aiConfig, enemy: aiConfig };
 
 // data のテストは「定義データが core で正しく読めるか」を確かめるため、core の関数を使ってよい。
@@ -61,7 +62,7 @@ describe('ふたつの丘の戦場と最初の部隊', () => {
     ]);
   });
 
-  it('敵の段階が上がるほど、レベルと能力値が高く、覚えている技が多い', () => {
+  it('敵の段階が上がるほど、レベルと能力値が高く、覚えている技と受動的なアビリティが多い', () => {
     const enemiesOf = (tierId: string) => start(1, tierId).state.units.filter((u) => u.team === 'enemy');
     const [easy, normal, hard] = ['easy', 'normal', 'hard'].map(enemiesOf);
     expect(easy!.every((u) => u.level === 1)).toBe(true);
@@ -71,8 +72,19 @@ describe('ふたつの丘の戦場と最初の部隊', () => {
     expect(warrior(normal).stats.maxHp).toBeGreaterThan(warrior(easy).stats.maxHp);
     expect(warrior(hard).stats.attack).toBeGreaterThan(warrior(normal).stats.attack);
     expect(warrior(easy).strikes).toEqual([]);
-    expect(warrior(normal).strikes.map((s) => s.id)).toEqual(['powerStrike']);
+    expect(warrior(normal).strikes.map((s) => s.id)).toEqual(['powerStrike', 'knockback']);
     expect(hard!.find((u) => u.jobId === 'mage')!.spells.map((s) => s.id)).toContain('thunder');
+    // 「やさしい」には受動的なアビリティを付けない。段階が上がるほど多い
+    const passiveCount = (list: typeof easy) => list!.reduce((n, u) => n + u.passives.length, 0);
+    expect(passiveCount(easy)).toBe(0);
+    expect(passiveCount(normal)).toBeGreaterThan(0);
+    expect(passiveCount(hard)).toBeGreaterThan(passiveCount(normal));
+    // 「やさしい」の敵の癒し手は MP が少ない（癒しを2回まで）
+    const healer = easy!.find((u) => u.jobId === 'healer')!;
+    expect(healer.stats.maxMp).toBe(16);
+    // 付けている受動的なアビリティは、能力値に反映される（重装で最大 HP、早足で移動力）
+    const hardWarrior = warrior(hard);
+    expect(hardWarrior.stats.move).toBe(jobs.find((j) => j.id === 'warrior')!.stats.move + 1);
   });
 
   it('部隊の育成の状態（ジョブ・成長値・副コマンド）が、戦闘のユニットに反映される', () => {

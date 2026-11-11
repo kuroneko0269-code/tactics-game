@@ -7,7 +7,9 @@ import type { JobDefinition } from '../core/battleTypes';
  * - stats: 基本の能力値。ユニットの能力値は、これに成長値を足したもの。maxMp は MP の最大値、magic は魔力
  * - weapon: 武器の種類（装備が入るまでは、ジョブごとに固定）
  * - abilities: 行動アビリティの一覧（コマンド）。jpCost はそのジョブの JP で習得する時の消費量。
- *   starter はそのジョブに就いた時点で習得済み
+ *   starter はそのジョブに就いた時点で習得済み。jobLevel は習得に必要なそのジョブのレベル（省くと 1）
+ * - passives: 受動的なアビリティ（リアクション・サポート・ムーブ。定義は passives.ts）の一覧。習得の仕方は行動アビリティと同じ。
+ *   習得すると、ジョブを問わず付けられる。ジョブのレベルを上げる意味を作るため、jobLevel が必要なものを混ぜている
  * - growth: 成長率。レベルが 1 上がるごとに増える成長値（能力値の 1/100 単位。300 なら HP 3.0）。
  *   差は控えめにしている（育て方を気にしなくても困らず、こだわると違いが分かる程度）
  * - unlock: 解放条件（ほかのジョブのレベル）。今は4つとも最初から就ける
@@ -19,7 +21,15 @@ export const warrior: JobDefinition = {
   stats: { maxHp: 72, attack: 14, speed: 6, move: 4, jump: 2, maxMp: 0, magic: 0 },
   attack: { kind: 'melee', maxHeightDiff: 2 },
   weapon: 'sword',
-  abilities: [{ id: 'powerStrike', jpCost: 100 }],
+  abilities: [
+    { id: 'powerStrike', jpCost: 100 },
+    { id: 'knockback', jpCost: 130 },
+  ],
+  passives: [
+    { id: 'counter', jpCost: 200, jobLevel: 3 },
+    { id: 'heavyArmor', jpCost: 250, jobLevel: 4 },
+    { id: 'quickStep', jpCost: 180 },
+  ],
   growth: { maxHp: 300, maxMp: 40, attack: 60, magic: 20, speed: 4 },
   unlock: [],
 };
@@ -30,7 +40,15 @@ export const archer: JobDefinition = {
   stats: { maxHp: 50, attack: 11, speed: 7, move: 3, jump: 2, maxMp: 0, magic: 0 },
   attack: { kind: 'ranged', minRange: 3, maxRange: 5, heightPerExtraRange: 2 },
   weapon: 'bow',
-  abilities: [{ id: 'aimedShot', jpCost: 120 }],
+  abilities: [
+    { id: 'aimedShot', jpCost: 120 },
+    { id: 'slowArrow', jpCost: 100 },
+  ],
+  passives: [
+    { id: 'evade', jpCost: 180, jobLevel: 2 },
+    { id: 'focus', jpCost: 200, jobLevel: 3 },
+    { id: 'lightFoot', jpCost: 150 },
+  ],
   growth: { maxHp: 230, maxMp: 40, attack: 55, magic: 25, speed: 8 },
   unlock: [],
 };
@@ -45,6 +63,11 @@ export const mage: JobDefinition = {
     { id: 'wind', jpCost: 0, starter: true },
     { id: 'fire', jpCost: 120 },
     { id: 'thunder', jpCost: 170 },
+    { id: 'seal', jpCost: 140 },
+  ],
+  passives: [
+    { id: 'magicShell', jpCost: 180, jobLevel: 2 },
+    { id: 'quickCast', jpCost: 280, jobLevel: 4 },
   ],
   growth: { maxHp: 190, maxMp: 120, attack: 30, magic: 70, speed: 4 },
   unlock: [],
@@ -59,6 +82,11 @@ export const healer: JobDefinition = {
   abilities: [
     { id: 'heal', jpCost: 0, starter: true },
     { id: 'bigHeal', jpCost: 150 },
+    { id: 'protectPrayer', jpCost: 160 },
+  ],
+  passives: [
+    { id: 'meditate', jpCost: 150 },
+    { id: 'thrift', jpCost: 220, jobLevel: 3 },
   ],
   growth: { maxHp: 250, maxMp: 100, attack: 30, magic: 55, speed: 4 },
   unlock: [],

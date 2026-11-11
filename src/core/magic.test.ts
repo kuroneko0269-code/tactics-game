@@ -323,7 +323,7 @@ describe('詠唱中のユニット', () => {
       { type: 'cast', spellId: 'wind', target: { kind: 'unit', unitId: 'e' } },
     ] satisfies BattleAction[]) {
       const r = applyAction(base(20), action);
-      expect(r.events[0], action.type).toEqual({ type: 'castInterrupted', casterId: 'm', spellId: 'fire' });
+      expect(r.events[0], action.type).toEqual({ type: 'castInterrupted', casterId: 'm', spellId: 'fire', reason: 'acted' });
       const m = getUnit(r.state, 'm');
       expect(m.mp, action.type).toBe(action.type === 'cast' ? 15 : 20);
       expect(m.charging?.spellId ?? null, action.type).toBe(action.type === 'cast' ? 'wind' : null);

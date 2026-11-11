@@ -1,4 +1,4 @@
-import type { GrowthValues, JobDefinition } from '../../core/battleTypes';
+import type { GrowthValues, JobDefinition, UnitStats } from '../../core/battleTypes';
 import type { BattleSite, EnemyTier } from '../../core/sortie';
 import { archer, healer, mage, warrior } from '../jobs';
 import { twinHills } from '../maps/twinHills';
@@ -25,8 +25,16 @@ const grownBy = (job: JobDefinition, levels: number): GrowthValues => {
   };
 };
 
-/** 敵の段階。level のレベルで、abilities[ジョブ] の行動アビリティを習得している */
-const tier = (id: string, level: number, abilities: Readonly<Record<string, readonly string[]>>): EnemyTier => {
+/**
+ * 敵の段階。level のレベルで、abilities[ジョブ] の行動アビリティを習得し、passives[ジョブ] の受動的なアビリティを付けている
+ */
+const tier = (
+  id: string,
+  level: number,
+  abilities: Readonly<Record<string, readonly string[]>>,
+  passives: Readonly<Record<string, readonly string[]>> = {},
+  statBonus: Readonly<Record<string, Partial<UnitStats>>> = {},
+): EnemyTier => {
   const unit = (id: string, job: JobDefinition, x: number, z: number) => ({
     id,
     jobId: job.id,
@@ -36,6 +44,8 @@ const tier = (id: string, level: number, abilities: Readonly<Record<string, read
     level,
     growth: grownBy(job, level - 1),
     commands: [{ jobId: job.id, abilityIds: abilities[job.id] ?? [] }],
+    passives: passives[job.id] ?? [],
+    statBonus: statBonus[job.id],
   });
   return {
     id,
@@ -60,16 +70,37 @@ export const twinHillsBattle: BattleSite = {
     { x: 6, z: 9, facing: 'north' },
   ],
   tiers: [
-    // やさしい: 最初の部隊と同じ強さ（レベル 1、最初から使えるアビリティだけ）
-    tier('easy', 1, { mage: ['wind', 'fire'], healer: ['heal'] }),
-    // ふつう: レベル 8。各ジョブの技を1つずつ覚えている
-    tier('normal', 8, { warrior: ['powerStrike'], archer: ['aimedShot'], mage: ['wind', 'fire'], healer: ['heal', 'bigHeal'] }),
-    // むずかしい: レベル 18。すべての行動アビリティを覚えている
-    tier('hard', 18, {
-      warrior: ['powerStrike'],
-      archer: ['aimedShot'],
-      mage: ['wind', 'fire', 'thunder'],
-      healer: ['heal', 'bigHeal'],
-    }),
+    // やさしい: 最初の部隊とほぼ同じ（レベル 1、最初から使えるアビリティだけ、受動的なアビリティなし）。
+    // ただし敵の癒し手は MP が 16（癒しを2回まで）。育てていない部隊でも7割ほど勝てるように（フェーズ2-1b）
+    tier('easy', 1, { mage: ['wind', 'fire'], healer: ['heal'] }, {}, { healer: { maxMp: -24 } }),
+    // ふつう: レベル 8。各ジョブの技を覚えていて、受動的なアビリティを1つずつ付けている
+    tier(
+      'normal',
+      8,
+      {
+        warrior: ['powerStrike', 'knockback'],
+        archer: ['aimedShot', 'slowArrow'],
+        mage: ['wind', 'fire', 'seal'],
+        healer: ['heal', 'bigHeal', 'protectPrayer'],
+      },
+      { warrior: ['quickStep'], archer: ['focus'], mage: ['magicShell'], healer: ['meditate'] },
+    ),
+    // むずかしい: レベル 18。すべての行動アビリティを覚えていて、付けられる受動的なアビリティをすべて付けている
+    tier(
+      'hard',
+      18,
+      {
+        warrior: ['powerStrike', 'knockback'],
+        archer: ['aimedShot', 'slowArrow'],
+        mage: ['wind', 'fire', 'thunder', 'seal'],
+        healer: ['heal', 'bigHeal', 'protectPrayer'],
+      },
+      {
+        warrior: ['counter', 'heavyArmor', 'quickStep'],
+        archer: ['evade', 'focus', 'lightFoot'],
+        mage: ['magicShell', 'quickCast'],
+        healer: ['meditate', 'thrift'],
+      },
+    ),
   ],
 };
