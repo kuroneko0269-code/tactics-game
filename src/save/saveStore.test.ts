@@ -29,10 +29,7 @@ const storeOf = (backend: SaveBackend, onFail?: (r: string) => void) =>
   createSaveStore(backend, catalog, progressionRules, saveMigrationContext, onFail);
 
 /** 版 2 までの部隊のユニット（装備の枠がない） */
-const oldUnits = initialRoster.units.map((u) => {
-  const { equipment: _omit, ...rest } = u;
-  return rest;
-});
+const oldUnits = initialRoster.units.map((u) => Object.fromEntries(Object.entries(u).filter(([key]) => key !== 'equipment')));
 
 describe('セーブの出入口', () => {
   it('部隊（所持金・所持品・装備を含む）とダンジョンの記録・訓練戦の記録を保存して読み込むと、元に戻る（版の番号も保存される）', () => {

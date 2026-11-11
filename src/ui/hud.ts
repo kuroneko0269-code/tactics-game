@@ -354,6 +354,12 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
         line.textContent = TEXT.statusInfo(TEXT.statuses[st.id], TEXT.statusHelp[st.id], st.turns);
         info.append(line);
       }
+      // 装備（フェーズ2-4。敵のユニットも見られる）
+      if (unit.equipment.length > 0) {
+        const line = el('div', 'info-equipment');
+        line.textContent = TEXT.equipmentInfo(unit.equipment.map((e) => TEXT.equipment[e.id]?.name ?? e.id));
+        info.append(line);
+      }
       // 付けている受動的なアビリティ（敵のユニットも見られる）
       if (unit.passives.length > 0) {
         const line = el('div', 'info-passives');

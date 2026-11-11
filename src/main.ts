@@ -14,6 +14,7 @@ import {
 import { createMap, type MapDefinition } from './core/map';
 import {
   clearCount,
+  clearRewardItems,
   clearRewardJp,
   EMPTY_DUNGEON_STATE,
   finishRunBattle,
@@ -24,8 +25,11 @@ import {
   type DungeonState,
 } from './core/dungeon';
 import { buildSortie, type BattleSite } from './core/sortie';
+import { EMPTY_RECORDS, type GameRecords } from './core/saveData';
+import { grantSpoils, recordTrainingWin, rollSpoils, shopStock, type BattleReward } from './core/shop';
 import { strikes, spells } from './data/abilities';
 import { passives } from './data/passives';
+import { autoEquipWeights, equipment, saveMigrationContext, shop } from './data/equipment';
 import { aiConfig } from './data/aiConfig';
 import { battleRules } from './data/battleRules';
 import { twinHillsBattle } from './data/battles/twinHillsBattle';
@@ -47,6 +51,8 @@ import { victoryText } from './ui/objectives';
 import { createHud, type BattleHud } from './ui/hud';
 import { showReportScreen } from './ui/reportScreen';
 import { createRosterScreen } from './ui/rosterScreen';
+import { createShopScreen } from './ui/shopScreen';
+import { itemName } from './ui/equipmentText';
 import { showVersion } from './ui/version';
 import { TEXT } from './ui/text';
 import { createUnitLabels, type UnitLabels } from './ui/unitLabels';
@@ -55,12 +61,14 @@ import { createUnitLabels, type UnitLabels } from './ui/unitLabels';
  * 入口。定義データ（data）を戦闘ルールと育成の計算（core）に渡し、
  * 3D 表示（render）と画面（ui）、保存（save）を組み立てる。
  *
- * 画面の流れ: 拠点 →（出撃: 訓練戦なら敵の強さを選ぶ）→ 出撃前の配置 → 戦闘 → 結果 → 拠点。拠点 →（編成）→ 拠点。
+ * 画面の流れ: 拠点 →（出撃: 訓練戦なら敵の強さを選ぶ）→ 出撃前の配置 → 戦闘 → 結果 → 拠点。拠点 →（編成・店）→ 拠点。
  * ダンジョン: 拠点 →（出撃: 挑む・再開する）→ 配置 → 戦闘 → 戦闘の間（結果・編成）→ 次の戦闘 … → クリアの画面 → 拠点。
  * 負けたら、やり直すか撤退するかを選ぶ。
- * 部隊の状態とダンジョンの進み具合は、戦闘が終わった時と編成を変えた時に、端末へ自動で保存する（戦闘の途中は保存しない）。
+ * 部隊の状態（所持金・所持品を含む）とダンジョンの進み具合・訓練戦の記録は、戦闘が終わった時と、編成を変えた時・店で売り買いした時に、
+ * 端末へ自動で保存する（戦闘の途中は保存しない）。
+ * 戦闘に勝つと、戦場の段階ごとの報酬（ゴールドと戦利品の抽選）を部隊に入れる（フェーズ2-4）。
  */
-type ScreenName = 'base' | 'roster' | 'deploy' | 'battle' | 'result';
+type ScreenName = 'base' | 'roster' | 'shop' | 'deploy' | 'battle' | 'result';
 
 interface ActiveBattle {
   readonly view: BattleView;
@@ -83,9 +91,9 @@ function main(): void {
   }
   document.title = TEXT.appTitle;
 
-  const catalog: GameCatalog = { jobs, spells, strikes, passives };
+  const catalog: GameCatalog = { jobs, spells, strikes, passives, equipment };
   const site = twinHillsBattle;
-  const store = createSaveStore(localStorageBackend(), catalog, progressionRules, (reason) =>
+  const store = createSaveStore(localStorageBackend(), catalog, progressionRules, saveMigrationContext, (reason) =>
     console.warn(`セーブデータを読み込めませんでした（${reason}）。はじめからにします`),
   );
   if (validateRoster(initialRoster, catalog, progressionRules).length > 0) throw new Error('最初の部隊の定義が正しくありません');
@@ -93,7 +101,11 @@ function main(): void {
   let roster: Roster = loaded?.roster ?? initialRoster;
   /** ダンジョンの進み具合とクリアの記録（戦闘の間で保存する） */
   let dungeonState: DungeonState = normalizeDungeonState(loaded?.dungeon ?? EMPTY_DUNGEON_STATE, [ruinsDungeon]);
-  const persist = () => store.save({ roster, dungeon: dungeonState });
+  /** 訓練戦の段階ごとの勝利の回数（店の品ぞろえの条件） */
+  let records: GameRecords = loaded?.records ?? EMPTY_RECORDS;
+  const persist = () => store.save({ roster, dungeon: dungeonState, records });
+  /** 今の店の品ぞろえ */
+  const stock = () => shopStock(shop, { trainingWins: records.trainingWins, dungeonClears: dungeonState.clears });
   const updateRoster = (next: Roster) => {
     roster = next;
     persist();
@@ -178,17 +190,31 @@ function main(): void {
       nextBattle: dungeonState.run?.dungeonId === ruinsDungeon.id ? dungeonState.run.battle : null,
       clears: clearCount(dungeonState, ruinsDungeon.id),
     }),
-    onSortie: (tierId) => startSortie(site, tierId, finishBattle),
+    gold: () => roster.gold,
+    onSortie: (tierId) => startSortie(site, tierId, (state) => finishBattle(tierId, state)),
     onDungeon: (fresh) => {
       if (fresh || dungeonState.run?.dungeonId !== ruinsDungeon.id) updateDungeon(startRun(dungeonState, ruinsDungeon.id));
       playDungeonBattle();
     },
     onRoster: () => showRoster(showBase),
+    onShop: () => {
+      setScreen('shop');
+      shopScreen.show();
+    },
     onNewGame: () => {
       store.clear();
       roster = initialRoster;
       dungeonState = EMPTY_DUNGEON_STATE;
+      records = EMPTY_RECORDS;
     },
+  });
+  const shopScreen = createShopScreen(screenEl, {
+    catalog,
+    shop,
+    stock,
+    roster: () => roster,
+    update: updateRoster,
+    onBack: () => showBase(),
   });
   /** 編成の画面の「戻る」の行き先（拠点か、ダンジョンの戦闘の間の画面） */
   let rosterReturn: () => void = () => showBase();
@@ -200,6 +226,7 @@ function main(): void {
   const rosterScreen = createRosterScreen(screenEl, {
     catalog,
     rules: progressionRules,
+    autoEquipWeights,
     roster: () => roster,
     update: updateRoster,
     onBack: () => rosterReturn(),
@@ -225,13 +252,31 @@ function main(): void {
       fn();
     }, 1200);
 
-  /** 訓練戦が終わった: 経験値と JP を部隊に反映して保存し、結果の画面を出す */
-  const finishBattle = (state: BattleState) => {
+  /**
+   * 勝った時の報酬（ゴールドと戦利品の抽選）を部隊に入れる。抽選には、戦闘が終わった時点の乱数の状態を使う。
+   * extraItems はボスからの初回の報酬など、必ず手に入る物
+   */
+  const takeSpoils = (base: Roster, reward: BattleReward | undefined, state: BattleState, extraItems: readonly string[] = []) => {
+    const spoils = rollSpoils(reward, state.winner === 'player', state.rngState);
+    const all = { gold: spoils.gold, itemIds: [...spoils.itemIds, ...extraItems] };
+    const granted = grantSpoils(base, all);
+    return {
+      roster: granted.roster,
+      view: { gold: all.gold, goldTotal: granted.roster.gold, items: all.itemIds.map(itemName) },
+    };
+  };
+
+  /** 訓練戦が終わった: 経験値と JP、勝てばゴールドと戦利品を部隊に入れて保存し、結果の画面を出す */
+  const finishBattle = (tierId: string, state: BattleState) => {
     const result = applyBattleResult(roster, state, catalog, progressionRules);
-    updateRoster(result.roster);
+    const spoils = takeSpoils(result.roster, site.tiers.find((t) => t.id === tierId)?.reward, state);
+    if (result.report.victory) records = { ...records, trainingWins: recordTrainingWin(records.trainingWins, tierId) };
+    updateRoster(spoils.roster);
     afterResultPause(() => {
       setScreen('result');
-      showReportScreen(screenEl, result.report, jobOf, canLearn, [{ label: TEXT.report.toBase, onClick: showBase, primary: true }]);
+      showReportScreen(screenEl, result.report, jobOf, canLearn, [{ label: TEXT.report.toBase, onClick: showBase, primary: true }], {
+        spoils: spoils.view,
+      });
     });
   };
 
@@ -255,10 +300,12 @@ function main(): void {
     const played = dungeonState.run!.battle;
     const result = applyBattleResult(roster, state, catalog, progressionRules);
     const progress = finishRunBattle(dungeonState, ruinsDungeon, result.report.victory);
-    roster =
-      progress.outcome.kind === 'cleared'
-        ? grantClearReward(result.roster, ruinsDungeon, progress.outcome.firstClear)
-        : result.roster;
+    const cleared = progress.outcome.kind === 'cleared';
+    const firstClear = progress.outcome.kind === 'cleared' && progress.outcome.firstClear;
+    // ボスからの初回の報酬は、戦利品と一緒に入れる（クリアの画面で目立たせる）
+    const bossItems = cleared ? clearRewardItems(ruinsDungeon, firstClear) : [];
+    const spoils = takeSpoils(result.roster, ruinsDungeon.battles[played]!.tiers[0]?.reward, state, bossItems);
+    roster = cleared ? grantClearReward(spoils.roster, ruinsDungeon, firstClear) : spoils.roster;
     dungeonState = progress.state;
     persist();
     const outcome = progress.outcome;
@@ -271,8 +318,13 @@ function main(): void {
         showReportScreen(screenEl, result.report, jobOf, canLearn, [{ label: TEXT.report.toBase, onClick: showBase, primary: true }], {
           heading,
           title: TEXT.report.clearTitle(dungeonName),
-          highlights: [...(outcome.firstClear ? [TEXT.report.firstClear] : []), TEXT.report.reward(clearRewardJp(ruinsDungeon, outcome.firstClear))],
+          highlights: [
+            ...(outcome.firstClear ? [TEXT.report.firstClear] : []),
+            TEXT.report.reward(clearRewardJp(ruinsDungeon, outcome.firstClear)),
+            ...bossItems.map((id) => TEXT.report.bossItem(itemName(id))),
+          ],
           notes: [],
+          spoils: spoils.view,
         });
       } else if (outcome.kind === 'next') {
         const next = battleTitle(outcome.battle);
@@ -286,7 +338,7 @@ function main(): void {
             { label: TEXT.report.editRoster, onClick: () => showRoster(show) },
             { label: TEXT.report.suspend, onClick: showBase },
           ],
-          { heading, notes: [TEXT.report.healed] },
+          { heading, notes: [TEXT.report.healed], spoils: spoils.view },
         );
       } else {
         showReportScreen(
@@ -306,7 +358,7 @@ function main(): void {
               },
             },
           ],
-          { heading, notes: [TEXT.report.lostNote] },
+          { heading, notes: [TEXT.report.lostNote], spoils: spoils.view },
         );
       }
     };
@@ -448,6 +500,10 @@ function main(): void {
       roster: () => roster,
       /** ダンジョンの進み具合とクリアの記録 */
       dungeon: () => dungeonState,
+      /** 訓練戦の記録（段階ごとの勝利の回数） */
+      records: () => records,
+      /** 今の店の品ぞろえ */
+      stock: () => stock(),
       /**
        * 今の戦闘を、指定した陣営の勝ちで終わらせる（ダンジョンの流れ（戦闘の間・やり直し・クリア）を短い時間で確かめるため）。
        * ここまでに行った行動の経験値と JP は入る

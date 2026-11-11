@@ -20,6 +20,8 @@ export interface ReportExtras {
   readonly notes?: readonly string[];
   /** 目立たせる短い文（初めてのクリアなど） */
   readonly highlights?: readonly string[];
+  /** 手に入れたゴールドと戦利品（フェーズ2-4）。goldTotal は受け取った後の所持金、items は装備の名前 */
+  readonly spoils?: { readonly gold: number; readonly goldTotal: number; readonly items: readonly string[] };
 }
 
 /** 勝利のボーナスを数え上げる時間（ミリ秒） */
@@ -31,6 +33,7 @@ const BONUS_COUNT_MS = 700;
  * - 「この戦闘で得た合計」: ユニットごとの経験値と JP。勝った時は、戦闘中の分から始めて、勝利のボーナスを数え上げて見せる。
  * - 「レベルが上がったユニット」: キャラクターのレベル（勝利のボーナスで上がった分は、数え上げの後に足す）。
  *   ジョブのレベルが上がったことは、合計の行の名前の横に控えめに添える。
+ * - 「手に入れた物」: 勝った時のゴールドと戦利品（フェーズ2-4。負けた時は「なし」）。
  * - 下のボタン（actions）: 訓練戦なら「拠点へ戻る」、ダンジョンなら「次へ進む」「編成を変える」など。
  * 画面全体はスクロールさせない（横向きと PC は左右2列）。数え上げが終わると、画面の箱に data-done="true" が付く（自動プレイ用）。
  */
@@ -120,6 +123,19 @@ export function showReportScreen(
 
   // 横向きと PC では、レベルが上がったユニットをボタンと同じ右の列に置く（縦の長さを分ける）
   const menu = el('div', 'screen-col report-actions');
+  if (extras.spoils) {
+    const sp = extras.spoils;
+    const spoils = el('div', 'report-spoils');
+    spoils.dataset.gold = String(sp.gold);
+    spoils.dataset.items = String(sp.items.length);
+    if (sp.gold > 0 || sp.items.length > 0) {
+      spoils.append(el('span', 'report-gold', TEXT.report.goldGain(sp.gold, sp.goldTotal)));
+      for (const name of sp.items) spoils.append(el('span', 'report-chip loot', name));
+    } else {
+      spoils.append(el('span', 'screen-note', TEXT.report.noSpoils));
+    }
+    menu.append(el('h2', 'report-section-title', TEXT.report.spoilsTitle), spoils);
+  }
   menu.append(upsTitle, ups);
   const [first, ...rest] = actions;
   if (first) menu.append(screenButton(first.label, first.onClick, { className: first.primary ? 'primary big' : first.danger ? 'danger big' : 'big' }));

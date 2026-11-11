@@ -3,7 +3,9 @@
  * 文言はここ以外に書かない（将来の翻訳と表記の統一のため）。
  * core は文言を作らず、出来事や状態（例: 地形 'grass'、向き 'back'）だけを返す。それを文言に変えるのがここの役割。
  */
-import type { GrowthStat, PassiveSlot, SpellElement, StatusId, Team, WeaponType } from '../core/battleTypes';
+import type { ArmorType, EquipmentEffect, EquipSlot, GrowthStat, PassiveSlot, SpellElement, StatusId, Team, UnitStats, WeaponType } from '../core/battleTypes';
+import type { EquipRefusal } from '../core/equipment';
+import type { BuyRefusal, SellRefusal } from '../core/shop';
 import type { LearnRefusal } from '../core/progression';
 import type { RelativeSide } from '../core/geometry';
 import type { Terrain } from '../core/map';
@@ -221,6 +223,69 @@ export const TEXT = {
     staff: '杖',
   } satisfies Record<WeaponType, string>,
 
+  /** 防具の種類（フェーズ2-4） */
+  armors: {
+    heavy: '鎧',
+    light: '軽装',
+    robe: 'ローブ',
+  } satisfies Record<ArmorType, string>,
+
+  /** 装備の枠 */
+  equipSlots: {
+    weapon: '武器',
+    armor: '防具',
+    accessory: '装飾品',
+  } satisfies Record<EquipSlot, string>,
+
+  /** 装備の名前と説明（id で引く。名称は仮） */
+  equipment: {
+    'sword-1': { name: '銅の剣', help: '手になじむ、基本の剣' },
+    'sword-2': { name: '鋼の剣', help: 'よく鍛えられた剣' },
+    'sword-3': { name: '白銀の剣', help: '名工の打った、鋭い剣' },
+    'bow-1': { name: '狩人の弓', help: '扱いやすい短い弓' },
+    'bow-2': { name: '長弓', help: '遠くまで力強く射られる弓' },
+    'bow-3': { name: '風切りの弓', help: '風を裂いて飛ぶ、名工の弓' },
+    'staff-1': { name: '樫の杖', help: '魔力を通しやすい木の杖' },
+    'staff-2': { name: '水晶の杖', help: '先の水晶が魔力を集める' },
+    'staff-3': { name: '星詠みの杖', help: '星の力を宿すという杖' },
+    'heavy-1': { name: '鉄の鎧', help: '重いが頼れる鎧' },
+    'heavy-2': { name: '鋼の鎧', help: '厚い鋼の鎧' },
+    'heavy-3': { name: '白銀の鎧', help: '軽くて硬い、名工の鎧' },
+    'light-1': { name: '革の服', help: '動きやすい革の服' },
+    'light-2': { name: '硬革の服', help: '要所を硬い革で守る服' },
+    'light-3': { name: '銀糸の服', help: '銀の糸を織り込んだ服' },
+    'robe-1': { name: '麻のローブ', help: '魔法使いの普段着' },
+    'robe-2': { name: '絹のローブ', help: '魔力をためやすい絹のローブ' },
+    'robe-3': { name: '月光のローブ', help: '月の光を織ったというローブ' },
+    'swift-boots': { name: '疾風の靴', help: '移動力が 1 上がる' },
+    'spring-boots': { name: '跳ね靴', help: 'ジャンプ力が 1 上がる' },
+    'quick-ring': { name: '早駆けの指輪', help: '素早さが 1 上がる' },
+    'mana-charm': { name: '魔力の首飾り', help: '最大 MP が 10 上がる' },
+    'quiet-amulet': { name: '静寂よけの護符', help: '沈黙にならない' },
+    'steady-bangle': { name: '不動の腕輪', help: '詠唱中に受けるダメージが増えない' },
+    'altar-crown': { name: '主の宝冠', help: '祭壇の主が戴いていた冠。店では手に入らない' },
+  } as Readonly<Record<string, { name: string; help: string }>>,
+
+  /** 装備の値の短い名前（「攻撃力 +3」のように使う） */
+  equipStatNames: {
+    maxHp: 'HP',
+    maxMp: 'MP',
+    attack: '攻撃力',
+    magic: '魔力',
+    speed: '素早さ',
+    move: '移動',
+    jump: 'ジャンプ',
+  } satisfies Record<keyof UnitStats, string>,
+
+  /** 装備の特別な効果 */
+  equipmentEffect: (effect: EquipmentEffect, statusName: (id: StatusId) => string): string =>
+    effect.kind === 'statusImmunity' ? `${statusName(effect.status)}を防ぐ` : '詠唱中の被ダメージ増加を打ち消す',
+  /** 戦闘中、装備で状態変化を防いだ時 */
+  equipmentBlocked: (item: string, status: string) => `${item}: ${status}を防いだ`,
+  /** 情報の欄の装備 */
+  equipmentInfo: (names: readonly string[]) => `装備: ${names.join('・')}`,
+  gold: (n: number) => `${n} G`,
+
   teams: {
     player: '味方',
     enemy: '敵',
@@ -368,6 +433,8 @@ export const TEXT = {
     /** 当たって倒れない時の合計 */
     total: (damage: number, hp: number) => `合計 ${damage}（HP → ${hp}）`,
     inflicts: (status: string) => `当たると${status}を付ける`,
+    /** 相手の装備で状態変化を防がれる時 */
+    blocked: (item: string, status: string) => `${status}は「${item}」で防がれる`,
     interrupts: '当たると詠唱を中断させる',
     counter: '反撃あり',
     counterDetail: (damage: number, hit: number) => `受ける見込み ${damage}（命中 ${hit}%）`,
@@ -414,6 +481,8 @@ export const TEXT = {
     title: '拠点',
     sortie: '出撃',
     roster: '編成',
+    shop: '店',
+    gold: (n: number) => `所持金 ${n} G`,
     newGame: 'はじめから',
     confirmNewGame: '部隊の育成の記録をすべて消して、はじめからにしますか？ 元には戻せません',
     confirmNewGameYes: '消して、はじめから',
@@ -482,6 +551,40 @@ export const TEXT = {
     clearTitle: (name: string) => `${name} クリア！`,
     firstClear: '初めてのクリア！',
     reward: (jp: number) => `報酬: 全員の今のジョブに JP +${jp}`,
+    /** ゴールドと戦利品（フェーズ2-4） */
+    spoilsTitle: '手に入れた物',
+    goldGain: (n: number, total: number) => `+${n} G（所持金 ${total} G）`,
+    noSpoils: 'なし（負けた時は、ゴールドと戦利品は得られません）',
+    bossItem: (name: string) => `祭壇の主から「${name}」を手に入れた！`,
+  },
+
+  /** 店（フェーズ2-4） */
+  shop: {
+    title: '店',
+    back: '戻る',
+    close: '閉じる',
+    tabs: { buy: '買う', sell: '売る' } as Readonly<Record<string, string>>,
+    empty: '売れる物がありません',
+    price: (n: number) => `${n} G`,
+    sellPrice: (n: number) => `売値 ${n} G`,
+    wornBy: (name: string) => `${name}が装備中`,
+    owned: (n: number) => `持っている数 ${n}`,
+    whoCanEquip: '部隊のだれが装備できるか（付け替えた時の能力値）',
+    cannotEquip: '装備できない',
+    sameAsNow: '今と同じ',
+    buy: (n: number) => `買う（${n} G）`,
+    sell: (n: number) => `売る（+${n} G）`,
+    bought: (name: string) => `${name}を買いました。編成の「装備」で付けられます`,
+    sold: (name: string, n: number) => `${name}を売りました（+${n} G）`,
+    buyRefusal: {
+      notInStock: '品切れ',
+      notEnoughGold: 'ゴールドが足りません',
+    } satisfies Record<BuyRefusal, string>,
+    sellRefusal: {
+      notOwned: '持っていません',
+      equipped: '装備中の物は売れません（編成で外すと売れます）',
+    } satisfies Record<SellRefusal, string>,
+    newStock: '品ぞろえは、ダンジョンのクリアや訓練戦の勝利で増えます',
   },
 
   /** 編成の画面（フェーズ2-3 で作り直し。項目名と数値で伝わる所には、説明の文を置かない） */
@@ -490,12 +593,13 @@ export const TEXT = {
     back: '戻る',
     close: '閉じる',
     level: (lv: number) => `Lv ${lv}`,
-    tabs: { stats: '能力', job: 'ジョブ', abilities: 'アビリティ', learn: '習得' } as Readonly<Record<string, string>>,
+    tabs: { stats: '能力', job: 'ジョブ', abilities: 'アビリティ', learn: '習得', equip: '装備' } as Readonly<Record<string, string>>,
     // 能力
     expToNext: (n: number) => `次のレベルまで ${n} EXP`,
     maxLevel: 'レベルの上限',
     legendBase: '基本',
     legendGrowth: '成長値',
+    legendEquip: '装備',
     growthTotal: '成長の合計',
     moveJump: (move: number, jump: number) => `移動 ${move} ・ ジャンプ ${jump}`,
     weapon: (w: string) => `武器 ${w}`,
@@ -513,6 +617,21 @@ export const TEXT = {
     compareAfter: '変更後',
     rateTitle: '成長率（1レベルごと）',
     becomeJob: (job: string) => `${job}になる`,
+    /** ジョブを変えると外れる装備（フェーズ2-4） */
+    willRemove: (names: string) => `外れる装備: ${names}（新しいジョブでは付けられません）`,
+    removed: (unit: string, names: string) => `${unit}の${names}が外れました（新しいジョブでは付けられません）`,
+    // 装備（フェーズ2-4）
+    autoEquip: 'おまかせ',
+    autoEquipHelp: '持っている物から、今のジョブに合う最も強い組み合わせを付けます',
+    chooseEquip: (slot: string) => `${slot}を選ぶ`,
+    noEquipChoices: '付けられる物を持っていません（店で買えます）',
+    wornByOther: (name: string) => `${name}が装備中（付け替えます）`,
+    wearing: '装備中',
+    equipRefusal: {
+      notOwned: '持っていません',
+      wrongSlot: '枠が違います',
+      cannotEquip: 'このジョブでは付けられません',
+    } satisfies Record<EquipRefusal, string>,
     // アビリティ
     mainCommand: '主コマンド',
     subCommand: '副コマンド',

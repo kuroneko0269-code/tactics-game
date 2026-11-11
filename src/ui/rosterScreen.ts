@@ -1,6 +1,16 @@
-import type { GrowthStat, JobAbility, JobDefinition, PassiveSlot } from '../core/battleTypes';
+import type { EquipSlot, GrowthStat, JobAbility, JobDefinition, PassiveSlot } from '../core/battleTypes';
 import {
-  changeJob,
+  autoEquip,
+  changeJobWithEquipment,
+  equipCandidates,
+  equipItem,
+  equippedDefinitions,
+  equippedStats,
+  itemOf,
+  type AutoEquipWeights,
+} from '../core/equipment';
+import { EQUIP_SLOTS, findEquipment } from '../core/items';
+import {
   expToNext,
   findJob,
   findUnit,
@@ -21,7 +31,6 @@ import {
   secondaryChoices,
   setPassive,
   setSecondary,
-  statsWithGrowth,
   unitStats,
   type GameCatalog,
   type ProgressionRules,
@@ -29,14 +38,17 @@ import {
   type RosterUnit,
 } from '../core/progression';
 import { el, formatHundredths, screenButton, showSheet, tabButton } from './dom';
+import { itemEffectText, itemName, statChanges } from './equipmentText';
 import { TEXT, unitName } from './text';
 
 /**
  * 編成の画面（フェーズ2-3 で作り直し）。画面全体はスクロールさせず、1画面に収める。
  *
  * - 上に部隊の5人を並べ、タップでユニットを切り替える（選んでいるユニットは枠で目立たせる）。
- * - ユニットごとの内容は4つのタブ: 能力（レベル・経験値・能力値・成長値を棒で）、ジョブ（ジョブチェンジ）、
- *   アビリティ（主コマンド・副コマンド・リアクション・サポート・ムーブの付け替え）、習得（種類ごとの一覧）。
+ * - ユニットごとの内容は5つのタブ: 能力（レベル・経験値・能力値・成長値と装備の分を棒で）、ジョブ（ジョブチェンジ）、
+ *   アビリティ（主コマンド・副コマンド・リアクション・サポート・ムーブの付け替え）、習得（種類ごとの一覧）、
+ *   装備（武器・防具・装飾品の付け替えと「おまかせ」。フェーズ2-4）。
+ * - ジョブを変えた時、新しいジョブで付けられなくなった装備は自動で外れ、その旨を出す（変える前の欄でも知らせる）。
  * - 一覧には名前と数値だけを出し、説明・条件・「習得する」「付ける」などのボタンは、項目を押すと下からせり上がる欄に出す。
  * - ジョブチェンジと付け替えは、ユニットを選んでから2回以内のタップで届く（タブ → 項目）。タブはユニットを切り替えても変わらない。
  * - 習得の一覧（数が増え続ける）だけ、その枠の中でスクロールする。
@@ -46,6 +58,8 @@ import { TEXT, unitName } from './text';
 export interface RosterScreenDeps {
   readonly catalog: GameCatalog;
   readonly rules: ProgressionRules;
+  /** 「おまかせ」の点数の重み */
+  readonly autoEquipWeights: AutoEquipWeights;
   roster(): Roster;
   /** 部隊を変えた（保存もここで行う） */
   update(roster: Roster): void;
@@ -56,8 +70,8 @@ export interface RosterScreen {
   show(): void;
 }
 
-export type RosterTab = 'stats' | 'job' | 'abilities' | 'learn';
-const TABS: readonly RosterTab[] = ['stats', 'job', 'abilities', 'learn'];
+export type RosterTab = 'stats' | 'job' | 'abilities' | 'learn' | 'equip';
+const TABS: readonly RosterTab[] = ['stats', 'job', 'abilities', 'learn', 'equip'];
 type LearnGroup = 'action' | PassiveSlot;
 const LEARN_GROUPS: readonly LearnGroup[] = ['action', ...PASSIVE_SLOTS];
 
@@ -65,7 +79,8 @@ const LEARN_GROUPS: readonly LearnGroup[] = ['action', ...PASSIVE_SLOTS];
 type Sheet =
   | { kind: 'job'; jobId: string }
   | { kind: 'slot'; slot: 'main' | 'secondary' | PassiveSlot }
-  | { kind: 'ability'; jobId: string; abilityId: string };
+  | { kind: 'ability'; jobId: string; abilityId: string }
+  | { kind: 'equip'; slot: EquipSlot };
 
 export function createRosterScreen(root: HTMLElement, deps: RosterScreenDeps): RosterScreen {
   const { catalog, rules } = deps;
@@ -75,6 +90,8 @@ export function createRosterScreen(root: HTMLElement, deps: RosterScreenDeps): R
   let sheet: Sheet | undefined;
   /** 習得の一覧のスクロール位置（習得した後も、同じ位置に戻す） */
   let learnScroll = 0;
+  /** ジョブを変えて装備が外れた時などの、短い知らせ（次の操作で消える） */
+  let notice: string | undefined;
 
   const jobName = (id: string) => TEXT.jobs[id] ?? id;
   const abilityName = (id: string) => TEXT.abilities[id] ?? id;
@@ -82,18 +99,33 @@ export function createRosterScreen(root: HTMLElement, deps: RosterScreenDeps): R
     slot === 'main' ? TEXT.roster.mainCommand : slot === 'secondary' ? TEXT.roster.subCommand : TEXT.passiveSlots[slot];
   const slotOf = (id: string): PassiveSlot | undefined => catalog.passives.find((p) => p.id === id)?.slot;
 
-  /** 能力ごとの棒の長さの基準（どのジョブの基本値 + 成長値の上限でも収まる値） */
+  /** 装備で上がる値の最大（枠ごとの最も大きい値の合計） */
+  const maxEquipBonus = (stat: GrowthStat) =>
+    EQUIP_SLOTS.reduce((sum, slot) => sum + Math.max(0, ...catalog.equipment.filter((e) => e.slot === slot).map((e) => e.stats[stat] ?? 0)), 0);
+  /** 能力ごとの棒の長さの基準（どのジョブの基本値 + 成長値の上限 + 装備でも収まる値） */
   const statScale = Object.fromEntries(
-    GROWTH_STATS.map((s) => [s, Math.max(1, ...catalog.jobs.map((j) => j.stats[s])) + Math.floor(rules.growthCap[s] / 100)]),
+    GROWTH_STATS.map((s) => [
+      s,
+      Math.max(1, ...catalog.jobs.map((j) => j.stats[s])) + Math.floor(rules.growthCap[s] / 100) + maxEquipBonus(s),
+    ]),
   ) as Record<GrowthStat, number>;
 
   const set = (patch: () => void) => {
+    notice = undefined;
     patch();
     render();
   };
   const edit = (change: (u: RosterUnit) => RosterUnit, after?: () => void) => {
     const roster = deps.roster();
     deps.update(replaceUnit(roster, change(findUnit(roster, unitId))));
+    notice = undefined;
+    after?.();
+    render();
+  };
+  /** 部隊ごと変える（装備の付け替えは、ほかのユニットから外すこともある） */
+  const editRoster = (change: (r: Roster) => Roster, after?: () => void) => {
+    deps.update(change(deps.roster()));
+    notice = undefined;
     after?.();
     render();
   };
@@ -112,7 +144,10 @@ export function createRosterScreen(root: HTMLElement, deps: RosterScreenDeps): R
   // ---- 能力 ----
   const renderStats = (panel: HTMLElement, u: RosterUnit) => {
     const job = findJob(catalog, u.jobId);
-    const stats = unitStats(u, catalog);
+    const roster = deps.roster();
+    const grownStats = unitStats(u, catalog);
+    const stats = equippedStats(u, roster, catalog);
+    const weapon = equippedDefinitions(u, roster, catalog).find((d) => d.slot === 'weapon');
     const block = el('div', 'level-block');
     const atMax = u.level >= rules.maxLevel;
     const need = expToNext(u.level, rules);
@@ -127,19 +162,25 @@ export function createRosterScreen(root: HTMLElement, deps: RosterScreenDeps): R
       s.style.setProperty('--swatch', color);
       return s;
     };
-    legend.append(swatch(TEXT.roster.legendBase, '#6f8bb3'), swatch(TEXT.roster.legendGrowth, 'var(--accent)'));
+    legend.append(
+      swatch(TEXT.roster.legendBase, '#6f8bb3'),
+      swatch(TEXT.roster.legendGrowth, 'var(--accent)'),
+      swatch(TEXT.roster.legendEquip, '#5fc7a8'),
+    );
     const list = el('div', 'stat-bars');
     for (const s of GROWTH_STATS) {
       const row = el('div', 'stat-bar-row');
       row.dataset.stat = s;
       const base = job.stats[s];
-      const grown = stats[s] - base;
-      row.title = `${TEXT.statNames[s]} ${base} + ${grown}（${formatHundredths(u.growth[s])}）`;
+      const grown = grownStats[s] - base;
+      const equip = stats[s] - grownStats[s];
+      row.title = `${TEXT.statNames[s]} ${base} + ${grown}（${formatHundredths(u.growth[s])}） + ${equip}`;
       row.append(
         el('span', 'name', TEXT.statNames[s]),
         bar([
           [base / statScale[s], 'bar-base'],
           [grown / statScale[s], 'bar-growth'],
+          [Math.max(0, equip) / statScale[s], 'bar-equip'],
         ]),
         el('span', 'value', String(stats[s])),
       );
@@ -161,7 +202,7 @@ export function createRosterScreen(root: HTMLElement, deps: RosterScreenDeps): R
       el(
         'p',
         'screen-note',
-        `${TEXT.roster.moveJump(stats.move, stats.jump)} ・ ${TEXT.roster.weapon(job.weapon ? TEXT.weapons[job.weapon] : '-')}`,
+        `${TEXT.roster.moveJump(stats.move, stats.jump)} ・ ${TEXT.roster.weapon(weapon?.weaponType ? TEXT.weapons[weapon.weaponType] : TEXT.roster.none)}`,
       ),
     );
   };
@@ -203,12 +244,14 @@ export function createRosterScreen(root: HTMLElement, deps: RosterScreenDeps): R
     panel.append(card, grid);
   };
 
-  /** ジョブを変える前の比較（選んだジョブについてだけ）と「〇〇になる」 */
+  /** ジョブを変える前の比較（選んだジョブについてだけ。付けられなくなる装備は外した後の値）と「〇〇になる」 */
   const jobSheet = (u: RosterUnit, jobId: string): HTMLElement[] => {
     const next = findJob(catalog, jobId);
     const now = findJob(catalog, u.jobId);
-    const before = unitStats(u, catalog);
-    const after = statsWithGrowth(next.stats, u.growth);
+    const roster = deps.roster();
+    const before = equippedStats(u, roster, catalog);
+    const changed = changeJobWithEquipment(roster, u.id, jobId, catalog, rules);
+    const after = equippedStats(findUnit(changed.roster, u.id), changed.roster, catalog);
     const grid = el('div', 'compare-grid');
     grid.append(el('span', 'head', ''), el('span', 'head', TEXT.roster.compareAfter), el('span', 'head', TEXT.roster.rateTitle));
     for (const s of GROWTH_STATS) {
@@ -224,12 +267,21 @@ export function createRosterScreen(root: HTMLElement, deps: RosterScreenDeps): R
       );
       grid.append(el('span', undefined, TEXT.statNames[s]), value, rate);
     }
+    const removedNames = changed.removed.map((i) => itemName(i.itemId)).join('・');
     return [
       grid,
       el('p', 'screen-note', TEXT.roster.moveJump(after.move, after.jump)),
+      ...(changed.removed.length > 0 ? [el('p', 'sheet-warning', TEXT.roster.willRemove(removedNames))] : []),
       screenButton(
         TEXT.roster.becomeJob(jobName(next.id)),
-        () => edit((x) => changeJob(x, next.id, catalog, rules), () => (sheet = undefined)),
+        () =>
+          editRoster(
+            (r) => changeJobWithEquipment(r, u.id, next.id, catalog, rules).roster,
+            () => {
+              sheet = undefined;
+              if (changed.removed.length > 0) notice = TEXT.roster.removed(unitName(u.id, next.id), removedNames);
+            },
+          ),
         { className: 'primary big' },
       ),
     ];
@@ -387,6 +439,89 @@ export function createRosterScreen(root: HTMLElement, deps: RosterScreenDeps): R
     return body;
   };
 
+  // ---- 装備（フェーズ2-4） ----
+  const renderEquip = (panel: HTMLElement, u: RosterUnit) => {
+    const roster = deps.roster();
+    const list = el('div', 'slot-list equip-slots');
+    for (const slot of EQUIP_SLOTS) {
+      const uid = u.equipment[slot];
+      const item = uid === null ? undefined : itemOf(roster, uid);
+      const def = item ? findEquipment(catalog, item.itemId) : undefined;
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'screen-button slot-row equip-row';
+      b.dataset.slot = slot;
+      b.setAttribute('aria-label', TEXT.equipSlots[slot]);
+      const value = el('span', `slot-value${def ? '' : ' empty'}`);
+      value.append(el('span', 'equip-name', def ? itemName(def.id) : TEXT.roster.none));
+      if (def) value.append(el('span', 'equip-effect', itemEffectText(def)));
+      b.append(el('span', 'slot-name', TEXT.equipSlots[slot]), value);
+      b.addEventListener('click', () => set(() => (sheet = { kind: 'equip', slot })));
+      list.append(b);
+    }
+    const stats = equippedStats(u, roster, catalog);
+    const summary = el('p', 'screen-note equip-summary');
+    summary.textContent = [
+      `${TEXT.statNames.maxHp} ${stats.maxHp}`,
+      `${TEXT.statNames.maxMp} ${stats.maxMp}`,
+      `${TEXT.statNames.attack} ${stats.attack}`,
+      `${TEXT.statNames.magic} ${stats.magic}`,
+      `${TEXT.statNames.speed} ${stats.speed}`,
+      TEXT.roster.moveJump(stats.move, stats.jump),
+    ].join(' ・ ');
+    const auto = screenButton(TEXT.roster.autoEquip, () => editRoster((r) => autoEquip(r, u.id, catalog, deps.autoEquipWeights)), {
+      className: 'big auto-equip',
+      sub: TEXT.roster.autoEquipHelp,
+    });
+    panel.append(list, summary, auto);
+  };
+
+  /** 装備の枠を押した時: 付けられる候補（押すとすぐ付け替える）。付け替えた時の能力値の変化を出す */
+  const equipSheet = (u: RosterUnit, slot: EquipSlot): HTMLElement[] => {
+    const roster = deps.roster();
+    const choices = el('div', 'sheet-choices equip-choices');
+    const before = equippedStats(u, roster, catalog);
+    const choose = (uid: string | null) => editRoster((r) => equipItem(r, u.id, slot, uid, catalog), () => (sheet = undefined));
+    // 同じ物が複数ある時は、だれも付けていない物を1つだけ出す（付けている物は1つずつ出す）
+    const shown = new Set<string>();
+    for (const c of equipCandidates(roster, u.id, slot, catalog)) {
+      const mine = c.wornBy === u.id;
+      if (!c.wornBy) {
+        if (shown.has(c.def.id)) continue;
+        shown.add(c.def.id);
+      }
+      const changes = statChanges(before, c.statsAfter);
+      const sub = [
+        itemEffectText(c.def),
+        mine ? TEXT.roster.wearing : c.wornBy ? TEXT.roster.wornByOther(unitName(c.wornBy, findUnit(roster, c.wornBy).jobId)) : '',
+      ]
+        .filter((x) => x)
+        .join(' ・ ');
+      const b = screenButton(itemName(c.def.id), () => (mine ? set(() => (sheet = undefined)) : choose(c.item.uid)), {
+        sub,
+        pressed: mine,
+        className: 'equip-choice',
+      });
+      b.dataset.uid = c.item.uid;
+      b.dataset.itemId = c.def.id;
+      const diff = el('span', 'equip-diff');
+      for (const ch of changes) diff.append(el('span', ch.up ? 'up' : 'down', ch.text));
+      if (changes.length > 0) b.append(diff);
+      choices.append(b);
+    }
+    if (u.equipment[slot] !== null) {
+      const off = screenButton(TEXT.roster.remove, () => choose(null), { className: 'equip-remove' });
+      const diff = el('span', 'equip-diff');
+      for (const ch of statChanges(before, equippedStats({ ...u, equipment: { ...u.equipment, [slot]: null } }, roster, catalog))) {
+        diff.append(el('span', ch.up ? 'up' : 'down', ch.text));
+      }
+      off.append(diff);
+      choices.append(off);
+    }
+    if (choices.children.length === 0) choices.append(el('p', 'screen-note', TEXT.roster.noEquipChoices));
+    return [choices];
+  };
+
   /** 最後にせり上がる動きを見せた欄（習得の後など、同じ欄を出し直す時は動かさない） */
   let animatedSheet = '';
   const renderSheet = (u: RosterUnit) => {
@@ -407,6 +542,14 @@ export function createRosterScreen(root: HTMLElement, deps: RosterScreenDeps): R
         kind: `slot-${s.slot}`,
         title: s.slot === 'main' ? TEXT.roster.mainCommand : TEXT.roster.chooseFor(slotName(s.slot)),
         body: slotSheet(u, s.slot),
+        closeLabel: TEXT.roster.close,
+        onClose: close,
+      });
+    } else if (s.kind === 'equip') {
+      showSheet(root, {
+        kind: `equip-${s.slot}`,
+        title: TEXT.roster.chooseEquip(TEXT.equipSlots[s.slot]),
+        body: equipSheet(u, s.slot),
         closeLabel: TEXT.roster.close,
         onClose: close,
       });
@@ -454,9 +597,11 @@ export function createRosterScreen(root: HTMLElement, deps: RosterScreenDeps): R
     const panel = el('div', 'roster-panel');
     panel.dataset.tab = tab;
     panel.setAttribute('role', 'tabpanel');
+    if (notice) panel.append(el('p', 'roster-notice', notice));
     if (tab === 'stats') renderStats(panel, u);
     else if (tab === 'job') renderJob(panel, u);
     else if (tab === 'abilities') renderAbilities(panel, u);
+    else if (tab === 'equip') renderEquip(panel, u);
     else renderLearn(panel, u);
     main.append(tabs, panel);
 
@@ -468,6 +613,7 @@ export function createRosterScreen(root: HTMLElement, deps: RosterScreenDeps): R
   return {
     show() {
       sheet = undefined;
+      notice = undefined;
       if (!deps.roster().units.some((x) => x.id === unitId)) unitId = deps.roster().units[0]!.id;
       render();
     },
