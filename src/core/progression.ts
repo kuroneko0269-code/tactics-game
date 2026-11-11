@@ -220,7 +220,7 @@ export function levelUp(unit: RosterUnit, catalog: Pick<GameCatalog, 'jobs'>, ru
 
 /**
  * レベルを 1 つ下げる（今のジョブの成長率ぶん成長値が減る）。レベル 1 なら何もしない。
- * 貯まっていた経験値は 0 に戻す。（フェーズ2-2 で、レベルを下げる罠のマスに使う）
+ * 貯まっていた経験値は 0 に戻す。（フェーズ2-2 の脱力の罠で下がったレベルを、戦闘の後に部隊へ反映する時に使う）
  */
 export function levelDown(unit: RosterUnit, catalog: Pick<GameCatalog, 'jobs'>): RosterUnit {
   if (unit.level <= 1) return unit;
@@ -523,6 +523,8 @@ export interface UnitBattleReport {
   readonly jobId: string;
   readonly levelBefore: number;
   readonly levelAfter: number;
+  /** 脱力の罠で下がったレベルの数（経験値より先に反映する） */
+  readonly levelDrops: number;
   readonly jobLevelBefore: number;
   readonly jobLevelAfter: number;
 }
@@ -537,6 +539,7 @@ export interface BattleReport {
  * battle の味方のユニットのうち、部隊にいるユニット（id が同じ）に反映する。
  * 経験値: 行動ごとに、相手のレベルによって増減した量（actionExp）。勝利すると、倒れたユニットを含む全員に、
  * 敵の最も高いレベルによって増減した expVictory。レベルの増減は、戦闘の開始時の自分のレベルで計算する。
+ * 脱力の罠で下がったレベル（levelDrops）は、勝ち負けに関わらず、経験値を足す前に levelDown で反映する（戻らない）。
  */
 export function applyBattleResult(
   roster: Roster,
@@ -556,7 +559,9 @@ export function applyBattleResult(
     const exp = actionTotal + (victory ? scaledExp(rules.expVictory, u.level, enemyLevel, rules) : 0);
     const jp = u.actions.length * rules.jpPerAction + (victory ? rules.jpVictoryBonus : 0);
     const jobId = before.jobId;
-    const after = gainJp(gainExp(before, exp, catalog, rules), jobId, jp);
+    let drained = before;
+    for (let i = 0; i < u.levelDrops; i++) drained = levelDown(drained, catalog);
+    const after = gainJp(gainExp(drained, exp, catalog, rules), jobId, jp);
     reports.push({
       unitId: u.id,
       actions: u.actions.length,
@@ -565,6 +570,7 @@ export function applyBattleResult(
       jobId,
       levelBefore: before.level,
       levelAfter: after.level,
+      levelDrops: before.level - drained.level,
       jobLevelBefore: jobLevel(before, jobId, rules),
       jobLevelAfter: jobLevel(after, jobId, rules),
     });

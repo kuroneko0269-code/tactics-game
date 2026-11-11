@@ -126,4 +126,18 @@ describe('ふたつの丘の戦場と最初の部隊', () => {
     expect(a.state).toEqual(b.state);
     expect(a.events).toEqual(b.events);
   }, 30_000);
+
+  it('敵 AI の封じ: 「ふつう」以上で、魔法を使う相手（育てていない部隊）がいる戦闘では、1戦に平均 0.5 回以上使う', () => {
+    for (const tierId of ['normal', 'hard']) {
+      let seals = 0;
+      const n = 12;
+      for (let seed = 1; seed <= n; seed++) {
+        const { events, state } = runAutoBattle(start(seed, tierId).state, 1000, configs);
+        const enemy = new Set(state.units.filter((u) => u.team === 'enemy').map((u) => u.id));
+        seals += events.filter((e) => e.type === 'castStarted' && e.spellId === 'seal' && enemy.has(e.casterId)).length;
+      }
+      expect(seals / n, tierId).toBeGreaterThanOrEqual(0.5);
+    }
+  });
 });
+

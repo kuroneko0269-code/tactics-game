@@ -8,7 +8,14 @@
  * 行動には、通常攻撃のほかに行動アビリティ（強打のようにすぐ出る技と、詠唱のある魔法・狙い撃ち）がある。
  * アビリティは、必要な武器の種類が合わなければ使えない。
  * 攻撃・魔法・技を実行するたびに、ユニットの行動の記録（actions。相手のレベルなど）を残す（戦闘の後の経験値と JP に使う）。
- * 勝敗は全滅で決まる（敵が全滅で味方の勝ち、味方が全滅で敵の勝ち）。
+ * 勝敗は、戦闘ごとの勝敗条件で決まる（省くと全滅。判定は scenario.ts）。
+ *
+ * マップ上のイベント・罠・増援（フェーズ2-2）:
+ * - 手番の区切り（ある手番が終わり、次の手番が始まる前）で、手番数の勝敗条件 →「手番」のきっかけのイベント
+ *   → 予告済みの増援の出現 → 状態で決まるきっかけのイベント の順に処理する。
+ * - ユニットが移動か突き飛ばしでマスに入ったら、そのマスの罠 →「マスに入る」のきっかけのイベント の順に処理する。
+ * - HP が減った後（攻撃・魔法・罠）に、「HP が一定以下」「撃破」のきっかけを調べる。
+ * - 罠やイベントが起きた移動は、取り消せない。自分の移動で倒れたら、その手番はそこで終わる。
  *
  * 状態変化（守り・鈍足・沈黙）は、そのユニットの手番が終わるたびに持続が 1 減り、0 で消える（effects.ts）。
  * 攻撃が当たった後の順番: ダメージ → 突き飛ばし（詠唱の中断、押し出しと落下・追加のダメージ）→ 状態変化 → 瞑想 → 反撃。
@@ -23,25 +30,42 @@ import type {
   BattleSetup,
   BattleState,
   JobDefinition,
+  MapEventState,
   PassiveDefinition,
+  PendingReinforcement,
+  ScenarioState,
   SpellDefinition,
   SpellTarget,
   StatusId,
   StrikeDefinition,
   Team,
+  TrapKind,
   TurnState,
   UnitCommand,
+  UnitPlacement,
   UnitState,
   UnitStats,
 } from './battleTypes';
 import { attackableTargets, canReach, knockbackOutcome, previewAttack, strikeOf, weaponFits } from './combat';
-import { addStatus, applyPassiveStats, isSilencedFor, mpCostOf, passiveEffect, passiveIdOf, tickStatuses } from './effects';
-import { DIRECTIONS, directionToward, manhattan } from './geometry';
+import { addStatus, applyPassiveStats, damageTaken, isSilencedFor, mpCostOf, passiveEffect, passiveIdOf, tickStatuses } from './effects';
+import { DIRECTIONS, directionToward, manhattan, type Coord } from './geometry';
 import { hasMpFor, isValidSpellTarget, previewSpellAt, spellArea, spellOf, targetCenter } from './magic';
 import { statsWithGrowth, ZERO_GROWTH } from './progression';
 import { createMap, getTile } from './map';
-import { isAlive, reachableTiles } from './movement';
+import { isAlive, reachableTiles, unitAt } from './movement';
 import { createRng, restoreRng } from './rng';
+import {
+  currentLevel,
+  DEFAULT_OBJECTIVES,
+  enterTriggerDue,
+  judgeOutcome,
+  judgeTurnOutcome,
+  spawnTile,
+  stateTriggerDue,
+  trapAt,
+  turnTriggerDue,
+  type Outcome,
+} from './scenario';
 import { ctAfterTurn, nextTimelineEntry } from './turnOrder';
 
 /**
@@ -60,54 +84,47 @@ export function startBattle(
 ): ActionResult {
   const map = createMap(setup.map);
   const ids = new Set<string>();
+  const build = (p: UnitPlacement) => buildUnit(p, jobs, spells, strikes, passives);
   const units: UnitState[] = setup.units.map((p) => {
-    const job = jobs.find((j) => j.id === p.jobId);
-    if (!job) throw new Error(`ユニット ${p.id}: ジョブ ${p.jobId} が見つかりません`);
     if (ids.has(p.id)) throw new Error(`ユニット id ${p.id} が重複しています`);
     ids.add(p.id);
     if (!getTile(map, p.x, p.z)) throw new Error(`ユニット ${p.id}: 配置 (${p.x}, ${p.z}) がマップ外です`);
-    const commands: readonly UnitCommand[] = p.commands ?? [
-      { jobId: job.id, abilityIds: (job.abilities ?? []).map((a) => a.id) },
-    ];
-    const unitSpells: SpellDefinition[] = [];
-    const unitStrikes: StrikeDefinition[] = [];
-    for (const id of commands.flatMap((c) => c.abilityIds)) {
-      const spell = spells.find((s) => s.id === id);
-      const strike = strikes.find((s) => s.id === id);
-      if (spell && !unitSpells.includes(spell)) unitSpells.push(spell);
-      else if (strike && !unitStrikes.includes(strike)) unitStrikes.push(strike);
-      else if (!spell && !strike) throw new Error(`ユニット ${p.id}: アビリティ ${id} が見つかりません`);
-    }
-    const unitPassives = (p.passives ?? []).map((id) => {
-      const def = passives.find((x) => x.id === id);
-      if (!def) throw new Error(`ユニット ${p.id}: 受動的なアビリティ ${id} が見つかりません`);
-      return def;
-    });
-    const stats = applyPassiveStats(withBonus(statsWithGrowth(job.stats, p.growth ?? ZERO_GROWTH), p.statBonus), unitPassives);
-    return {
-      id: p.id,
-      team: p.team,
-      jobId: p.jobId,
-      x: p.x,
-      z: p.z,
-      facing: p.facing,
-      hp: stats.maxHp,
-      ct: 0,
-      stats,
-      attack: job.attack,
-      mp: stats.maxMp,
-      level: p.level ?? 1,
-      weapon: job.weapon ?? null,
-      commands,
-      spells: unitSpells,
-      strikes: unitStrikes,
-      passives: unitPassives,
-      statuses: [],
-      actions: [],
-      charging: null,
-      movedLastTurn: false,
-    };
+    return build(p);
   });
+  const objectives = setup.objectives ?? DEFAULT_OBJECTIVES;
+  const known = (id: string) => ids.has(id);
+  const events: MapEventState[] = (setup.events ?? []).map((e) => {
+    const effects = e.effects.map((effect) => {
+      if (effect.kind !== 'reinforce') return effect;
+      if (!Number.isInteger(effect.delay) || effect.delay < 1) throw new Error(`イベント ${e.id}: 増援の delay は 1 以上にしてください`);
+      return {
+        kind: 'reinforce' as const,
+        delay: effect.delay,
+        units: effect.units.map((p) => {
+          if (!getTile(map, p.x, p.z)) throw new Error(`イベント ${e.id}: 増援 ${p.id} の位置がマップ外です`);
+          return build(p);
+        }),
+      };
+    });
+    // HP と撃破のきっかけは1回だけ（状態で決まるので、繰り返すと同じ時点で何度も起きてしまう）
+    const once = e.trigger.kind === 'hpBelow' || e.trigger.kind === 'unitDefeated';
+    const times = once ? 1 : (e.times ?? 1);
+    return { id: e.id, trigger: e.trigger, effects, times, fired: 0 };
+  });
+  for (const c of [...objectives.victory, ...objectives.defeat]) {
+    if ((c.kind === 'defeatUnit' || c.kind === 'unitDefeated') && !known(c.unitId)) {
+      throw new Error(`勝敗条件のユニット ${c.unitId} がいません`);
+    }
+  }
+  for (const t of setup.traps ?? []) {
+    if (!getTile(map, t.x, t.z)) throw new Error(`罠 (${t.x}, ${t.z}) がマップ外です`);
+  }
+  const scenario: ScenarioState = {
+    objectives,
+    events,
+    traps: (setup.traps ?? []).map((t) => ({ x: t.x, z: t.z, kind: t.kind, revealed: false })),
+    reinforcements: [],
+  };
   const state: BattleState = {
     map,
     rules,
@@ -117,9 +134,67 @@ export function startBattle(
     rngState: createRng(seed).getState(),
     turnNumber: 0,
     lastAggressionTurn: 0,
+    scenario,
   };
-  const events: BattleEvent[] = [];
-  return { state: beginNextTurn(state, events), events };
+  const out: BattleEvent[] = [];
+  return { state: beginNextTurn(state, out), events: out };
+}
+
+/**
+ * 配置の定義から、戦闘中のユニットを組み立てる（戦闘の開始時の味方・敵と、増援）。
+ * 能力値は、ジョブの基本値に配置の成長値を足し、受動的なアビリティ（重装・早足・身軽）を反映したもの。
+ */
+function buildUnit(
+  p: UnitPlacement,
+  jobs: readonly JobDefinition[],
+  spells: readonly SpellDefinition[],
+  strikes: readonly StrikeDefinition[],
+  passives: readonly PassiveDefinition[],
+): UnitState {
+  const job = jobs.find((j) => j.id === p.jobId);
+  if (!job) throw new Error(`ユニット ${p.id}: ジョブ ${p.jobId} が見つかりません`);
+  const commands: readonly UnitCommand[] = p.commands ?? [
+    { jobId: job.id, abilityIds: (job.abilities ?? []).map((a) => a.id) },
+  ];
+  const unitSpells: SpellDefinition[] = [];
+  const unitStrikes: StrikeDefinition[] = [];
+  for (const id of commands.flatMap((c) => c.abilityIds)) {
+    const spell = spells.find((s) => s.id === id);
+    const strike = strikes.find((s) => s.id === id);
+    if (spell && !unitSpells.includes(spell)) unitSpells.push(spell);
+    else if (strike && !unitStrikes.includes(strike)) unitStrikes.push(strike);
+    else if (!spell && !strike) throw new Error(`ユニット ${p.id}: アビリティ ${id} が見つかりません`);
+  }
+  const unitPassives = (p.passives ?? []).map((id) => {
+    const def = passives.find((x) => x.id === id);
+    if (!def) throw new Error(`ユニット ${p.id}: 受動的なアビリティ ${id} が見つかりません`);
+    return def;
+  });
+  const stats = applyPassiveStats(withBonus(statsWithGrowth(job.stats, p.growth ?? ZERO_GROWTH), p.statBonus), unitPassives);
+  return {
+    id: p.id,
+    team: p.team,
+    jobId: p.jobId,
+    x: p.x,
+    z: p.z,
+    facing: p.facing,
+    hp: stats.maxHp,
+    ct: 0,
+    stats,
+    attack: job.attack,
+    mp: stats.maxMp,
+    level: p.level ?? 1,
+    levelDrops: 0,
+    weapon: job.weapon ?? null,
+    commands,
+    spells: unitSpells,
+    strikes: unitStrikes,
+    passives: unitPassives,
+    statuses: [],
+    actions: [],
+    charging: null,
+    movedLastTurn: false,
+  };
 }
 
 /** 能力値に補正を足す（0 より下にはしない） */
@@ -170,18 +245,22 @@ export function applyAction(state: BattleState, action: BattleAction): ActionRes
       // 移動後は、最後に進んだ方向を向く
       const facing = directionToward(prev, last, unit.facing);
       events.push({ type: 'moved', unitId: unit.id, path: dest.path });
-      return {
-        state: {
-          ...updateUnit(state, unit.id, { x: dest.x, z: dest.z, facing }),
-          turn: { ...turn, moved: true },
-        },
-        events,
-      };
+      const before = events.length;
+      let next: BattleState = { ...updateUnit(state, unit.id, { x: dest.x, z: dest.z, facing }), turn: { ...turn, moved: true } };
+      next = arrive(next, unit.id, events);
+      next = runStateEvents(next, events);
+      // 罠やイベントが起きた移動は、取り消せない
+      if (events.length > before && next.turn) next = { ...next, turn: { ...next.turn, moveLocked: true } };
+      next = endIfDecided(next, events);
+      // 罠で手番のユニットが倒れたら、その手番はそこで終わる
+      if (!next.winner && !isAlive(getUnit(next, unit.id))) next = beginNextTurn({ ...next, turn: null }, events);
+      return { state: next, events };
     }
 
     case 'undoMove': {
       if (!turn.moved) throw new Error('取り消す移動がありません');
       if (turn.acted) throw new Error('行動した後は移動を取り消せません');
+      if (turn.moveLocked) throw new Error('罠やイベントが起きた移動は取り消せません');
       const { x, z, facing } = turn.origin;
       events.push({ type: 'moveUndone', unitId: unit.id, x, z, facing });
       return {
@@ -195,6 +274,7 @@ export function applyAction(state: BattleState, action: BattleAction): ActionRes
       const strike = action.abilityId === undefined ? undefined : strikeOf(unit, action.abilityId);
       let next = updateUnit(state, unit.id, { actions: [...unit.actions, { targetLevel: target.level, ally: false }] });
       next = resolveWeaponAttack(next, unit.id, target.id, strike, false, events);
+      next = runStateEvents(next, events);
       next = { ...next, turn: { ...turn, acted: true }, lastAggressionTurn: state.turnNumber };
       next = endIfDecided(next, events);
       // 反撃で手番のユニットが倒れたら、その手番はそこで終わる
@@ -236,12 +316,9 @@ export function applyAction(state: BattleState, action: BattleAction): ActionRes
   }
 }
 
-/** 決着していれば勝った陣営を返す */
+/** 決着していれば勝った陣営を返す（手番数の条件は除く。scenario.ts の judgeOutcome） */
 export function judgeWinner(state: BattleState): Team | null {
-  const alive = (team: Team) => state.units.some((u) => u.team === team && isAlive(u));
-  if (!alive('enemy')) return 'player';
-  if (!alive('player')) return 'enemy';
-  return null;
+  return judgeOutcome(state)?.winner ?? null;
 }
 
 /** 移動・攻撃・魔法の指定が、ルール上できるかを確かめる（詠唱の中断より前に確かめる） */
@@ -373,6 +450,11 @@ function resolveWeaponAttack(
     events.push({ type: 'knockedBack', unitId: targetId, from: { x: t.x, z: t.z }, to: kb.to, damage: kbDamage, hp });
     next = updateUnit(next, targetId, kb.to ? { x: kb.to.x, z: kb.to.z, hp } : { hp });
     if (hp === 0) return defeat(next, targetId, events);
+    // 押し出された先の罠と「マスに入る」のイベント
+    if (kb.to) {
+      next = arrive(next, targetId, events);
+      if (!isAlive(getUnit(next, targetId))) return next;
+    }
   }
   if (strike?.inflicts) next = inflict(next, targetId, strike.inflicts, events);
   next = meditate(next, targetId, events);
@@ -423,10 +505,160 @@ function spellReference(state: BattleState, caster: UnitState, spell: SpellDefin
 
 /** 決着していれば、勝敗を記録して手番をなくす */
 function endIfDecided(state: BattleState, events: BattleEvent[]): BattleState {
-  const winner = judgeWinner(state);
-  if (!winner) return state;
-  events.push({ type: 'battleEnded', winner });
-  return { ...state, winner, turn: null };
+  if (state.winner) return state;
+  return decide(state, judgeOutcome(state), events);
+}
+
+function decide(state: BattleState, outcome: Outcome | null, events: BattleEvent[]): BattleState {
+  if (!outcome) return state;
+  events.push({ type: 'battleEnded', winner: outcome.winner, reason: outcome.reason });
+  return { ...state, winner: outcome.winner, turn: null };
+}
+
+// ---- マップ上のイベント・罠・増援 ----
+
+/** ユニットがマスに入った（移動か突き飛ばし）: そのマスの罠 →「マスに入る」のきっかけのイベント */
+function arrive(state: BattleState, unitId: string, events: BattleEvent[]): BattleState {
+  let next = state;
+  const unit = getUnit(next, unitId);
+  const trap = trapAt(next, unit);
+  if (trap) {
+    const revealed = !trap.revealed;
+    if (revealed) {
+      next = {
+        ...next,
+        scenario: {
+          ...next.scenario,
+          traps: next.scenario.traps.map((t) => (t === trap ? { ...t, revealed: true } : t)),
+        },
+      };
+    }
+    next = springTrap(next, unitId, trap.kind, unit, revealed, events);
+  }
+  const mover = getUnit(next, unitId);
+  const at = { x: unit.x, z: unit.z };
+  for (let i = 0; i < next.scenario.events.length; i++) {
+    if (enterTriggerDue(next.scenario.events[i]!, mover, at)) next = fireEvent(next, i, events);
+  }
+  return next;
+}
+
+/**
+ * 罠の効果を与える。unitId のユニットが c にいる（イベントの罠でマスに誰もいなければ null）。
+ * 落石はダメージ、ぬかるみは鈍足、脱力の罠はレベルが 1 下がる（1 より下にはならない）。
+ */
+function springTrap(
+  state: BattleState,
+  unitId: string | null,
+  kind: TrapKind,
+  c: Coord,
+  revealed: boolean,
+  events: BattleEvent[],
+): BattleState {
+  const base = { type: 'trapTriggered' as const, trap: kind, x: c.x, z: c.z, revealed };
+  if (unitId === null) {
+    events.push({ ...base, unitId: null, damage: 0, hp: 0 });
+    return state;
+  }
+  const unit = getUnit(state, unitId);
+  if (kind === 'rockfall') {
+    const raw = Math.floor((unit.stats.maxHp * state.rules.trap.rockfallDamagePercent) / 100);
+    const damage = Math.min(unit.hp, damageTaken(state.rules, unit, raw, { ignoreCharging: true }));
+    const hp = unit.hp - damage;
+    events.push({ ...base, unitId, damage, hp });
+    const next = updateUnit(state, unitId, { hp });
+    return hp === 0 ? defeat(next, unitId, events) : next;
+  }
+  if (kind === 'mud') {
+    events.push({ ...base, unitId, damage: 0, hp: unit.hp });
+    return inflict(state, unitId, 'slow', events);
+  }
+  const from = currentLevel(unit);
+  const drops = from > 1 ? unit.levelDrops + 1 : unit.levelDrops;
+  events.push({ ...base, unitId, damage: 0, hp: unit.hp, level: { from, to: unit.level - drops } });
+  return updateUnit(state, unitId, { levelDrops: drops });
+}
+
+/** イベントを起こす（起きた回数を数え、起きることを順に処理する） */
+function fireEvent(state: BattleState, index: number, events: BattleEvent[]): BattleState {
+  const event = state.scenario.events[index]!;
+  const fired = event.fired + 1;
+  let next: BattleState = {
+    ...state,
+    scenario: { ...state.scenario, events: state.scenario.events.map((e, i) => (i === index ? { ...e, fired } : e)) },
+  };
+  events.push({ type: 'eventFired', eventId: event.id });
+  for (const effect of event.effects) {
+    if (effect.kind === 'message') {
+      events.push({ type: 'message', messageId: effect.messageId });
+    } else if (effect.kind === 'trap') {
+      for (const t of effect.tiles) {
+        const occupant = unitAt(next, t.x, t.z);
+        next = springTrap(next, occupant?.id ?? null, effect.trap, t, false, events);
+      }
+    } else {
+      // 増援: delay 手番後に現れる。繰り返すイベントでは、id に何回目かを付ける
+      const suffix = event.times > 1 ? `-${fired}` : '';
+      const pending: PendingReinforcement = {
+        eventId: event.id,
+        appearAfterTurn: next.turnNumber + effect.delay,
+        units: effect.units.map((u) => ({ ...u, id: `${u.id}${suffix}` })),
+      };
+      events.push({
+        type: 'reinforcementWarned',
+        eventId: event.id,
+        appearAfterTurn: pending.appearAfterTurn,
+        tiles: pending.units.map((u) => ({ x: u.x, z: u.z })),
+      });
+      next = { ...next, scenario: { ...next.scenario, reinforcements: [...next.scenario.reinforcements, pending] } };
+    }
+  }
+  return next;
+}
+
+/** 状態で決まるきっかけ（HP が一定以下・撃破）のイベントを、起きなくなるまで起こす */
+function runStateEvents(state: BattleState, events: BattleEvent[]): BattleState {
+  let next = state;
+  for (let guard = 0; guard < 100; guard++) {
+    const index = next.scenario.events.findIndex((e) => stateTriggerDue(e, next));
+    if (index < 0) return next;
+    next = fireEvent(next, index, events);
+  }
+  return next;
+}
+
+/**
+ * 手番の区切り（state.turnNumber 回の手番が終わった時点）の処理:
+ * 手番数の勝敗条件 →「手番」のきっかけのイベント → 予告済みの増援の出現 → 状態で決まるきっかけ → 勝敗。
+ */
+function turnBoundary(state: BattleState, events: BattleEvent[]): BattleState {
+  const finished = state.turnNumber;
+  let next = decide(state, judgeTurnOutcome(state.scenario.objectives, finished), events);
+  if (next.winner) return next;
+  for (let i = 0; i < next.scenario.events.length; i++) {
+    if (turnTriggerDue(next.scenario.events[i]!, finished)) next = fireEvent(next, i, events);
+  }
+  const due = next.scenario.reinforcements.filter((r) => r.appearAfterTurn <= finished);
+  if (due.length > 0) {
+    next = { ...next, scenario: { ...next.scenario, reinforcements: next.scenario.reinforcements.filter((r) => !due.includes(r)) } };
+    for (const r of due) next = spawn(next, r, events);
+  }
+  next = runStateEvents(next, events);
+  return endIfDecided(next, events);
+}
+
+/** 増援を出す。予定のマスにユニットがいれば、近くの空いたマスに出す（空いたマスがなければ出さない） */
+function spawn(state: BattleState, reinforcement: PendingReinforcement, events: BattleEvent[]): BattleState {
+  let next = state;
+  for (const template of reinforcement.units) {
+    if (next.units.some((u) => u.id === template.id)) throw new Error(`増援の id ${template.id} が重複しています`);
+    const tile = spawnTile(next, template);
+    if (!tile) continue;
+    const unit: UnitState = { ...template, x: tile.x, z: tile.z, ct: 0 };
+    next = { ...next, units: [...next.units, unit] };
+    events.push({ type: 'unitAppeared', unit });
+  }
+  return next;
 }
 
 /** 詠唱が満ちた魔法を発動する */
@@ -469,12 +701,13 @@ function resolveCharge(state: BattleState, casterId: string, events: BattleEvent
 
 /** 時計を進め、途中で発動する魔法を発動しながら、次の手番を始める。途中で決着したらそこで止める */
 function beginNextTurn(state: BattleState, events: BattleEvent[]): BattleState {
-  let current = state;
+  let current = turnBoundary(state, events);
+  if (current.winner) return current;
   for (;;) {
     const { units, entry } = nextTimelineEntry(current.units, current.rules);
     current = { ...current, units };
     if (entry.kind === 'spell') {
-      current = endIfDecided(resolveCharge(current, entry.casterId, events), events);
+      current = endIfDecided(runStateEvents(resolveCharge(current, entry.casterId, events), events), events);
       if (current.winner) return current;
       continue;
     }

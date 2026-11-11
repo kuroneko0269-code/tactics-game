@@ -8,9 +8,14 @@
 //    ユニット（ジョブ）ごとのレベル 50 までの戦闘数、初めての習得、ジョブのレベル 8 までの戦闘数
 // 3. 成長率の違い: 同じジョブだけでレベル 50 まで育てた場合と、能力ごとに成長率の良いジョブを選んで育てた場合の差
 //
+// 4. ダンジョン「はじまりの遺跡」（フェーズ2-2）: 3つの戦闘それぞれの勝率・手番数・見込み時間（育てていない部隊と、
+//    レベル 5 前後の部隊）、第2戦で味方が「待つ」動かし方をした時と「進む」（通常）動かし方をした時の勝率、
+//    ダンジョン全体の見込み時間、封じの回数（陣営ごと）
+//
 // 1戦の見込み時間は、手番ごとの目安の秒数から計算する（下の SECONDS）。
 //
 // 使い方: npm run balance -- --battles=40 --trained-level=30 --campaign=400
+//         npm run balance -- --dungeon-only   ダンジョンだけ（約1分）
 import { createServer } from 'vite';
 
 const args = Object.fromEntries(
@@ -28,6 +33,11 @@ const TRAINED_LEVEL = Number(args['trained-level'] ?? 30);
 const CAMPAIGN = Number(args.campaign ?? 400);
 /** 段階ごとの勝率だけを見る（育成の速さと成長率を省く） */
 const TIERS_ONLY = args['tiers-only'] === 'true';
+/** ダンジョンだけを見る */
+const DUNGEON_ONLY = args['dungeon-only'] === 'true';
+/** 「レベル 5 前後の部隊」のレベルと、今のジョブに足す JP（「やさしい」を数回こなした程度） */
+const MID_LEVEL = Number(args['mid-level'] ?? 5);
+const MID_JP = Number(args['mid-jp'] ?? 600);
 
 /**
  * 見込み時間の目安（秒）。
@@ -45,6 +55,7 @@ async function main() {
   const P = await load('/src/core/progression.ts');
   const { buildSortie } = await load('/src/core/sortie.ts');
   const { twinHillsBattle } = await load('/src/data/battles/twinHillsBattle.ts');
+  const { ruinsDungeon } = await load('/src/data/battles/ruins/index.ts');
   const { jobs } = await load('/src/data/jobs.ts');
   const { spells, strikes } = await load('/src/data/abilities.ts');
   const { passives } = await load('/src/data/passives.ts');
@@ -88,6 +99,116 @@ async function main() {
     }),
   };
 
+  /** 1戦の見込み時間（分） */
+  const minutesOf = ({ state, events }) => {
+    const teamOf = new Map(state.units.map((u) => [u.id, u.team]));
+    let sec = 0;
+    for (const e of events) {
+      if (e.type === 'turnStarted') sec += teamOf.get(e.unitId) === 'player' ? SECONDS.playerTurn : SECONDS.enemyTurn;
+      if (e.type === 'spellResolved') sec += SECONDS.spell;
+    }
+    return sec / 60;
+  };
+  /** 封じの回数（1戦あたり、陣営ごと） */
+  const sealUse = (runs) => {
+    const n = { player: 0, enemy: 0 };
+    for (const { state, events } of runs) {
+      const teamOf = new Map(state.units.map((u) => [u.id, u.team]));
+      for (const e of events) if (e.type === 'castStarted' && e.spellId === 'seal') n[teamOf.get(e.casterId)]++;
+    }
+    return `味方 ${(n.player / runs.length).toFixed(2)} / 敵 ${(n.enemy / runs.length).toFixed(2)}`;
+  };
+
+  /** ダンジョン「はじまりの遺跡」の3つの戦闘 */
+  function dungeonReport() {
+    const midRoster = {
+      units: initialRoster.units.map((u0) => {
+        let u = u0;
+        while (u.level < MID_LEVEL) u = P.levelUp(u, catalog, rules);
+        return learnAll(P.gainJp(u, u.jobId, MID_JP));
+      }),
+    };
+    const playDungeon = (site, seed, roster, playerAi = aiConfig) => {
+      const setup = buildSortie(site, 'main', roster, catalog);
+      const start = startBattle(setup, jobs, battleRules, seed, spells, strikes, passives).state;
+      return runAutoBattle(start, 2000, { player: playerAi, enemy: aiConfig });
+    };
+    console.log('');
+    console.log(`■ ダンジョン「はじまりの遺跡」（1つの組み合わせにつき ${BATTLES} 戦）`);
+    console.log(`  レベル ${MID_LEVEL} の部隊: 全員 Lv ${MID_LEVEL}（今のジョブだけで育てた成長値）、今のジョブに ${MID_JP} JP を足して覚えられるものを覚えた`);
+    const totals = {};
+    for (const [label, roster] of [
+      ['育てていない部隊', initialRoster],
+      [`レベル ${MID_LEVEL} の部隊`, midRoster],
+    ]) {
+      totals[label] = 0;
+      for (const [i, site] of ruinsDungeon.battles.entries()) {
+        const runs = [];
+        for (let k = 0; k < BATTLES; k++) runs.push(playDungeon(site, FIRST_SEED + k, roster));
+        const wins = runs.filter((r) => r.state.winner === 'player').length;
+        const turns = runs.map((r) => r.state.turnNumber);
+        const minutes = runs.map(minutesOf);
+        const reasons = {};
+        for (const r of runs) {
+          const end = r.events.find((e) => e.type === 'battleEnded');
+          if (end) reasons[`${end.winner}:${end.reason}`] = (reasons[`${end.winner}:${end.reason}`] ?? 0) + 1;
+        }
+        const appeared = avg(runs.map((r) => r.events.filter((e) => e.type === 'unitAppeared').length));
+        const traps = avg(runs.map((r) => r.events.filter((e) => e.type === 'trapTriggered').length));
+        totals[label] += avg(minutes);
+        console.log(
+          `  ${label} 第${i + 1}戦 ${site.id}: 勝率 ${pct(wins, runs.length)}、未決着 ${runs.filter((r) => !r.state.winner).length}、` +
+            `手番数 平均 ${avg(turns).toFixed(1)}（最大 ${Math.max(...turns)}）、見込み時間 平均 ${avg(minutes).toFixed(1)}分（最大 ${Math.max(...minutes).toFixed(1)}分）`,
+        );
+        console.log(
+          `          決着の内訳: ${Object.entries(reasons).map(([k, v]) => `${k} ${v}`).join(' / ')}、増援 ${appeared.toFixed(1)}体、罠の発動 ${traps.toFixed(1)}回、封じ ${sealUse(runs)}`,
+        );
+      }
+      console.log(`  ${label}: ダンジョン全体の見込み時間（3戦の平均の合計） ${totals[label].toFixed(1)}分`);
+    }
+    // 連戦: 育てていない部隊で第1戦から続けて戦い、戦闘の後に得た経験値と JP で覚えられるものを覚える（負けてもそのまま次へ）
+    {
+      const chainWins = ruinsDungeon.battles.map(() => 0);
+      const levels = ruinsDungeon.battles.map(() => []);
+      let cleared = 0;
+      for (let k = 0; k < BATTLES; k++) {
+        let roster = initialRoster;
+        let all = true;
+        for (const [i, site] of ruinsDungeon.battles.entries()) {
+          levels[i].push(avg(roster.units.map((u) => u.level)));
+          const { state } = playDungeon(site, 5000 + k * 10 + i, roster);
+          if (state.winner === 'player') chainWins[i]++;
+          else all = false;
+          roster = { units: P.applyBattleResult(roster, state, catalog, rules).roster.units.map((u) => learnAll(u)) };
+        }
+        if (all) cleared++;
+      }
+      console.log(
+        `  連戦（育てていない部隊で第1戦から続けて。戦闘の後に覚えられるものを覚える）: ` +
+          ruinsDungeon.battles.map((_, i) => `第${i + 1}戦 勝率 ${pct(chainWins[i], BATTLES)}（開始時の平均 Lv ${avg(levels[i]).toFixed(1)}）`).join('、') +
+          `、3戦とも勝った ${pct(cleared, BATTLES)}`,
+      );
+    }
+    // 第2戦: 待つ（攻撃できない時は動かない）と、進む（通常。到達するマスへ前進する）
+    const corridor = ruinsDungeon.battles[1];
+    for (const [label, roster] of [
+      ['育てていない部隊', initialRoster],
+      [`レベル ${MID_LEVEL} の部隊`, midRoster],
+    ]) {
+      const rate = (stance) => {
+        const runs = [];
+        for (let k = 0; k < BATTLES; k++) runs.push(playDungeon(corridor, FIRST_SEED + k, roster, { ...aiConfig, stance }));
+        return `${pct(runs.filter((r) => r.state.winner === 'player').length, runs.length)}（手番数 ${avg(runs.map((r) => r.state.turnNumber)).toFixed(0)}）`;
+      };
+      console.log(`  第2戦の動かし方（${label}）: 待つ ${rate('hold')}、進む ${rate('normal')}`);
+    }
+  }
+
+  if (DUNGEON_ONLY) {
+    dungeonReport();
+    return server.close();
+  }
+
   console.log(`AI 同士の対戦（1つの組み合わせにつき ${BATTLES} 戦。シード値 ${FIRST_SEED}〜${FIRST_SEED + BATTLES - 1}）`);
   console.log(`見込み時間の目安: 味方の手番 ${SECONDS.playerTurn}秒、敵の手番 ${SECONDS.enemyTurn}秒、魔法の発動 ${SECONDS.spell}秒`);
   console.log(
@@ -106,15 +227,7 @@ async function main() {
       const wins = runs.filter((r) => r.state.winner === 'player').length;
       const undecided = runs.filter((r) => !r.state.winner).length;
       const turns = runs.map((r) => r.state.turnNumber);
-      const minutes = runs.map(({ state, events }) => {
-        const teamOf = new Map(state.units.map((u) => [u.id, u.team]));
-        let sec = 0;
-        for (const e of events) {
-          if (e.type === 'turnStarted') sec += teamOf.get(e.unitId) === 'player' ? SECONDS.playerTurn : SECONDS.enemyTurn;
-          if (e.type === 'spellResolved') sec += SECONDS.spell;
-        }
-        return sec / 60;
-      });
+      const minutes = runs.map(minutesOf);
       const abilityUse = {};
       const reactionUse = {};
       for (const { events } of runs) {
@@ -134,9 +247,11 @@ async function main() {
       );
       console.log(`          使われた行動アビリティ（1戦あたり、両軍）: ${per(abilityUse)}`);
       console.log(`          発動したリアクション（1戦あたり、両軍）: ${per(reactionUse)}`);
+      console.log(`          封じ（1戦あたり）: ${sealUse(runs)}`);
     }
   }
   if (TIERS_ONLY) return server.close();
+  dungeonReport();
 
   // ---- 育成の速さ（続けて戦う） ----
   console.log('');

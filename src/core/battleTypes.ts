@@ -271,6 +271,128 @@ export interface BattleRules {
   readonly status: StatusRules;
   /** 突き飛ばしの数値 */
   readonly knockback: KnockbackRules;
+  /** 罠の数値 */
+  readonly trap: TrapRules;
+}
+
+/** 罠の数値（src/data に置く） */
+export interface TrapRules {
+  /** 落石: 最大 HP に対するダメージの割合（%。切り捨て、最小 1。守りで減る） */
+  readonly rockfallDamagePercent: number;
+}
+
+/**
+ * 罠の種類。
+ * - rockfall（落石）: ダメージを受ける
+ * - mud（ぬかるみ）: 鈍足が付く
+ * - drain（脱力の罠）: キャラクターのレベルが 1 下がる（戦闘が終わっても戻らない）
+ */
+export type TrapKind = 'rockfall' | 'mud' | 'drain';
+
+/** マップに置く罠（src/data に置く）。踏むまで見えない */
+export interface TrapPlacement {
+  readonly x: number;
+  readonly z: number;
+  readonly kind: TrapKind;
+}
+
+/** 戦闘中の罠。revealed は一度発動して見えるようになったか（見えるようになっても、踏めば何度でも発動する） */
+export interface TrapState extends TrapPlacement {
+  readonly revealed: boolean;
+}
+
+/**
+ * 勝利条件。どれか1つを満たすと勝利。敵の全滅は、書かなくても常に勝利になる。
+ * - defeatAll: 敵の全滅
+ * - defeatUnit: 特定の敵の撃破
+ * - reachTile: 味方のだれかが、指定のマスのどれかに立つ
+ * - surviveTurns: 規定の手番数を耐える（turns 回の手番が終わった時点で勝利）
+ */
+export type VictoryCondition =
+  | { readonly kind: 'defeatAll' }
+  | { readonly kind: 'defeatUnit'; readonly unitId: string }
+  | { readonly kind: 'reachTile'; readonly tiles: readonly Coord[] }
+  | { readonly kind: 'surviveTurns'; readonly turns: number };
+
+/**
+ * 敗北条件。どれか1つを満たすと敗北。味方の全滅は、書かなくても常に敗北になる。
+ * - allDefeated: 味方の全滅
+ * - unitDefeated: 特定の味方が倒れる
+ * - turnLimit: 規定の手番数を超える（turns 回の手番が終わっても勝っていなければ敗北）
+ */
+export type DefeatCondition =
+  | { readonly kind: 'allDefeated' }
+  | { readonly kind: 'unitDefeated'; readonly unitId: string }
+  | { readonly kind: 'turnLimit'; readonly turns: number };
+
+/** 勝敗条件。勝利と敗北が同時に満たされた時は、勝利を優先する */
+export interface BattleObjectives {
+  readonly victory: readonly VictoryCondition[];
+  readonly defeat: readonly DefeatCondition[];
+}
+
+/**
+ * マップ上のイベントのきっかけ。
+ * - turn: turn 回の手番が終わった時（0 なら戦闘の開始時）。every があれば、その後も every 手番ごとに
+ * - enterTile: ユニット（team を書けばその陣営だけ）が、移動か突き飛ばしで指定のマスのどれかに入った時
+ * - hpBelow: 特定のユニットの HP が最大 HP の percent% 以下になった時（倒れた時も含む。1回だけ）
+ * - unitDefeated: 特定のユニットが倒れた時（1回だけ）
+ */
+export type EventTrigger =
+  | { readonly kind: 'turn'; readonly turn: number; readonly every?: number }
+  | { readonly kind: 'enterTile'; readonly tiles: readonly Coord[]; readonly team?: Team }
+  | { readonly kind: 'hpBelow'; readonly unitId: string; readonly percent: number }
+  | { readonly kind: 'unitDefeated'; readonly unitId: string };
+
+/**
+ * マップ上のイベントで起きること（src/data に置く形）。
+ * - reinforce: 増援。きっかけの delay 手番後に、units の位置に現れる（それまでは出現するマスに予告の目印を出す）。
+ *   出現するマスにユニットがいる時は、近くの空いたマスに出す
+ * - message: 短いメッセージを出す（文言は src/ui/text.ts に messageId で引く）
+ * - trap: 指定のマスにいるユニットに、罠と同じ効果を与える（マスに置いた罠とは別。見えない罠を増やすものではない）
+ */
+export type EventEffect =
+  | { readonly kind: 'reinforce'; readonly units: readonly UnitPlacement[]; readonly delay: number }
+  | { readonly kind: 'message'; readonly messageId: string }
+  | { readonly kind: 'trap'; readonly trap: TrapKind; readonly tiles: readonly Coord[] };
+
+/** マップ上のイベント（src/data に置く）。times は起きる回数の上限（省くと 1。every のあるきっかけで繰り返す時に使う） */
+export interface MapEventDefinition {
+  readonly id: string;
+  readonly trigger: EventTrigger;
+  readonly effects: readonly EventEffect[];
+  readonly times?: number;
+}
+
+/** 戦闘中の「起きること」。増援は、戦闘の開始時に能力値まで組み立てたユニット（id は出現の時に付け直す）を持つ */
+export type EventEffectState =
+  | { readonly kind: 'reinforce'; readonly units: readonly UnitState[]; readonly delay: number }
+  | { readonly kind: 'message'; readonly messageId: string }
+  | { readonly kind: 'trap'; readonly trap: TrapKind; readonly tiles: readonly Coord[] };
+
+/** 戦闘中のイベント。fired は起きた回数 */
+export interface MapEventState {
+  readonly id: string;
+  readonly trigger: EventTrigger;
+  readonly effects: readonly EventEffectState[];
+  readonly times: number;
+  readonly fired: number;
+}
+
+/** 予告済みの増援。appearAfterTurn 回の手番が終わった時点で現れる */
+export interface PendingReinforcement {
+  readonly eventId: string;
+  readonly appearAfterTurn: number;
+  /** 現れるユニット（id は付け直し済み。x, z は出現する予定のマス） */
+  readonly units: readonly UnitState[];
+}
+
+/** 戦闘の筋書き（勝敗条件・イベント・罠・予告済みの増援）。JSON にそのまま変換できる */
+export interface ScenarioState {
+  readonly objectives: BattleObjectives;
+  readonly events: readonly MapEventState[];
+  readonly traps: readonly TrapState[];
+  readonly reinforcements: readonly PendingReinforcement[];
 }
 
 /** 魔法の狙い先 */
@@ -328,6 +450,12 @@ export interface BattleSetup {
   readonly id: string;
   readonly map: MapDefinition;
   readonly units: readonly UnitPlacement[];
+  /** 勝敗条件。省くと「敵の全滅で勝利、味方の全滅で敗北」 */
+  readonly objectives?: BattleObjectives;
+  /** マップ上のイベント */
+  readonly events?: readonly MapEventDefinition[];
+  /** 罠 */
+  readonly traps?: readonly TrapPlacement[];
 }
 
 export interface UnitState {
@@ -343,8 +471,10 @@ export interface UnitState {
   readonly stats: UnitStats;
   readonly attack: AttackProfile;
   readonly mp: number;
-  /** キャラクターのレベル（表示用。戦闘の計算には使わない） */
+  /** 戦闘の開始時のキャラクターのレベル（経験値の計算に使う。戦闘の計算には使わない） */
   readonly level: number;
+  /** この戦闘で脱力の罠によって下がったレベルの数（今のレベル = level − levelDrops。戦闘の後に部隊へ反映する） */
+  readonly levelDrops: number;
   /** 武器の種類。合わないアビリティは使えない */
   readonly weapon: WeaponType | null;
   /** 行動アビリティのコマンド（主コマンドが先頭）。画面のメニューの並び */
@@ -380,6 +510,8 @@ export interface TurnState {
    * （この手番で新しく指定した魔法は中断されない）
    */
   readonly chargingAtStart: boolean;
+  /** 移動で罠やイベントが起きたか。起きた後は、移動を取り消せない */
+  readonly moveLocked?: boolean;
 }
 
 export interface BattleState {
@@ -396,6 +528,8 @@ export interface BattleState {
   readonly turnNumber: number;
   /** 最後に通常攻撃か魔法の指定があった手番（なければ 0）。AI がにらみ合いを見分けるため */
   readonly lastAggressionTurn: number;
+  /** 勝敗条件・イベント・罠・予告済みの増援 */
+  readonly scenario: ScenarioState;
 }
 
 /** プレイヤーや AI が選ぶ行動 */
@@ -513,8 +647,47 @@ export type BattleEvent =
       readonly reason: 'acted' | 'silenced' | 'knockedBack';
     }
   | { readonly type: 'defeated'; readonly unitId: string }
+  | {
+      /**
+       * 罠が発動した。unitId は踏んだ（そのマスにいた）ユニット。イベントで起きた罠でマスに誰もいなければ null。
+       * revealed は、この発動で初めて見えるようになったか（マスに置いた罠だけ）。
+       * damage と hp は落石の時、level は脱力の罠の時（下がる前と後の今のレベル）
+       */
+      readonly type: 'trapTriggered';
+      readonly trap: TrapKind;
+      readonly x: number;
+      readonly z: number;
+      readonly unitId: string | null;
+      readonly revealed: boolean;
+      readonly damage: number;
+      readonly hp: number;
+      readonly level?: { readonly from: number; readonly to: number };
+    }
+  | {
+      /** マップ上のイベントが起きた */
+      readonly type: 'eventFired';
+      readonly eventId: string;
+    }
+  | { readonly type: 'message'; readonly messageId: string }
+  | {
+      /** 増援の予告。appearAfterTurn 回の手番が終わった時点で、tiles に現れる */
+      readonly type: 'reinforcementWarned';
+      readonly eventId: string;
+      readonly appearAfterTurn: number;
+      readonly tiles: readonly Coord[];
+    }
+  | {
+      /** 増援が現れた（unit は現れた時点のユニットの状態） */
+      readonly type: 'unitAppeared';
+      readonly unit: UnitState;
+    }
   | { readonly type: 'turnEnded'; readonly unitId: string; readonly facing: Direction; readonly ct: number }
-  | { readonly type: 'battleEnded'; readonly winner: Team };
+  | {
+      /** 決着した。reason は決め手になった条件（勝利なら勝利条件、敗北なら敗北条件の kind） */
+      readonly type: 'battleEnded';
+      readonly winner: Team;
+      readonly reason: VictoryCondition['kind'] | DefeatCondition['kind'];
+    };
 
 /** 魔法が1体のユニットに与えた結果 */
 export interface SpellUnitResult {

@@ -153,7 +153,7 @@ describe('applyAction', () => {
       ],
     });
     const r = applyAction(state, { type: 'attack', targetId: 'e' });
-    expect(r.events.at(-1)).toEqual({ type: 'battleEnded', winner: 'player' });
+    expect(r.events.at(-1)).toEqual({ type: 'battleEnded', winner: 'player', reason: 'defeatAll' });
     expect(r.state.winner).toBe('player');
     expect(r.state.turn).toBeNull();
     expect(() => applyAction(r.state, { type: 'endTurn', facing: 'north' })).toThrow();
