@@ -1135,8 +1135,15 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   const openLearnItem = async (jobId, abilityId) => {
     await tapLocator(page.locator(`.learn-item[data-job-id="${jobId}"][data-ability-id="${abilityId}"]`));
     await waitFor('説明の欄', (a) => document.querySelector(`.sheet[data-sheet="ability"][data-ability-id="${a}"]`) !== null, abilityId);
+    await waitSheetStill();
   };
+  /** 欄がせり上がる動きの途中で押すと、動いている先を押してしまうことがあるため、動きが終わるまで待つ */
+  const waitSheetStill = () =>
+    waitFor('説明の欄の動きが終わる', () =>
+      [...document.querySelectorAll('.sheet')].every((s) => s.getAnimations().every((a) => a.playState !== 'running')),
+    );
   const closeSheet = async () => {
+    await waitSheetStill();
     await pressButton(text.roster.close);
     await waitFor('説明の欄を閉じる', () => document.querySelector('.sheet') === null);
   };
@@ -1145,6 +1152,7 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
     await openTab(tab);
     await tapLocator(page.locator(itemSelector));
     await waitFor(`欄 ${sheetKind}`, (k) => document.querySelector(`.sheet[data-sheet="${k}"]`) !== null, sheetKind);
+    await waitSheetStill();
   };
   await pressButton('編成');
   await waitFor('編成の画面', () => window.__tactics.screen() === 'roster');

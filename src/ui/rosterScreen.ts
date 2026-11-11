@@ -387,10 +387,19 @@ export function createRosterScreen(root: HTMLElement, deps: RosterScreenDeps): R
     return body;
   };
 
+  /** 最後にせり上がる動きを見せた欄（習得の後など、同じ欄を出し直す時は動かさない） */
+  let animatedSheet = '';
   const renderSheet = (u: RosterUnit) => {
-    if (!sheet) return;
+    if (!sheet) {
+      animatedSheet = '';
+      return;
+    }
     const close = () => set(() => (sheet = undefined));
     const s = sheet;
+    const key = JSON.stringify([unitId, s]);
+    const still = key === animatedSheet;
+    animatedSheet = key;
+
     if (s.kind === 'job') {
       showSheet(root, { kind: 'job', title: TEXT.roster.changeJobTitle(jobName(s.jobId)), body: jobSheet(u, s.jobId), closeLabel: TEXT.roster.close, onClose: close });
     } else if (s.kind === 'slot') {
@@ -411,6 +420,7 @@ export function createRosterScreen(root: HTMLElement, deps: RosterScreenDeps): R
       });
       sh.dataset.abilityId = s.abilityId;
     }
+    if (still) root.querySelector('.sheet')?.classList.add('still');
   };
 
   const render = () => {
