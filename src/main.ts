@@ -262,7 +262,7 @@ function main(): void {
     const granted = grantSpoils(base, all);
     return {
       roster: granted.roster,
-      view: { gold: all.gold, goldTotal: granted.roster.gold, items: all.itemIds.map(itemName) },
+      view: { gold: all.gold, goldTotal: granted.roster.gold, items: spoils.itemIds.map(itemName), special: extraItems.map(itemName) },
     };
   };
 
@@ -321,7 +321,6 @@ function main(): void {
           highlights: [
             ...(outcome.firstClear ? [TEXT.report.firstClear] : []),
             TEXT.report.reward(clearRewardJp(ruinsDungeon, outcome.firstClear)),
-            ...bossItems.map((id) => TEXT.report.bossItem(itemName(id))),
           ],
           notes: [],
           spoils: spoils.view,

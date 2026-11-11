@@ -556,6 +556,8 @@ export const TEXT = {
     goldGain: (n: number, total: number) => `+${n} G（所持金 ${total} G）`,
     noSpoils: 'なし（負けた時は、ゴールドと戦利品は得られません）',
     bossItem: (name: string) => `祭壇の主から「${name}」を手に入れた！`,
+    /** 戦利品の欄で、ボスからの初回の報酬に付ける印 */
+    specialItem: (name: string) => `★ ${name}（祭壇の主から）`,
   },
 
   /** 店（フェーズ2-4） */

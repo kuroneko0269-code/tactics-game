@@ -20,8 +20,16 @@ export interface ReportExtras {
   readonly notes?: readonly string[];
   /** 目立たせる短い文（初めてのクリアなど） */
   readonly highlights?: readonly string[];
-  /** 手に入れたゴールドと戦利品（フェーズ2-4）。goldTotal は受け取った後の所持金、items は装備の名前 */
-  readonly spoils?: { readonly gold: number; readonly goldTotal: number; readonly items: readonly string[] };
+  /**
+   * 手に入れたゴールドと戦利品（フェーズ2-4）。goldTotal は受け取った後の所持金、items は装備の名前。
+   * special は、ボスからの初回の報酬のように目立たせる物（items の後ろに、印を付けて並べる）
+   */
+  readonly spoils?: {
+    readonly gold: number;
+    readonly goldTotal: number;
+    readonly items: readonly string[];
+    readonly special?: readonly string[];
+  };
 }
 
 /** 勝利のボーナスを数え上げる時間（ミリ秒） */
@@ -51,7 +59,8 @@ export function showReportScreen(
   box.dataset.screen = 'result';
   const info = el('div', 'screen-col report-info');
   if (extras.heading) info.append(el('p', 'report-heading', extras.heading));
-  const title = el('h1', `screen-title result-title ${report.victory ? 'result-win' : 'result-lose'}`);
+  const long = (extras.title ?? '').length > 6;
+  const title = el('h1', `screen-title result-title ${report.victory ? 'result-win' : 'result-lose'}${long ? ' long' : ''}`);
   title.textContent = extras.title ?? (report.victory ? TEXT.result.player : TEXT.result.enemy);
   info.append(title);
   for (const h of extras.highlights ?? []) info.append(el('p', 'report-highlight', h));
@@ -126,11 +135,17 @@ export function showReportScreen(
   if (extras.spoils) {
     const sp = extras.spoils;
     const spoils = el('div', 'report-spoils');
+    const special = sp.special ?? [];
     spoils.dataset.gold = String(sp.gold);
-    spoils.dataset.items = String(sp.items.length);
-    if (sp.gold > 0 || sp.items.length > 0) {
+    spoils.dataset.items = String(sp.items.length + special.length);
+    if (sp.gold > 0 || sp.items.length > 0 || special.length > 0) {
       spoils.append(el('span', 'report-gold', TEXT.report.goldGain(sp.gold, sp.goldTotal)));
       for (const name of sp.items) spoils.append(el('span', 'report-chip loot', name));
+      for (const name of special) {
+        const chip = el('span', 'report-chip loot special', TEXT.report.specialItem(name));
+        chip.title = TEXT.report.bossItem(name);
+        spoils.append(chip);
+      }
     } else {
       spoils.append(el('span', 'screen-note', TEXT.report.noSpoils));
     }

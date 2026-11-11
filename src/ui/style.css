@@ -1586,6 +1586,12 @@ body {
   letter-spacing: 0.15em;
 }
 
+/* クリアの画面のような長い題は、1行に収まるよう小さめに（小さめのスマホで2行になって画面からあふれないように） */
+.report-screen .result-title.long {
+  font-size: 26px;
+  letter-spacing: 0.04em;
+}
+
 .result-win {
   color: var(--accent);
 }
@@ -2455,6 +2461,15 @@ body {
 }
 
 @media (orientation: landscape) and (max-height: 500px) {
+  /* 装備のタブ: 横向きの低い画面では、枠を少し低くし、「おまかせ」の説明を省く */
+  .screen-button.slot-row.equip-row {
+    min-height: 48px;
+  }
+
+  .auto-equip .sub {
+    display: none;
+  }
+
   .shop-side {
     gap: 6px;
   }
@@ -2485,4 +2500,28 @@ body {
 .report-chip.loot {
   background: rgba(95, 199, 168, 0.25);
   border-color: rgba(95, 199, 168, 0.7);
+}
+
+/* ボスからの初回の報酬 */
+.report-chip.loot.special {
+  background: rgba(242, 193, 78, 0.25);
+  border-color: var(--accent);
+  color: #ffe7a8;
+}
+
+/* 縦向きの低めの画面: 札を詰めて、戦利品やレベルアップが多い時も1画面に収める */
+@media (orientation: portrait) and (max-height: 700px) {
+  .report-chip {
+    padding: 2px 8px;
+    font-size: 12px;
+  }
+
+  .report-spoils,
+  .report-ups {
+    gap: 4px;
+  }
+
+  .report-gold {
+    font-size: 14px;
+  }
 }
