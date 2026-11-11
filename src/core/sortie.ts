@@ -1,8 +1,10 @@
 /**
  * 出撃: 部隊（Roster）と、戦場の定義（マップ・味方の配置・敵の強さの段階）から、1戦ぶんの定義を組み立てる。
  *
- * - 味方は、部隊の並び順に、戦場の味方の配置へ置く。能力値・使えるアビリティ・付けている受動的なアビリティは、部隊の育成の状態から決まる。
- * - 敵は、選んだ段階で決まったレベル・成長値・習得済みアビリティ・受動的なアビリティを持つ（プレイヤーのレベルに合わせて変えない）。
+ * - 味方は、部隊の並び順に、戦場の味方の配置へ置く。能力値・使えるアビリティ・付けている受動的なアビリティ・装備は、
+ *   部隊の育成の状態から決まる。
+ * - 敵は、選んだ段階で決まったレベル・成長値・習得済みアビリティ・受動的なアビリティ・装備を持つ（プレイヤーのレベルに合わせて変えない）。
+ * - 段階ごとに、勝った時の報酬（ゴールドと戦利品の候補。shop.ts）を持つ（フェーズ2-4）。
  * - 勝敗条件・マップ上のイベント・罠は、戦場の定義のものをそのまま使う（フェーズ2-2）。
  * - 出撃前の配置の画面で、味方2体の位置を入れ替えられる（swapPlacements）。
  * - 並び順（行動順が同時になった時の順番）は、味方と敵を1体ずつ組にして、組ごとに先になる側を入れ替える
@@ -12,7 +14,9 @@
 import type { BattleObjectives, BattleSetup, MapEventDefinition, TrapPlacement, UnitPlacement } from './battleTypes';
 import type { Direction } from './geometry';
 import type { MapDefinition } from './map';
+import { equippedDefinitions } from './equipment';
 import { equippedPassives, jobProgress, unitCommands, type GameCatalog, type ProgressionRules, type Roster } from './progression';
+import type { BattleReward } from './shop';
 
 /** 配置の場所 */
 export interface Slot {
@@ -26,6 +30,8 @@ export interface EnemyTier {
   readonly id: string;
   /** 敵のユニット（team は enemy として扱う） */
   readonly units: readonly Omit<UnitPlacement, 'team'>[];
+  /** 勝った時の報酬（ゴールドと戦利品の候補） */
+  readonly reward?: BattleReward;
 }
 
 /** 戦場の定義（src/data に置く） */
@@ -52,7 +58,7 @@ export function buildSortie(
   site: BattleSite,
   tierId: string,
   roster: Roster,
-  catalog: Pick<GameCatalog, 'jobs'>,
+  catalog: Pick<GameCatalog, 'jobs' | 'equipment'>,
   progression?: ProgressionRules,
 ): BattleSetup {
   const tier = site.tiers.find((t) => t.id === tierId);
@@ -67,6 +73,7 @@ export function buildSortie(
     growth: u.growth,
     commands: unitCommands(u, catalog),
     passives: equippedPassives(u),
+    equipment: equippedDefinitions(u, roster, catalog),
     ...(progression
       ? { progress: { exp: u.exp, jp: jobProgress(u, u.jobId).jp, jpTotal: jobProgress(u, u.jobId).jpTotal } }
       : {}),

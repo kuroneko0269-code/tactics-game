@@ -46,7 +46,7 @@ import type {
   UnitState,
 } from './battleTypes';
 import { attackableTargets, attackRangeTiles, previewAttack, weaponFits } from './combat';
-import { hasStatus, statusTurns } from './effects';
+import { hasStatus, statusBlocker, statusTurns } from './effects';
 import { DIRECTION_VECTORS, DIRECTIONS, directionToward, manhattan, type Coord, type Direction, type RelativeSide } from './geometry';
 import { canCast, chargeArea, hasMpFor, previewSpellAt, spellRangeTiles } from './magic';
 import { getTile } from './map';
@@ -254,7 +254,8 @@ function withBestStrike(state: BattleState, unit: UnitState, plan: AttackPlan, c
   const target = state.units.find((u) => u.id === plan.targetId)!;
   const expected = (strike?: UnitState['strikes'][number]) => {
     const p = previewAttack(state, unit, target, plan.position, strike);
-    const slow = strike?.inflicts === 'slow' && !hasStatus(target, 'slow') ? (config?.slowValue ?? 0) : 0;
+    const slow =
+      strike?.inflicts === 'slow' && !hasStatus(target, 'slow') && !statusBlocker(target, 'slow') ? (config?.slowValue ?? 0) : 0;
     return p.hitPercent * (Math.min(p.damage + (p.knockback?.damage ?? 0), target.hp) + slow);
   };
   let best: { abilityId?: string; value: number } = { value: expected() };
@@ -371,7 +372,13 @@ export function chooseSealSpell(
     if (sp?.inflicts === 'silence') pending.add(u.charging.target.unitId);
   }
   const targets = state.units.filter(
-    (o) => isAlive(o) && o.team !== unit.team && usesMagic(o) && !hasStatus(o, 'silence') && !pending.has(o.id),
+    (o) =>
+      isAlive(o) &&
+      o.team !== unit.team &&
+      usesMagic(o) &&
+      !hasStatus(o, 'silence') &&
+      !statusBlocker(o, 'silence') &&
+      !pending.has(o.id),
   );
   if (targets.length === 0) return undefined;
   const threat = threatMap(state, unit.team);

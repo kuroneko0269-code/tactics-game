@@ -12,10 +12,14 @@
 //    レベル 5 前後の部隊）、第2戦で味方が「待つ」動かし方をした時と「進む」（通常）動かし方をした時の勝率、
 //    ダンジョン全体の見込み時間、封じの回数（陣営ごと）
 //
+// 5. 装備（フェーズ2-4）: 装備の段階ごとの、訓練戦の3段階とダンジョンの3戦の勝率、戦闘ごとのゴールドの収入と戦利品の見込み、
+//    最初の部隊から戦い続けて店で買いそろえた時の、全員が2段階目・3段階目の武器と防具をそろえるまでの戦闘数
+//
 // 1戦の見込み時間は、手番ごとの目安の秒数から計算する（下の SECONDS）。
 //
 // 使い方: npm run balance -- --battles=40 --trained-level=30 --campaign=400
-//         npm run balance -- --dungeon-only   ダンジョンだけ（約1分）
+//         npm run balance -- --dungeon-only     ダンジョンだけ（約1分）
+//         npm run balance -- --equipment-only   装備だけ（約3分）
 import { createServer } from 'vite';
 
 const args = Object.fromEntries(
@@ -35,9 +39,15 @@ const CAMPAIGN = Number(args.campaign ?? 400);
 const TIERS_ONLY = args['tiers-only'] === 'true';
 /** ダンジョンだけを見る */
 const DUNGEON_ONLY = args['dungeon-only'] === 'true';
+/** 装備だけを見る */
+const EQUIPMENT_ONLY = args['equipment-only'] === 'true';
 /** 「レベル 5 前後の部隊」のレベルと、今のジョブに足す JP（「やさしい」を数回こなした程度） */
 const MID_LEVEL = Number(args['mid-level'] ?? 5);
 const MID_JP = Number(args['mid-jp'] ?? 600);
+/** 装備の段階ごとの勝率で、「十分に育てた部隊」とするレベル（3段階目をそろえる頃の平均レベル） */
+const EQUIP_LEVEL = Number(args['equip-level'] ?? 25);
+/** 買いそろえるまでの戦闘数を確かめる時の、乱数の通り数 */
+const CAMPAIGN_SEEDS = Number(args['campaign-seeds'] ?? 3);
 
 /**
  * 見込み時間の目安（秒）。
@@ -59,11 +69,14 @@ async function main() {
   const { jobs } = await load('/src/data/jobs.ts');
   const { spells, strikes } = await load('/src/data/abilities.ts');
   const { passives } = await load('/src/data/passives.ts');
+  const E = await load('/src/data/equipment.ts');
   const { battleRules } = await load('/src/data/battleRules.ts');
   const { aiConfig } = await load('/src/data/aiConfig.ts');
   const { progressionRules: rules } = await load('/src/data/progression.ts');
   const { initialRoster } = await load('/src/data/roster.ts');
-  const catalog = { jobs, spells, strikes, passives };
+  const EQ = await load('/src/core/equipment.ts');
+  const SHOP = await load('/src/core/shop.ts');
+  const catalog = { jobs, spells, strikes, passives, equipment: E.equipment };
 
   const play = (seed, tierId, roster) => {
     const setup = buildSortie(twinHillsBattle, tierId, roster, catalog, rules);
@@ -91,6 +104,7 @@ async function main() {
 
   /** 十分に育てた部隊: 全員が今のジョブで TRAINED_LEVEL まで上がり、今のジョブのアビリティをすべて覚えて、受動的なアビリティを付けている */
   const trainedRoster = {
+    ...initialRoster,
     units: initialRoster.units.map((u0) => {
       let u = u0;
       while (u.level < TRAINED_LEVEL) u = P.levelUp(u, catalog, rules);
@@ -122,6 +136,7 @@ async function main() {
   /** ダンジョン「はじまりの遺跡」の3つの戦闘 */
   function dungeonReport() {
     const midRoster = {
+      ...initialRoster,
       units: initialRoster.units.map((u0) => {
         let u = u0;
         while (u.level < MID_LEVEL) u = P.levelUp(u, catalog, rules);
@@ -179,7 +194,7 @@ async function main() {
           const { state } = playDungeon(site, 5000 + k * 10 + i, roster);
           if (state.winner === 'player') chainWins[i]++;
           else all = false;
-          roster = { units: P.applyBattleResult(roster, state, catalog, rules).roster.units.map((u) => learnAll(u)) };
+          roster = { ...roster, units: P.applyBattleResult(roster, state, catalog, rules).roster.units.map((u) => learnAll(u)) };
         }
         if (all) cleared++;
       }
@@ -202,6 +217,223 @@ async function main() {
       };
       console.log(`  第2戦の動かし方（${label}）: 待つ ${rate('hold')}、進む ${rate('normal')}`);
     }
+  }
+
+  // ---- 装備（フェーズ2-4） ----
+  /** ジョブごとの、段階ごとの武器と防具 */
+  const KIT = {
+    warrior: ['sword', 'heavy'],
+    archer: ['bow', 'light'],
+    mage: ['staff', 'robe'],
+    healer: ['staff', 'robe'],
+  };
+  /** 部隊の全員に、段階 tierOf(ジョブ) の武器と防具（と装飾品）を持たせて付ける（今の装備は捨てる） */
+  const withGear = (roster, tierOf, accessoryOf = () => null) => {
+    let r = { ...roster, items: [], nextItemSeq: 1, units: roster.units.map((u) => ({ ...u, equipment: { weapon: null, armor: null, accessory: null } })) };
+    for (const u of roster.units) {
+      const t = tierOf(u.jobId);
+      const ids = [...KIT[u.jobId].map((k) => `${k}-${t}`), ...(accessoryOf(u.jobId) ? [accessoryOf(u.jobId)] : [])];
+      const { roster: next, added } = SHOP.addItems(r, ids);
+      r = next;
+      for (const item of added) r = EQ.equipItem(r, u.id, E.equipment.find((e) => e.id === item.itemId).slot, item.uid, catalog);
+    }
+    return r;
+  };
+  const levelTo = (roster, level, jp) => ({
+    ...roster,
+    units: roster.units.map((u0) => {
+      let u = u0;
+      while (u.level < level) u = P.levelUp(u, catalog, rules);
+      return learnAll(P.gainJp(u, u.jobId, jp));
+    }),
+  });
+
+  function equipmentReport() {
+    const lv5 = levelTo(initialRoster, MID_LEVEL, MID_JP);
+    const lv30 = levelTo(initialRoster, EQUIP_LEVEL, 5000);
+    /** 最初の店に並ぶ2段階目（剣・杖・鎧）だけを買った（弓使いは1段階目のまま） */
+    const partial = (job) => (job === 'archer' ? 1 : 2);
+    const hardAccessory = { warrior: 'spring-boots', archer: 'quick-ring', mage: 'steady-bangle', healer: 'quiet-amulet' };
+    const parties = [
+      ['育てていない部隊・1段階目', initialRoster],
+      [`Lv ${MID_LEVEL}・1段階目`, lv5],
+      [`Lv ${MID_LEVEL}・2段階目を一部（剣・杖・鎧）`, withGear(lv5, partial)],
+      [`Lv ${MID_LEVEL}・2段階目`, withGear(lv5, () => 2)],
+      [`Lv ${EQUIP_LEVEL}・1段階目`, lv30],
+      [`Lv ${EQUIP_LEVEL}・2段階目`, withGear(lv30, () => 2)],
+      [`Lv ${EQUIP_LEVEL}・3段階目`, withGear(lv30, () => 3)],
+      [`Lv ${EQUIP_LEVEL}・3段階目と装飾品`, withGear(lv30, () => 3, (j) => hardAccessory[j])],
+    ];
+    const battles = [
+      ...twinHillsBattle.tiers.map((t) => ({ label: `訓練戦 ${t.id}`, site: twinHillsBattle, tierId: t.id })),
+      ...ruinsDungeon.battles.map((b, i) => ({ label: `遺跡 第${i + 1}戦`, site: b, tierId: 'main' })),
+    ];
+    console.log('');
+    console.log(`■ 装備の段階ごとの勝率（1つの組み合わせにつき ${BATTLES} 戦。Lv ${MID_LEVEL} は今のジョブに ${MID_JP} JP、Lv ${EQUIP_LEVEL} は 5000 JP を足して覚えられるものを覚えた）`);
+    console.log('  （勝率・見込み時間の中央値。平均だと、癒し手どうしだけが残って長引いた戦闘に引きずられるため）');
+    console.log(`  ${'部隊'.padEnd(26)}${battles.map((b) => b.label.padStart(14)).join('')}`);
+    for (const [label, roster] of parties) {
+      const cells = battles.map((b) => {
+        let wins = 0;
+        const minutes = [];
+        for (let k = 0; k < BATTLES; k++) {
+          const setup = buildSortie(b.site, b.tierId, roster, catalog, rules);
+          const start = startBattle(setup, jobs, battleRules, FIRST_SEED + k, spells, strikes, passives).state;
+          const run = runAutoBattle(start, 2000, { player: aiConfig, enemy: aiConfig });
+          if (run.state.winner === 'player') wins++;
+          minutes.push(minutesOf(run));
+        }
+        const sorted = [...minutes].sort((a, b) => a - b);
+        return `${pct(wins, BATTLES)}・${sorted[Math.floor(sorted.length / 2)].toFixed(0)}分`;
+      });
+      console.log(`  ${label.padEnd(26)}${cells.map((c) => c.padStart(14)).join('')}`);
+    }
+
+    // 戦闘ごとのゴールドの収入と、戦利品の見込み（売値に直した期待値）
+    console.log('');
+    console.log('■ 戦闘ごとのゴールドの収入（勝った時）と戦利品の見込み');
+    const priceOf = (id) => E.equipment.find((e) => e.id === id).price;
+    const lootValue = (reward) => reward.loot.reduce((s, l) => s + (l.percent / 100) * SHOP.sellPrice(E.equipment.find((e) => e.id === l.itemId), E.shop), 0);
+    const lootCount = (reward) => reward.loot.reduce((s, l) => s + l.percent / 100, 0);
+    for (const b of battles) {
+      const reward = b.site.tiers.find((t) => t.id === b.tierId).reward;
+      console.log(
+        `  ${b.label.padEnd(12)}: ${String(reward.gold).padStart(4)} G、戦利品 1戦あたり ${lootCount(reward).toFixed(2)}個（売ると ${lootValue(reward).toFixed(0)} G 相当）`,
+      );
+    }
+    const runGold = ruinsDungeon.battles.reduce((s, b) => s + b.tiers[0].reward.gold, 0);
+    const tier2 = E.equipment.filter((e) => e.tier === 2 && e.slot !== 'accessory').map((e) => e.price);
+    const avgTier2 = tier2.reduce((a, b) => a + b, 0) / tier2.length;
+    console.log(
+      `  遺跡を1周（3戦とも勝つ）: ${runGold} G（2段階目の武器・防具の平均 ${avgTier2.toFixed(0)} G で ${(runGold / avgTier2).toFixed(1)}個ぶん。` +
+        `初めてのクリアでは、ほかに ${ruinsDungeon.firstClearItemId}（売ると ${SHOP.sellPrice(E.equipment.find((e) => e.id === ruinsDungeon.firstClearItemId), E.shop)} G）が手に入る）`,
+    );
+    const fullSet = (t) =>
+      initialRoster.units.reduce((s, u) => s + KIT[u.jobId].reduce((x, k) => x + priceOf(`${k}-${t}`), 0), 0);
+    console.log(`  部隊の全員の武器と防具を買いそろえる値段: 2段階目 ${fullSet(2)} G、3段階目 ${fullSet(3)} G`);
+
+    // 買いそろえるまでの戦闘数: 最初の部隊から、遺跡を1周 → 訓練戦（部隊の平均レベル以下で最も強い段階）を1戦、を繰り返す。
+    // 戦闘の後に、覚えられるものを覚え、「おまかせ」で付け、付けていない物を売り、全員の武器と防具を、品ぞろえの中で
+    // 今より段階の高い物に、並び順に買い替える（買ったら「おまかせ」で付ける）。負けた戦闘はもう一度戦う（ダンジョンはやり直し）
+    console.log('');
+    console.log(`■ 買いそろえるまでの戦闘数（${CAMPAIGN_SEEDS} 通りの乱数で。遺跡を1周 → 訓練戦を1戦、を繰り返す。戦闘の後に、付けていない物を売って買い替える）`);
+    const results = [];
+    for (let seedRun = 0; seedRun < CAMPAIGN_SEEDS; seedRun++) results.push(shoppingCampaign(seedRun));
+    const summary = (key) => {
+      const xs = results.map((r) => r[key]).filter((x) => x !== undefined);
+      return xs.length === 0 ? '-' : `平均 ${avg(xs).toFixed(1)}戦（${Math.min(...xs)}〜${Math.max(...xs)}）`;
+    };
+    console.log(`  全員が2段階目以上の武器と防具: ${summary('tier2')}`);
+    console.log(`  全員が3段階目の武器と防具: ${summary('tier3')}`);
+    console.log(`  初めて遺跡をクリアした戦闘: ${summary('firstClear')}、「ふつう」に初めて勝った戦闘: ${summary('normalWin')}`);
+    console.log(`  1戦あたりのゴールドの収入（売った分を含む）: ${avg(results.map((r) => r.goldPerBattle)).toFixed(0)} G`);
+    for (const r of results) console.log(`    ${r.log}`);
+  }
+
+  /** 最初の部隊から戦い続けて、店で買いそろえる（core の関数だけで） */
+  function shoppingCampaign(seedRun) {
+    let roster = initialRoster;
+    let dungeon = { run: null, clears: {} };
+    let trainingWins = {};
+    let battles = 0;
+    let goldEarned = 0;
+    const out = {};
+    const kitTier = (r) =>
+      Math.min(
+        ...r.units.flatMap((u) =>
+          EQ.equippedDefinitions(u, r, catalog)
+            .filter((d) => d.slot !== 'accessory')
+            .map((d) => d.tier)
+            .concat(EQ.equippedDefinitions(u, r, catalog).filter((d) => d.slot !== 'accessory').length < 2 ? [0] : []),
+        ),
+      );
+    const afterBattle = (state, reward, extra = []) => {
+      battles++;
+      const result = P.applyBattleResult(roster, state, catalog, rules);
+      const spoils = SHOP.rollSpoils(reward, state.winner === 'player', state.rngState);
+      const granted = SHOP.grantSpoils(result.roster, { gold: spoils.gold, itemIds: [...spoils.itemIds, ...extra] });
+      goldEarned += spoils.gold;
+      roster = { ...granted.roster, units: granted.roster.units.map((u) => learnAll(u)) };
+      shop();
+      const t = kitTier(roster);
+      if (t >= 2) out.tier2 ??= battles;
+      if (t >= 3) out.tier3 ??= battles;
+    };
+    const shop = () => {
+      for (const u of roster.units) roster = EQ.autoEquip(roster, u.id, catalog, E.autoEquipWeights);
+      const sell = () => {
+        for (const item of [...roster.items]) {
+          if (EQ.wearerOf(roster, item.uid)) continue;
+          const before = roster.gold;
+          roster = SHOP.sellItem(roster, item.uid, catalog, E.shop);
+          goldEarned += roster.gold - before;
+        }
+      };
+      sell();
+      const stock = SHOP.shopStock(E.shop, { trainingWins, dungeonClears: dungeon.clears });
+      for (const u of roster.units) {
+        for (const slot of ['weapon', 'armor']) {
+          const unit = roster.units.find((x) => x.id === u.id);
+          const now = EQ.equippedDefinitions(unit, roster, catalog).find((d) => d.slot === slot);
+          const job = P.findJob(catalog, unit.jobId);
+          const better = stock
+            .map((id) => E.equipment.find((e) => e.id === id))
+            .filter((d) => d.slot === slot && (d.tier ?? 0) > (now?.tier ?? 0) && (slot === 'weapon' ? job.weaponTypes : job.armorTypes).includes(d.weaponType ?? d.armorType))
+            .sort((a, b) => b.tier - a.tier);
+          const pick = better.find((d) => d.price <= roster.gold);
+          if (!pick) continue;
+          const bought = SHOP.buyItem(roster, pick.id, stock, catalog);
+          roster = EQ.equipItem(bought.roster, unit.id, slot, bought.item.uid, catalog);
+        }
+      }
+      sell();
+    };
+    const fight = (site, tierId, seed) => {
+      const setup = buildSortie(site, tierId, roster, catalog, rules);
+      const start = startBattle(setup, jobs, battleRules, seed, spells, strikes, passives).state;
+      return runAutoBattle(start, 2000, { player: aiConfig, enemy: aiConfig }).state;
+    };
+    let seed = 90000 + seedRun * 1000;
+    for (let loop = 0; battles < CAMPAIGN && !(out.tier3 && out.tier2); loop++) {
+      // 遺跡を1周（負けた戦闘はやり直す。1つの戦闘で 5 回負けたら撤退）
+      for (let i = 0; i < ruinsDungeon.battles.length; i++) {
+        let won = false;
+        for (let attempt = 0; attempt < 5 && !won; attempt++) {
+          const site = ruinsDungeon.battles[i];
+          const state = fight(site, 'main', seed++);
+          won = state.winner === 'player';
+          const last = i === ruinsDungeon.battles.length - 1;
+          const first = won && last && !(dungeon.clears.ruins > 0);
+          if (won && last) {
+            dungeon = { ...dungeon, clears: { ruins: (dungeon.clears.ruins ?? 0) + 1 } };
+            out.firstClear ??= battles + 1;
+          }
+          afterBattle(state, site.tiers[0].reward, first ? [ruinsDungeon.firstClearItemId] : []);
+        }
+        if (!won) break;
+      }
+      // 訓練戦を1戦（部隊の平均レベル以下で最も強い段階）
+      const avgLevel = avg(roster.units.map((u) => u.level));
+      const tier = [...twinHillsBattle.tiers].reverse().find((t) => t.units[0].level <= avgLevel) ?? twinHillsBattle.tiers[0];
+      const state = fight(twinHillsBattle, tier.id, seed++);
+      if (state.winner === 'player') {
+        trainingWins = SHOP.recordTrainingWin(trainingWins, tier.id);
+        if (tier.id === 'normal') out.normalWin ??= battles + 1;
+      }
+      afterBattle(state, tier.reward);
+    }
+    return {
+      ...out,
+      goldPerBattle: goldEarned / battles,
+      log:
+        `乱数 ${seedRun + 1}: 2段階目 ${out.tier2 ?? '-'}戦目、3段階目 ${out.tier3 ?? '-'}戦目、初クリア ${out.firstClear ?? '-'}戦目、` +
+        `「ふつう」初勝利 ${out.normalWin ?? '-'}戦目、最後の平均 Lv ${avg(roster.units.map((u) => u.level)).toFixed(1)}`,
+    };
+  }
+
+  if (EQUIPMENT_ONLY) {
+    equipmentReport();
+    return server.close();
   }
 
   if (DUNGEON_ONLY) {
@@ -252,6 +484,7 @@ async function main() {
   }
   if (TIERS_ONLY) return server.close();
   dungeonReport();
+  equipmentReport();
 
   // ---- 育成の速さ（続けて戦う） ----
   console.log('');
@@ -280,6 +513,7 @@ async function main() {
       actionsByUnit[r.unitId].push(r.actions);
     }
     roster = {
+      ...roster,
       units: roster.units.map((u0) => {
         const u = learnAll(u0, () => {
           firstLearn[u0.id] ??= b;

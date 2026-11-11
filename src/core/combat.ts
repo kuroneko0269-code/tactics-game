@@ -11,7 +11,7 @@
  * - 反撃: 隣接するマスから近接攻撃を受けて生き残った相手が「反撃」を付けていれば、通常攻撃で反撃する。
  */
 import type { AttackProfile, BattleRules, BattleState, StatusId, StrikeDefinition, UnitState, WeaponType } from './battleTypes';
-import { damageTaken, hasStatus, passiveEffect, passiveIdOf } from './effects';
+import { chargingPercentOf, damageTaken, hasStatus, passiveEffect, passiveIdOf } from './effects';
 import { directionToward, manhattan, relativeSide, type Coord, type Direction, type RelativeSide } from './geometry';
 import { getTile, type BattleMap } from './map';
 import { isAlive } from './movement';
@@ -193,7 +193,7 @@ export function previewAttack(
   const rules = state.rules;
   const side = relativeSide(from, target, target.facing);
   const heightPercent = heightDamagePercent(rules, heightAt(state.map, from), heightAt(state.map, target));
-  const chargingPercent = target.charging ? rules.chargingDamagePercent : 100;
+  const chargingPercent = chargingPercentOf(rules, target);
   const protectPercent = hasStatus(target, 'protect') ? rules.status.protect.damageTakenPercent : 100;
   const hit = weaponHit(rules, attacker, target, side, strike);
   const raw = computeDamage(rules, attacker.stats.attack, side, heightPercent, 100, strike?.damagePercent ?? 100);

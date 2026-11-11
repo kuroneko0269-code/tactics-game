@@ -2,7 +2,7 @@ import { el, screenButton } from './dom';
 import { TEXT } from './text';
 
 /**
- * 拠点の画面（仮の見た目）: 「出撃」「編成」と「はじめから」。
+ * 拠点の画面（仮の見た目）: 「出撃」「編成」「店」（フェーズ2-4）と「はじめから」。所持金も出す。
  * 出撃を押すと、訓練戦（敵の強さの段階を選ぶ）とダンジョン（3連戦に挑む・再開する）のどちらに行くかを選ぶ。
  * ダンジョンをクリアしたことがあれば、拠点の画面にクリアの回数を出す。
  * はじめからは、確認してから部隊を最初の状態に戻す。
@@ -15,10 +15,13 @@ export interface BaseScreenHandlers {
   readonly dungeon: { readonly id: string; readonly battles: readonly { readonly mapId: string; readonly objective: string }[] };
   /** ダンジョンの今の記録（挑戦中なら次の戦闘の番号（0 から）、クリアの回数） */
   dungeonStatus(): { readonly nextBattle: number | null; readonly clears: number };
+  /** 所持金（ゴールド） */
+  gold(): number;
   onSortie(tierId: string): void;
   /** ダンジョンに挑む。fresh なら第1戦から（挑戦中のものはやめる）、そうでなければ挑戦中の戦闘から再開 */
   onDungeon(fresh: boolean): void;
   onRoster(): void;
+  onShop(): void;
   onNewGame(): void;
 }
 
@@ -82,10 +85,13 @@ export function createBaseScreen(root: HTMLElement, handlers: BaseScreenHandlers
       info.append(el('h1', 'screen-title', TEXT.base.title));
       if (status.clears > 0) info.append(el('p', 'dungeon-cleared', TEXT.base.clearedBadge(dungeonName, status.clears)));
       else if (status.nextBattle !== null) info.append(el('p', 'screen-note', `${dungeonName}: ${TEXT.base.inProgress(status.nextBattle + 1)}`));
-      info.append(el('p', 'screen-note', TEXT.base.saved));
+      const gold = el('p', 'base-gold', TEXT.base.gold(handlers.gold()));
+      gold.dataset.gold = String(handlers.gold());
+      info.append(gold, el('p', 'screen-note', TEXT.base.saved));
       actions.append(
         screenButton(TEXT.base.sortie, () => render('sortie'), { className: 'primary big' }),
         screenButton(TEXT.base.roster, () => handlers.onRoster(), { className: 'big' }),
+        screenButton(TEXT.base.shop, () => handlers.onShop(), { className: 'big' }),
         screenButton(TEXT.base.newGame, () => render('confirm'), { className: 'quiet' }),
       );
     } else if (view === 'tiers') {

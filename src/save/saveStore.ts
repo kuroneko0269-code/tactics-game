@@ -5,7 +5,7 @@
  * SaveBackend を差し替えるだけで済むようにしている（画面や戦闘の処理は、保存先を知らない）。
  * データの形と、古い版を直す処理は src/core/saveData.ts。
  */
-import { createSaveData, migrateSaveData, type LoadFailure } from '../core/saveData';
+import { createSaveData, migrateSaveData, type GameRecords, type LoadFailure, type SaveMigrationContext } from '../core/saveData';
 import { validateRoster, type GameCatalog, type ProgressionRules, type Roster } from '../core/progression';
 import type { DungeonState } from '../core/dungeon';
 
@@ -16,10 +16,11 @@ export interface SaveBackend {
   remove(): void;
 }
 
-/** 保存するもの: 部隊の育成の状態と、ダンジョンの進み具合・クリアの記録 */
+/** 保存するもの: 部隊の育成の状態（所持金・所持品を含む）と、ダンジョンの進み具合・クリアの記録、訓練戦の記録 */
 export interface GameSave {
   readonly roster: Roster;
   readonly dungeon: DungeonState;
+  readonly records: GameRecords;
 }
 
 export interface SaveStore {
@@ -70,6 +71,7 @@ export function createSaveStore(
   backend: SaveBackend,
   catalog: GameCatalog,
   rules: ProgressionRules,
+  migration: SaveMigrationContext,
   onLoadFailure: (reason: LoadFailure | 'invalidJson' | 'invalidRoster') => void = () => {},
 ): SaveStore {
   return {
@@ -83,7 +85,7 @@ export function createSaveStore(
         onLoadFailure('invalidJson');
         return undefined;
       }
-      const result = migrateSaveData(raw);
+      const result = migrateSaveData(raw, migration);
       if (!result.ok) {
         onLoadFailure(result.reason);
         return undefined;
@@ -92,10 +94,10 @@ export function createSaveStore(
         onLoadFailure('invalidRoster');
         return undefined;
       }
-      return { roster: result.data.roster, dungeon: result.data.dungeon };
+      return { roster: result.data.roster, dungeon: result.data.dungeon, records: result.data.records };
     },
-    save({ roster, dungeon }) {
-      backend.write(JSON.stringify(createSaveData(roster, dungeon)));
+    save({ roster, dungeon, records }) {
+      backend.write(JSON.stringify(createSaveData(roster, dungeon, records)));
     },
     clear() {
       backend.remove();

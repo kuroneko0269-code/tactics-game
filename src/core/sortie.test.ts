@@ -29,6 +29,7 @@ const unit = (id: string, jobId: string, patch = {}) => ({
   growth: ZERO_GROWTH,
   jobs: { [jobId]: { jp: 0, jpTotal: 0, learned: [] as string[] } },
   slots: { secondary: null, reaction: null, support: null, movement: null },
+  equipment: { weapon: null, armor: null, accessory: null },
   ...patch,
 });
 
@@ -39,15 +40,15 @@ describe('出撃', () => {
       expLevelOffset: 10, expLevelPercentMax: 200, jpPerAction: 20, jpVictoryBonus: 50, jobLevelJp: [100],
       growthCap: ZERO_GROWTH, growthWeights: ZERO_GROWTH, growthTotalCap: 0,
     };
-    const roster: Roster = { units: [unit('a', 'warrior', { exp: 42, jobs: { warrior: { jp: 30, jpTotal: 130, learned: [] } } })] };
-    const setup = buildSortie(site, 'easy', roster, { jobs: testJobs }, rules);
+    const roster: Roster = { gold: 0, items: [], nextItemSeq: 1, units: [unit('a', 'warrior', { exp: 42, jobs: { warrior: { jp: 30, jpTotal: 130, learned: [] } } })] };
+    const setup = buildSortie(site, 'easy', roster, { jobs: testJobs, equipment: [] }, rules);
     expect(setup.progression).toBe(rules);
     const { state } = startBattle(setup, testJobs, testRules, 1, testSpells, testStrikes);
     expect(state.progression).toEqual(rules);
     expect(state.units.find((u) => u.id === 'a')!.progress).toEqual({ exp: 42, jp: 30, jpTotal: 130, gainedExp: 0, gainedJp: 0 });
     expect(state.units.find((u) => u.id === 'e1')!.progress).toBeNull();
     // 渡さなければ、戦闘中に経験値と JP は入らない
-    expect(startBattle(buildSortie(site, 'easy', roster, { jobs: testJobs }), testJobs, testRules, 1, testSpells, testStrikes).state.progression).toBeNull();
+    expect(startBattle(buildSortie(site, 'easy', roster, { jobs: testJobs, equipment: [] }), testJobs, testRules, 1, testSpells, testStrikes).state.progression).toBeNull();
   });
 
   it('味方と敵を1体ずつ組にして、組ごとに先になる側を入れ替えて並べる', () => {
@@ -57,12 +58,13 @@ describe('出撃', () => {
 
   it('部隊の並び順に味方を置き、敵は選んだ段階の決まったレベル・成長値・アビリティで置く', () => {
     const roster: Roster = {
+      gold: 0, items: [], nextItemSeq: 1,
       units: [
         unit('a', 'warrior', { level: 7, growth: { ...ZERO_GROWTH, maxHp: 1234 } }),
         unit('b', 'mage', { jobs: { mage: { jp: 0, jpTotal: 0, learned: ['wind'] } } }),
       ],
     };
-    const setup = buildSortie(site, 'easy', roster, { jobs: testJobs });
+    const setup = buildSortie(site, 'easy', roster, { jobs: testJobs, equipment: [] });
     expect(setup.units.map((u) => u.id)).toEqual(['a', 'e1', 'e2', 'b']);
     const { state } = startBattle(setup, testJobs, testRules, 1, testSpells, testStrikes);
     const a = state.units.find((u) => u.id === 'a')!;
@@ -73,13 +75,14 @@ describe('出撃', () => {
     expect(e2).toMatchObject({ team: 'enemy', level: 5 });
     expect(e2.stats.magic).toBe(testJobs[2]!.stats.magic + 5);
     expect(e2.spells.map((s) => s.id)).toEqual(['fire']);
-    expect(() => buildSortie(site, 'nope', roster, { jobs: testJobs })).toThrow();
+    expect(() => buildSortie(site, 'nope', roster, { jobs: testJobs, equipment: [] })).toThrow();
   });
 
   it('出撃前の配置: 味方2体の位置と向きを入れ替える（並び順は変えない）。敵や同じユニットとは入れ替えられない', () => {
-    const roster: Roster = { units: [unit('a', 'warrior'), unit('b', 'archer')] };
+    const roster: Roster = { gold: 0, items: [], nextItemSeq: 1, units: [unit('a', 'warrior'), unit('b', 'archer')] };
     const setup = buildSortie({ ...site, playerSlots: [{ x: 0, z: 3, facing: 'north' }, { x: 1, z: 2, facing: 'east' }] }, 'easy', roster, {
       jobs: testJobs,
+      equipment: [],
     });
     const swapped = swapPlacements(setup, 'a', 'b');
     expect(swapped.units.map((u) => u.id)).toEqual(setup.units.map((u) => u.id));
@@ -99,8 +102,8 @@ describe('出撃', () => {
         events: [{ id: 'm', trigger: { kind: 'turn', turn: 0 }, effects: [{ kind: 'message', messageId: 'x' }] }],
       },
       'easy',
-      { units: [unit('a', 'warrior')] },
-      { jobs: testJobs },
+      { gold: 0, items: [], nextItemSeq: 1, units: [unit('a', 'warrior')] },
+      { jobs: testJobs, equipment: [] },
     );
     const { state } = startBattle(setup, testJobs, testRules, 1, testSpells, testStrikes);
     expect(state.scenario.objectives.victory).toEqual([{ kind: 'defeatUnit', unitId: 'e2' }]);

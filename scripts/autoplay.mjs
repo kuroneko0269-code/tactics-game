@@ -109,7 +109,10 @@ async function main() {
   core.combat = await server.ssrLoadModule('/src/core/combat.ts');
   core.progression = await server.ssrLoadModule('/src/core/progression.ts');
   core.sortie = await server.ssrLoadModule('/src/core/sortie.ts');
+  core.equipment = await server.ssrLoadModule('/src/core/equipment.ts');
+  core.shop = await server.ssrLoadModule('/src/core/shop.ts');
   const abilities = await server.ssrLoadModule('/src/data/abilities.ts');
+  const equipData = await server.ssrLoadModule('/src/data/equipment.ts');
   const data = {
     site: (await server.ssrLoadModule('/src/data/battles/twinHillsBattle.ts')).twinHillsBattle,
     dungeon: (await server.ssrLoadModule('/src/data/battles/ruins/index.ts')).ruinsDungeon,
@@ -122,8 +125,9 @@ async function main() {
     roster: (await server.ssrLoadModule('/src/data/roster.ts')).initialRoster,
     ai: (await server.ssrLoadModule('/src/data/aiConfig.ts')).aiConfig,
     text: (await server.ssrLoadModule('/src/ui/text.ts')).TEXT,
+    equip: equipData,
   };
-  data.catalog = { jobs: data.jobs, spells: data.spells, strikes: data.strikes, passives: data.passives };
+  data.catalog = { jobs: data.jobs, spells: data.spells, strikes: data.strikes, passives: data.passives, equipment: equipData.equipment };
   core.data = data;
   /** 部隊と段階から、画面と同じ方法で戦闘を始める（core だけで） */
   core.start = (roster, tierId, seed) =>
@@ -178,7 +182,8 @@ async function main() {
   const plan = rosterPlan(core, expected);
   console.log(
     `戦闘の後: ${plan.learn ? `${plan.learn.unitId} が ${plan.learn.abilityId} を習得` : '習得できるアビリティなし'}、` +
-      `${plan.jobUnitId} がジョブを変えて戻り、副コマンドに ${plan.subJobId}`,
+      `${plan.jobUnitId} がジョブを変えて戻り（装備が外れる）、副コマンドに ${plan.subJobId}。` +
+      `店で ${plan.buy.itemId} を買って ${plan.equipUnitId} に付け、${plan.jobUnitId} は「おまかせ」、${plan.sell.itemId} を売る`,
   );
 
   const started = Date.now();
@@ -233,6 +238,9 @@ async function main() {
         `✔ ${label}: ${r.winner === 'player' ? '勝利' : '敗北'}（${r.turns}手番、味方の手番 ${r.playerTurns}、` +
           `魔法の指定 ${r.casts}回（ユニット狙い ${r.unitCasts}・マス狙い ${r.tileCasts}）、詠唱の中断 ${r.interrupts}回、` +
           `向きを変えた ${r.facingChanges}回、移動のやり直し ${r.undos}回、カメラ操作 ${r.cameraOps}回、タップ ${r.taps}回、${r.seconds}秒）`,
+      );
+      console.log(
+        `  装備と店: 店で買う ${r.buys}回・売る ${r.sells}回、装備の付け替え ${r.equips}回、「おまかせ」 ${r.autoEquips}回、ゴールドと戦利品の表示 ✔、ボスからの装備 ✔`,
       );
       console.log(
         `  育成: 戦闘中のレベルアップの表示 ✔、結果の画面 ✔、編成のタブ ${r.tabs}回・習得 ${r.learned}回・ジョブチェンジ ${r.jobChanges}回・副コマンド ${r.subChanges}回、再び出撃 ✔、` +
@@ -323,6 +331,10 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
     appeared: 0,
     reached: 0,
     tabs: 0,
+    buys: 0,
+    sells: 0,
+    equips: 0,
+    autoEquips: 0,
   };
   /** 指に近いタップ（狙いの中央から少しずれる）の回数と、そのうち押し直しが必要だった回数（種類ごと） */
   const finger = {
@@ -454,10 +466,21 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
       check(p, `${what} の画面上の位置が分かりません`);
       if (await isTappable(p)) return p;
       const before = await snapshot();
-      // 中央からドラッグして、狙う点を中央へ引き寄せる（大きすぎる移動は数回に分ける）
+      // 中央からドラッグして、狙う点を中央へ引き寄せる（大きすぎる移動は数回に分ける）。
+      // 指を置く点が情報欄やボタンの上だとマップが動かないので、人がするように、マップの見えている所まで上下にずらして置く
       const dx = clamp(center.x - p.x, -viewport.width * 0.4, viewport.width * 0.4);
       const dy = clamp(center.y - p.y, -viewport.height * 0.3, viewport.height * 0.3);
-      await drag({ x: center.x - dx / 2, y: center.y - dy / 2 }, { x: center.x + dx / 2, y: center.y + dy / 2 });
+      let shift = 0;
+      for (const s of [0, 60, -60, 120, -120, 180]) {
+        const from = { x: center.x - dx / 2, y: center.y - dy / 2 + s };
+        const to = { x: center.x + dx / 2, y: center.y + dy / 2 + s };
+        const inside = (q) => q.y > 0 && q.y < viewport.height;
+        if (inside(from) && inside(to) && (await isTappable(from))) {
+          shift = s;
+          break;
+        }
+      }
+      await drag({ x: center.x - dx / 2, y: center.y - dy / 2 + shift }, { x: center.x + dx / 2, y: center.y + dy / 2 + shift });
       stats.cameraOps++;
       await waitCameraIdle();
       check((await snapshot()) === before, `ドラッグの終わりに、マスかユニットが誤って選ばれました（${what} へ寄せる時）`);
@@ -886,6 +909,14 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
     await pressButton(text.objectives.close);
     if (drill) {
       await screenshot('00-deploy');
+      // 敵をタップすると、情報の欄にその敵の装備が出る（フェーズ2-4）
+      const enemy = (await getDeploy()).state.units.find((u) => u.team === 'enemy' && u.equipment.length > 0);
+      await tapDeployUnit(enemy.id);
+      await waitFor('敵の情報の欄', () => document.querySelector('.info-equipment') !== null);
+      const equipText = await page.locator('.info-equipment').textContent();
+      const names = enemy.equipment.map((e) => text.equipment[e.id].name);
+      check(names.every((n) => equipText.includes(n)), `敵の情報の欄に装備が出ていません（${equipText} / ${names}）`);
+      await screenshot('00-deploy-enemy-info');
       // 2人を入れ替えて、もう一度入れ替えて元に戻す（core だけの計算と同じ配置で戦うため）
       await swapOnDeploy('hero-1', 'hero-3');
       await screenshot('00-deploy-swapped');
@@ -1107,9 +1138,19 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   const jobUps = await page.locator('.report-job-up:not([hidden])').count();
   const expectedJobUps = plan.report.units.filter((u) => u.jobLevelAfter > u.jobLevelBefore).length;
   check(jobUps === expectedJobUps, `ジョブのレベルが上がった表示の数が違います（画面 ${jobUps} / core ${expectedJobUps}）`);
+  // 手に入れたゴールドと戦利品（勝った時だけ。core と同じ抽選）
+  const spoilsBox = page.locator('.report-spoils');
+  const shownGold = Number(await spoilsBox.getAttribute('data-gold'));
+  const shownItems = Number(await spoilsBox.getAttribute('data-items'));
+  check(
+    shownGold === plan.spoils.gold && shownItems === plan.spoils.itemIds.length,
+    `結果の画面のゴールドと戦利品が core の計算と違います（画面 ${shownGold}・${shownItems}個 / core ${plan.spoils.gold}・${plan.spoils.itemIds.length}個）`,
+  );
   await screenshot('result-screen');
   await pressButton(text.report.toBase);
   await waitFor('拠点', () => window.__tactics.screen() === 'base');
+  const baseGold = Number(await page.locator('.base-gold').getAttribute('data-gold'));
+  check(baseGold === plan.afterBattle.gold, `拠点の所持金が違います（画面 ${baseGold} / core ${plan.afterBattle.gold}）`);
   const sameRoster = async (want, what) => {
     const got = await T(() => window.__tactics.roster());
     check(JSON.stringify(got) === JSON.stringify(want), `${what}: 部隊の状態が core の計算と違います（画面 ${JSON.stringify(got)} / core ${JSON.stringify(want)}）`);
@@ -1158,14 +1199,46 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
     await waitFor(`欄 ${sheetKind}`, (k) => document.querySelector(`.sheet[data-sheet="${k}"]`) !== null, sheetKind);
     await waitSheetStill();
   };
+  // ---- 店で買う（フェーズ2-4）: 説明の欄で、部隊のだれが装備できるかと能力値の変化を見てから買う。ゴールドが足りない物は買えない ----
+  const shopGold = async () => Number(await page.locator('.shop-gold').getAttribute('data-gold'));
+  const openShopItem = async (selector, kind) => {
+    await tapLocator(page.locator(selector).first());
+    await waitFor(`店の欄 ${kind}`, (k) => document.querySelector(`.sheet[data-sheet="${k}"]`) !== null, kind);
+    await waitSheetStill();
+  };
+  await pressButton(text.base.shop);
+  await waitFor('店の画面', () => window.__tactics.screen() === 'shop');
+  const shownStock = await page.locator('.shop-list .shop-item').evaluateAll((els) => els.map((e) => e.dataset.itemId));
+  check(JSON.stringify(shownStock) === JSON.stringify(plan.stock), `店の品ぞろえが違います（画面 ${shownStock} / core ${plan.stock}）`);
+  await screenshot('shop-buy');
+  await openShopItem(`.shop-item[data-item-id="${plan.buy.itemId}"]`, 'shop-buy');
+  // 部隊の5人の行。剣を装備できる戦士の行には、付け替えた時の攻撃力の変化が出る
+  check((await page.locator('.shop-fit-row').count()) === plan.afterBattle.units.length, '店の欄に部隊のだれが装備できるかが出ていません');
+  check((await page.locator('.shop-fit-row.no').count()) === 3, '剣を装備できないユニットの数が違います');
+  await screenshot('shop-buy-sheet');
+  await tapLocator(page.locator('.sheet .shop-confirm'));
+  await waitFor('買う', (n) => window.__tactics.roster().items.length === n, plan.afterBuy.items.length);
+  stats.buys++;
+  check((await shopGold()) === plan.afterBuy.gold, `買った後の所持金が違います（画面 ${await shopGold()} / core ${plan.afterBuy.gold}）`);
+  await closeSheet();
+  // ゴールドが足りない物は「買う」が押せず、理由が出る
+  await openShopItem(`.shop-item[data-item-id="${plan.tooExpensive}"]`, 'shop-buy');
+  check(await page.locator('.sheet .shop-confirm').isDisabled(), `ゴールドが足りない ${plan.tooExpensive} の「買う」が押せます`);
+  check((await page.locator('.sheet').textContent()).includes(text.shop.buyRefusal.notEnoughGold), 'ゴールドが足りない理由が出ていません');
+  await closeSheet();
+  await pressButton(text.shop.back);
+  await waitFor('拠点', () => window.__tactics.screen() === 'base');
+  await sameRoster(plan.afterBuy, '店で買った後');
+
   await pressButton('編成');
   await waitFor('編成の画面', () => window.__tactics.screen() === 'roster');
-  // 4つのタブを順に開く（能力の棒、ジョブ、アビリティの枠、習得の一覧）
-  for (const tab of ['stats', 'job', 'abilities', 'learn']) {
+  // 5つのタブを順に開く（能力の棒、ジョブ、アビリティの枠、習得の一覧、装備）
+  for (const tab of ['stats', 'job', 'abilities', 'learn', 'equip']) {
     await openTab(tab);
     await screenshot(`roster-tab-${tab}`);
   }
-  check((await page.locator('.stat-bar-row').count()) === 0, '習得のタブに能力の棒が出ています');
+  check((await page.locator('.stat-bar-row').count()) === 0, '装備のタブに能力の棒が出ています');
+  check((await page.locator('.equip-row').count()) === 3, '装備のタブに3つの枠がありません');
   await openTab('stats');
   check((await page.locator('.stat-bar-row').count()) === 5, '能力のタブに5つの能力の棒がありません');
   check((await page.locator('.growth-total .bar').count()) === 1, '成長の合計の棒がありません');
@@ -1192,11 +1265,43 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   for (const jobId of [plan.subJobId, plan.homeJobId]) {
     await viaTwoTaps('job', `.job-choice[data-job-id="${jobId}"]`, 'job');
     check((await page.locator('.sheet .compare-grid').count()) === 1, '能力値と成長率の比較が出ていません');
-    if (stats.jobChanges === 0) await screenshot('roster-job-sheet');
+    const first = stats.jobChanges === 0;
+    // 魔術師になると、剣と鎧が外れる（変える前の欄と、変えた後の知らせに出る）
+    const removedNames = plan.removed.map((id) => text.equipment[id].name).join('・');
+    if (first) {
+      check((await page.locator('.sheet .sheet-warning').textContent()).includes(removedNames), `外れる装備の知らせが出ていません（${removedNames}）`);
+      await screenshot('roster-job-sheet');
+    }
     await pressButton(text.roster.becomeJob(text.jobs[jobId]));
     await waitFor('ジョブチェンジ', ([u, j]) => window.__tactics.roster().units.find((x) => x.id === u).jobId === j, [plan.jobUnitId, jobId]);
+    if (first) {
+      check((await page.locator('.roster-notice').textContent()).includes(removedNames), '装備が外れた知らせが出ていません');
+      check(
+        await T((u) => Object.values(window.__tactics.roster().units.find((x) => x.id === u).equipment).every((v) => v === null), plan.jobUnitId),
+        'ジョブを変えた後に、付けられない装備が外れていません',
+      );
+    }
     stats.jobChanges++;
   }
+  // ---- 装備のタブ: 買った剣を付け替える（ほかの枠の候補には、付け替えた時の能力値の変化が出る）。外れた戦士は「おまかせ」 ----
+  await pickUnit(plan.equipUnitId);
+  await viaTwoTaps('equip', '.equip-row[data-slot="weapon"]', 'equip-weapon');
+  const boughtChoice = page.locator(`.sheet .equip-choice[data-uid="${plan.buy.uid}"]`);
+  check((await boughtChoice.count()) === 1, '買った剣が武器の候補に出ていません');
+  await screenshot('roster-equip-sheet');
+  await tapLocator(boughtChoice);
+  await waitFor('武器の付け替え', ([u, uid]) => window.__tactics.roster().units.find((x) => x.id === u).equipment.weapon === uid, [plan.equipUnitId, plan.buy.uid]);
+  stats.equips++;
+  await pickUnit(plan.jobUnitId);
+  await openTab('equip');
+  await pressButton(text.roster.autoEquip);
+  await waitFor(
+    '「おまかせ」',
+    ([u, want]) => JSON.stringify(window.__tactics.roster().units.find((x) => x.id === u).equipment) === want,
+    [plan.jobUnitId, JSON.stringify(plan.afterEdit.units.find((x) => x.id === plan.jobUnitId).equipment)],
+  );
+  stats.autoEquips++;
+  await screenshot('roster-equip-auto');
   await viaTwoTaps('abilities', '.slot-row[data-slot="secondary"]', 'slot-secondary');
   await screenshot('roster-slot-sheet');
   await tapLocator(page.locator(`.sheet .screen-button[data-job-id="${plan.subJobId}"]`));
@@ -1209,13 +1314,32 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   await waitFor('拠点', () => window.__tactics.screen() === 'base');
   await sameRoster(plan.afterEdit, '編成の後');
 
-  // ---- 再び出撃: 部隊の変更が戦闘に反映される ----
+  // ---- 店で売る: 装備中の物は売れない（理由が出る）。だれも付けていない物を売ると、売値（買値の半分）が入る ----
+  await pressButton(text.base.shop);
+  await waitFor('店の画面', () => window.__tactics.screen() === 'shop');
+  await tapLocator(page.locator('.shop-tabs .tab-button[data-tab="sell"]'));
+  await waitFor('売るのタブ', () => document.querySelector('.shop-list')?.dataset.tab === 'sell');
+  await screenshot('shop-sell');
+  await openShopItem(`.shop-item[data-uid="${plan.sell.equippedUid}"]`, 'shop-sell');
+  check(await page.locator('.sheet .shop-confirm').isDisabled(), '装備中の物の「売る」が押せます');
+  check((await page.locator('.sheet').textContent()).includes(text.shop.sellRefusal.equipped), '装備中の物を売れない理由が出ていません');
+  await closeSheet();
+  await openShopItem(`.shop-item[data-uid="${plan.sell.uid}"]`, 'shop-sell');
+  await tapLocator(page.locator('.sheet .shop-confirm'));
+  await waitFor('売る', (uid) => !window.__tactics.roster().items.some((i) => i.uid === uid), plan.sell.uid);
+  stats.sells++;
+  check((await shopGold()) === plan.afterSell.gold, `売った後の所持金が違います（画面 ${await shopGold()} / core ${plan.afterSell.gold}）`);
+  await pressButton(text.shop.back);
+  await waitFor('拠点', () => window.__tactics.screen() === 'base');
+  await sameRoster(plan.afterSell, '店で売った後');
+
+  // ---- 再び出撃: 部隊の変更（装備を含む）が戦闘に反映される ----
   await sortieTraining(text.tiers.normal.name);
   const second = await getState();
-  const want = core.start(plan.afterEdit, 'normal', 1).state;
+  const want = core.start(plan.afterSell, 'normal', 1).state;
   for (const u of want.units.filter((u) => u.team === 'player')) {
     const got = second.units.find((x) => x.id === u.id);
-    const pick = (x) => JSON.stringify([x.jobId, x.level, x.stats, x.commands, x.weapon]);
+    const pick = (x) => JSON.stringify([x.jobId, x.level, x.stats, x.commands, x.weapon, x.equipment.map((e) => e.id)]);
     check(pick(got) === pick(u), `2戦目の ${u.id} に部隊の状態が反映されていません（画面 ${pick(got)} / core ${pick(u)}）`);
   }
   check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
@@ -1424,11 +1548,11 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   // ---- ページを読み込み直しても、部隊の状態が残る ----
   await page.reload();
   await page.waitForFunction(() => window.__tactics?.screen() === 'base', null, { timeout: 30000 });
-  await sameRoster(plan.afterEdit, '読み込み直した後');
+  await sameRoster(plan.afterSell, '読み込み直した後');
   // ---- 受動的なアビリティの習得と付け替え ----
   // JP の貯まった部隊を用意して、編成の画面で「反撃」を覚え（ジョブのレベルが足りない「重装」は押せない）、
   // リアクションの枠に付ける。付けた後の部隊は core の計算と同じで、出撃するとその戦闘のユニットに反映される
-  const pd = passiveDrill(core, plan.afterEdit);
+  const pd = passiveDrill(core, plan.afterSell);
   await page.evaluate((r) => window.__tactics.setRoster(r), pd.start);
   await waitFor('拠点', () => window.__tactics.screen() === 'base');
   await pressButton('編成');
@@ -1555,9 +1679,13 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   const next2 = text.report.next(2, text.mapNames[dungeonSite(1).map.id]);
   await pressButton(next2);
   // 第2戦（到達）: まず負けて、やり直す。負けても進み具合はそのまま
+  const goldBeforeLoss = await T(() => window.__tactics.roster().gold);
   await startDungeonBattle(1);
   await resolveDungeonBattle('enemy', false);
   check((await resultTitle()) === text.result.enemy, '第2戦の負けの画面が出ていません');
+  // 負けた時は、ゴールドも戦利品も得られない
+  check((await T(() => window.__tactics.roster().gold)) === goldBeforeLoss, '負けた時にゴールドが入っています');
+  check((await page.locator('.report-spoils').getAttribute('data-gold')) === '0', '負けた時の結果の画面にゴールドが出ています');
   check((await getDungeon()).run?.battle === 1, '負けた後の進み具合が変わっています');
   await screenshot('dungeon-2-lost');
   stats.retries++;
@@ -1585,6 +1713,7 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   await pressButton(resume3);
   // 第3戦（ボスの撃破）→ クリア
   const jpBefore = await T(() => window.__tactics.roster().units.map((u) => u.jobs[u.jobId].jp));
+  const goldBeforeBoss = await T(() => window.__tactics.roster().gold);
   await startDungeonBattle(2);
   await resolveDungeonBattle('player', FULL_DUNGEON);
   for (let attempt = 0; (await resultTitle()) === text.result.enemy && attempt < 3; attempt++) {
@@ -1601,6 +1730,12 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   // 報酬の JP（とこの戦闘で得た JP）が、全員の今のジョブに入っている
   check(jpAfter.every((jp, i) => jp >= jpBefore[i] + core.data.dungeon.clearRewardJp), `クリアの報酬の JP が入っていません（${jpBefore} → ${jpAfter}）`);
   check(JSON.stringify(await getDungeon()) === JSON.stringify({ run: null, clears: { ruins: 1 } }), 'クリアの記録が違います');
+  // ボスからの初回の報酬（店では買えない装備）と、第3戦のゴールド
+  const bossItemId = core.data.dungeon.firstClearItemId;
+  check(clearText.includes(text.report.specialItem(text.equipment[bossItemId].name)), 'クリアの画面にボスからの装備が出ていません');
+  check(await T((id) => window.__tactics.roster().items.some((i) => i.itemId === id), bossItemId), `ボスからの装備（${bossItemId}）が所持品にありません`);
+  const bossGold = core.data.dungeon.battles[2].tiers[0].reward.gold;
+  check((await T(() => window.__tactics.roster().gold)) === goldBeforeBoss + bossGold, `第3戦のゴールドが入っていません（${goldBeforeBoss} + ${bossGold}）`);
   await screenshot('dungeon-clear');
   await pressButton(text.report.toBase);
   await waitFor('拠点', () => window.__tactics.screen() === 'base');
@@ -1623,7 +1758,7 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
 }
 
 /**
- * 画面の収まりの確認: 各画面（拠点・出撃先・敵の強さ・ダンジョン・挑み直しの確認・はじめからの確認・編成の4つのタブと説明の欄・
+ * 画面の収まりの確認: 各画面（拠点・出撃先・敵の強さ・ダンジョン・挑み直しの確認・はじめからの確認・編成の5つのタブと説明の欄・店の買う・売るとその欄・
  * 配置・戦闘・結果・戦闘の間・負けた時・クリア）を開き、画面全体がスクロールしないこと（収まらない内容は枠の中だけでスクロールする）、
  * ボタンが画面の内側にあること、画面のボタンが指で押せる大きさ（高さ 48px 以上）であることを確かめる。
  */
@@ -1674,13 +1809,14 @@ async function checkLayouts(browser, baseUrl, name, core) {
       }
       return out;
     });
-    check(problems.length === 0, `${label}「${tag}」: ${problems.join(' / ')}`);
-    check(errors.length === 0, `ページでエラー: ${errors.map((e) => e.message).join(' / ')}`);
-    screens++;
+    // 画面写真は検査の前に撮る（収まらなかった画面も見られるように）
     if (SCREENSHOT_DIR) {
       fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
       await page.screenshot({ path: path.join(SCREENSHOT_DIR, `layout-${name}-${tag}.png`) });
     }
+    check(problems.length === 0, `${label}「${tag}」: ${problems.join(' / ')}`);
+    check(errors.length === 0, `ページでエラー: ${errors.map((e) => e.message).join(' / ')}`);
+    screens++;
   };
   const screenIs = (n) => until((n) => window.__tactics.screen() === n, n);
   const resultDone = () => until(() => document.querySelector('.report-screen[data-done="true"]') !== null);
@@ -1724,7 +1860,28 @@ async function checkLayouts(browser, baseUrl, name, core) {
   await page.locator('.slot-row[data-slot="main"]').click();
   await inspect('roster-sheet-main');
   await press(text.roster.close);
+  // 装備のタブと、枠の候補の欄（フェーズ2-4）
+  await tab('equip');
+  await inspect('roster-equip');
+  await page.locator('.equip-row[data-slot="weapon"]').click();
+  await inspect('roster-sheet-equip');
+  await press(text.roster.close);
   await press(text.roster.back);
+  await screenIs('base');
+  // 店: 買う（一覧と説明の欄）・売る（フェーズ2-4）
+  await press(text.base.shop);
+  await screenIs('shop');
+  await inspect('shop-buy');
+  await page.locator('.shop-item').first().click();
+  await inspect('shop-sheet-buy');
+  await press(text.shop.close);
+  await page.locator('.shop-tabs .tab-button[data-tab="sell"]').click();
+  await until(() => document.querySelector('.shop-list')?.dataset.tab === 'sell');
+  await inspect('shop-sell');
+  await page.locator('.shop-item').first().click();
+  await inspect('shop-sheet-sell');
+  await press(text.shop.close);
+  await press(text.shop.back);
   await screenIs('base');
   // 出撃先・敵の強さ・配置・戦闘・結果
   await press(text.base.sortie);
@@ -1829,28 +1986,69 @@ function interruptDrill(core) {
  */
 function rosterPlan(core, finalState) {
   const P = core.progression;
+  const E = core.equipment;
+  const S = core.shop;
   const { catalog, progression: rules } = core.data;
-  const { roster: afterBattle, report } = P.applyBattleResult(core.data.roster, finalState, catalog, rules);
+  const { roster: afterProgress, report } = P.applyBattleResult(core.data.roster, finalState, catalog, rules);
+  // 勝てば、ゴールドと戦利品（戦闘が終わった時点の乱数の状態で抽選。画面と同じ計算）
+  const easy = core.data.site.tiers.find((t) => t.id === 'easy');
+  const spoils = S.rollSpoils(easy.reward, finalState.winner === 'player', finalState.rngState);
+  const afterBattle = S.grantSpoils(afterProgress, spoils).roster;
+  // 店: 最初の品ぞろえから、買える中で強い剣を買う（鋼の剣が買えなければ旅人の剣）
+  const stock = S.shopStock(core.data.equip.shop, { trainingWins: finalState.winner === 'player' ? { easy: 1 } : {}, dungeonClears: {} });
+  const price = (id) => catalog.equipment.find((e) => e.id === id).price;
+  const buyId = afterBattle.gold >= price('sword-2') ? 'sword-2' : 'sword-1';
+  const bought = S.buyItem(afterBattle, buyId, stock, catalog);
+  const afterBuy = bought.roster;
+  // ゴールドが足りない物（品ぞろえの中で最も高い物）
+  const tooExpensive = [...stock].sort((a, b) => price(b) - price(a))[0];
+  if (price(tooExpensive) <= afterBuy.gold) throw new Error('ゴールドが足りない物が品ぞろえにありません');
   let learn;
   const candidates = [];
-  for (const u of afterBattle.units) {
+  for (const u of afterBuy.units) {
     const job = P.findJob(catalog, u.jobId);
     for (const a of job.abilities ?? []) {
       if (P.learnRefusal(u, job.id, a.id, catalog, rules) === null) candidates.push({ unitId: u.id, jobId: job.id, abilityId: a.id });
     }
   }
   learn = candidates.find((c) => c.abilityId === 'powerStrike' && c.unitId === 'hero-1') ?? candidates.find((c) => c.abilityId === 'powerStrike') ?? candidates[0];
-  let roster = afterBattle;
+  let roster = afterBuy;
   if (learn) roster = P.replaceUnit(roster, P.learnAbility(P.findUnit(roster, learn.unitId), learn.jobId, learn.abilityId, catalog, rules));
+  // ジョブを変えて戻る（魔術師になると剣と鎧が外れ、戦士に戻っても外れたまま）
   const jobUnitId = 'hero-2';
   const homeJobId = P.findUnit(roster, jobUnitId).jobId;
   const subJobId = 'mage';
-  let u = P.findUnit(roster, jobUnitId);
-  u = P.changeJob(u, subJobId, catalog, rules);
-  u = P.changeJob(u, homeJobId, catalog, rules);
-  u = P.setSecondary(u, subJobId, catalog);
-  const afterEdit = P.replaceUnit(roster, u);
-  return { report, afterBattle, learn, jobUnitId, homeJobId, subJobId, afterEdit };
+  const toSub = E.changeJobWithEquipment(roster, jobUnitId, subJobId, catalog, rules);
+  const removed = toSub.removed.map((i) => i.itemId);
+  roster = E.changeJobWithEquipment(toSub.roster, jobUnitId, homeJobId, catalog, rules).roster;
+  // 装備のタブ: 買った剣を hero-1 の武器の枠に付ける。hero-2 は「おまかせ」
+  const equipUnitId = 'hero-1';
+  roster = E.equipItem(roster, equipUnitId, 'weapon', bought.item.uid, catalog);
+  roster = E.autoEquip(roster, jobUnitId, catalog, core.data.equip.autoEquipWeights);
+  roster = P.replaceUnit(roster, P.setSecondary(P.findUnit(roster, jobUnitId), subJobId, catalog));
+  const afterEdit = roster;
+  // 売る: だれも付けていない旅人の剣。装備中の物（hero-1 の買った剣）は売れない
+  const free = afterEdit.items.find((i) => !E.wearerOf(afterEdit, i.uid) && i.itemId === 'sword-1');
+  if (!free) throw new Error('売る物がありません');
+  const afterSell = S.sellItem(afterEdit, free.uid, catalog, core.data.equip.shop);
+  return {
+    report,
+    spoils,
+    afterBattle,
+    stock,
+    buy: { itemId: buyId, uid: bought.item.uid },
+    tooExpensive,
+    afterBuy,
+    learn,
+    jobUnitId,
+    homeJobId,
+    subJobId,
+    removed,
+    equipUnitId,
+    afterEdit,
+    sell: { itemId: free.itemId, uid: free.uid, equippedUid: bought.item.uid },
+    afterSell,
+  };
 }
 
 /**
@@ -1861,11 +2059,11 @@ function strikeDrill(core, plan) {
   const P = core.progression;
   const { catalog, progression: rules } = core.data;
   const unitId = plan.jobUnitId;
-  let u = P.findUnit(plan.afterEdit, unitId);
+  let u = P.findUnit(plan.afterSell, unitId);
   if (!P.jobProgress(u, 'warrior').learned.includes('powerStrike')) {
     u = P.learnAbility(P.gainJp(u, 'warrior', 1000), 'warrior', 'powerStrike', catalog, rules);
   }
-  const roster = P.replaceUnit(plan.afterEdit, u);
+  const roster = P.replaceUnit(plan.afterSell, u);
   const base = core.start(roster, 'easy', SEED + 2).state;
   const me = base.units.find((x) => x.id === unitId);
   const targetId = 'e-warrior-2';

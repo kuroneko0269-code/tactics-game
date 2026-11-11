@@ -1,7 +1,8 @@
 import type { MapDefinition } from '../../../core/map';
 import type { BattleSite } from '../../../core/sortie';
 import { archer, healer, mage, warrior } from '../../jobs';
-import { enemyUnit } from '../enemyUnits';
+import { altarCrown, robe1, staff1 } from '../../equipment';
+import { enemyUnit, kit } from '../enemyUnits';
 
 /**
  * 第3戦「祭壇の間」: 10×10 の広間。勝利はボス（魔術師）の撃破。
@@ -11,7 +12,7 @@ import { enemyUnit } from '../enemyUnits';
  * - ボスの HP が半分以下になると、祭壇の両脇に取り巻きの戦士が2体現れる（2 手番前に予告）。
  * - 隠れた罠: 落石・ぬかるみを広間に1つずつ。脱力の罠を、味方の開始位置の南西の隅（高い柱の陰の行き止まり）に1つ。
  *   北へ進めば踏まないが、場所を知っていれば、開始位置からすぐに何度でも踏みに行ける。
- * 敵はレベル 4（ボスは 6）。受動的なアビリティを段階的に付けている。
+ * 敵はレベル 3（ボスは 6）。受動的なアビリティを段階的に付けている。装備は1段階目（ボスは主の宝冠も。フェーズ2-4）。
  */
 const map: MapDefinition = {
   id: 'ruins-altar',
@@ -57,12 +58,33 @@ export const ruinsAltar: BattleSite = {
   tiers: [
     {
       id: 'main',
+      // 勝った時の報酬（フェーズ2-4）。初めてのクリアでは、ほかに主の宝冠が必ず手に入る（index.ts の firstClearItemId）
+      reward: {
+        gold: 400,
+        loot: [
+          { itemId: 'bow-2', percent: 15 },
+          { itemId: 'staff-2', percent: 15 },
+          { itemId: 'heavy-2', percent: 15 },
+          { itemId: 'steady-bangle', percent: 10 },
+        ],
+      },
       units: [
-        enemyUnit({ id: 'r3-warrior-1', job: warrior, x: 4, z: 2, level, abilities: ['powerStrike', 'knockback'], passives: ['counter'] }),
-        enemyUnit({ id: 'r3-boss', job: mage, x: 4, z: 0, level: 6, abilities: ['inferno', 'wind', 'seal'], passives: ['magicShell'], statBonus: { maxHp: 30, maxMp: 30 } }),
-        enemyUnit({ id: 'r3-warrior-2', job: warrior, x: 5, z: 2, level, abilities: ['powerStrike', 'knockback'], passives: ['counter'] }),
-        enemyUnit({ id: 'r3-archer-1', job: archer, x: 0, z: 2, level, abilities: ['aimedShot'], passives: ['focus'] }),
-        enemyUnit({ id: 'r3-healer-1', job: healer, x: 5, z: 0, level, abilities: ['heal', 'bigHeal'], passives: ['meditate'] }),
+        enemyUnit({ id: 'r3-warrior-1', job: warrior, x: 4, z: 2, level, abilities: ['powerStrike', 'knockback'], passives: ['counter'], equipment: kit(warrior, 1) }),
+        enemyUnit({
+          id: 'r3-boss',
+          job: mage,
+          x: 4,
+          z: 0,
+          level: 6,
+          abilities: ['inferno', 'wind', 'seal'],
+          passives: ['magicShell'],
+          // 主の宝冠（初めてのクリアで手に入る）を付けている。残りの強さは能力値の補正で表す
+          equipment: [staff1, robe1, altarCrown],
+          statBonus: { maxHp: 16, maxMp: 18 },
+        }),
+        enemyUnit({ id: 'r3-warrior-2', job: warrior, x: 5, z: 2, level, abilities: ['powerStrike', 'knockback'], passives: ['counter'], equipment: kit(warrior, 1) }),
+        enemyUnit({ id: 'r3-archer-1', job: archer, x: 0, z: 2, level, abilities: ['aimedShot'], passives: ['focus'], equipment: kit(archer, 1) }),
+        enemyUnit({ id: 'r3-healer-1', job: healer, x: 5, z: 0, level, abilities: ['heal', 'bigHeal'], passives: ['meditate'], equipment: kit(healer, 1) }),
       ],
     },
   ],
@@ -78,8 +100,8 @@ export const ruinsAltar: BattleSite = {
           kind: 'reinforce',
           delay: 2,
           units: [
-            { ...enemyUnit({ id: 'r3-guard-1', job: warrior, x: 2, z: 0, level, abilities: ['powerStrike'] }), team: 'enemy' },
-            { ...enemyUnit({ id: 'r3-guard-2', job: warrior, x: 7, z: 0, level, abilities: ['powerStrike'] }), team: 'enemy' },
+            { ...enemyUnit({ id: 'r3-guard-1', job: warrior, x: 2, z: 0, level, abilities: ['powerStrike'], equipment: kit(warrior, 1) }), team: 'enemy' },
+            { ...enemyUnit({ id: 'r3-guard-2', job: warrior, x: 7, z: 0, level, abilities: ['powerStrike'], equipment: kit(warrior, 1) }), team: 'enemy' },
           ],
         },
       ],

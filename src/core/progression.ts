@@ -17,6 +17,7 @@
  */
 import type {
   BattleState,
+  EquipmentDefinition,
   GrowthStat,
   GrowthValues,
   JobAbility,
@@ -29,6 +30,7 @@ import type {
   UnitCommand,
   UnitStats,
 } from './battleTypes';
+import { canEquip, EQUIP_SLOTS, type EquipmentSlots, type ItemInstance } from './items';
 
 /** 成長値を持つ能力の並び（成長値の計算は、いつもこの順で行う） */
 export const GROWTH_STATS: readonly GrowthStat[] = ['maxHp', 'maxMp', 'attack', 'magic', 'speed'];
@@ -71,11 +73,19 @@ export interface RosterUnit {
   /** ジョブごとの進み具合（一度も就いていないジョブは含まないことがある） */
   readonly jobs: Readonly<Record<string, JobProgress>>;
   readonly slots: AbilitySlots;
+  /** 装備の枠（武器・防具・装飾品）。値は部隊の所持品（Roster.items）の uid */
+  readonly equipment: EquipmentSlots;
 }
 
 /** プレイヤーの部隊（戦闘をまたいで育てる） */
 export interface Roster {
   readonly units: readonly RosterUnit[];
+  /** 所持金（ゴールド） */
+  readonly gold: number;
+  /** 所持品（装備中の物も含む。1つずつ別の個体） */
+  readonly items: readonly ItemInstance[];
+  /** 次に手に入れる個体に付ける番号（uid は "i" + 番号。売った個体の uid を使い回さないため） */
+  readonly nextItemSeq: number;
 }
 
 /** 育成で参照する定義データ */
@@ -84,6 +94,8 @@ export interface GameCatalog {
   readonly spells: readonly SpellDefinition[];
   readonly strikes: readonly StrikeDefinition[];
   readonly passives: readonly PassiveDefinition[];
+  /** 装備の定義（フェーズ2-4） */
+  readonly equipment: readonly EquipmentDefinition[];
 }
 
 /** 受動的なアビリティの枠の並び */
@@ -426,13 +438,29 @@ export type RosterProblem =
   | { readonly kind: 'badJp'; readonly unitId: string; readonly jobId: string }
   | { readonly kind: 'unknownAbility'; readonly unitId: string; readonly jobId: string; readonly abilityId: string }
   | { readonly kind: 'badSecondary'; readonly unitId: string; readonly jobId: string }
-  | { readonly kind: 'badPassive'; readonly unitId: string; readonly slot: PassiveSlot; readonly abilityId: string };
+  | { readonly kind: 'badPassive'; readonly unitId: string; readonly slot: PassiveSlot; readonly abilityId: string }
+  | { readonly kind: 'badGold' }
+  | { readonly kind: 'badItem'; readonly uid: string }
+  | { readonly kind: 'duplicateItem'; readonly uid: string }
+  | { readonly kind: 'badEquipment'; readonly unitId: string; readonly uid: string };
 
 /** 部隊の状態がルールどおりかを確かめ、誤りの一覧を返す（正しければ空） */
 export function validateRoster(roster: Roster, catalog: GameCatalog, rules: ProgressionRules): RosterProblem[] {
   const problems: RosterProblem[] = [];
   const seen = new Set<string>();
   const isInt = (n: unknown) => Number.isInteger(n);
+  // 所持金と所持品（同じ uid は1つだけ。定義のある装備だけ）
+  if (!isInt(roster.gold) || roster.gold < 0) problems.push({ kind: 'badGold' });
+  if (!isInt(roster.nextItemSeq) || roster.nextItemSeq < 1) problems.push({ kind: 'badGold' });
+  const items = new Map<string, EquipmentDefinition>();
+  for (const item of roster.items) {
+    if (items.has(item.uid)) problems.push({ kind: 'duplicateItem', uid: item.uid });
+    const def = catalog.equipment.find((e) => e.id === item.itemId);
+    if (!def) problems.push({ kind: 'badItem', uid: item.uid });
+    else items.set(item.uid, def);
+  }
+  /** 装備の枠に入っている uid（同じ個体を2か所に付けていないか） */
+  const worn = new Set<string>();
   for (const u of roster.units) {
     const unitId = u.id;
     if (seen.has(unitId)) problems.push({ kind: 'duplicateUnit', unitId });
@@ -472,6 +500,16 @@ export function validateRoster(roster: Roster, catalog: GameCatalog, rules: Prog
       if (abilityId !== null && !passiveChoices(u, slot, catalog).includes(abilityId)) {
         problems.push({ kind: 'badPassive', unitId, slot, abilityId });
       }
+    }
+    // 装備: 持っている個体で、その枠の物で、今のジョブで付けられる物。同じ個体を2か所に付けない
+    for (const slot of EQUIP_SLOTS) {
+      const uid = u.equipment[slot];
+      if (uid === null) continue;
+      const def = items.get(uid);
+      if (!def || def.slot !== slot || worn.has(uid) || (job && !canEquip(job, def))) {
+        problems.push({ kind: 'badEquipment', unitId, uid });
+      }
+      worn.add(uid);
     }
   }
   return problems;

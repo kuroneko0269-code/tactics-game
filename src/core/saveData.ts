@@ -12,33 +12,85 @@
  * - 版 1（フェーズ2-1a）: 部隊（roster）だけ。
  * - 版 2（フェーズ2-2b）: ダンジョンの記録（dungeon。挑戦中のダンジョンと次の戦闘、クリアの回数）を追加。
  *   版 1 のデータは「挑戦中なし、クリアなし」として直す（部隊はそのまま）。
+ * - 版 3（フェーズ2-4）: 部隊に所持金（gold）・所持品（items）・次の個体の番号（nextItemSeq）、ユニットに装備の枠（equipment）、
+ *   進み具合の記録（records。訓練戦の段階ごとの勝利の回数）を追加。
+ *   版 2 のデータは、育てた状態をそのまま残し、各ユニットに「今のジョブの最初の装備」を配って付け、最初の所持金を持たせる。
  */
+import type { EquipmentDefinition } from './battleTypes';
 import type { DungeonState } from './dungeon';
 import type { Roster } from './progression';
 
 /** 今のセーブデータの版 */
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
+
+/** 進み具合の記録（ダンジョンのクリアは dungeon にある） */
+export interface GameRecords {
+  /** 訓練戦の段階ごとの勝利の回数（店の品ぞろえの条件に使う） */
+  readonly trainingWins: Readonly<Record<string, number>>;
+}
+
+export const EMPTY_RECORDS: GameRecords = { trainingWins: {} };
 
 /** セーブデータ（今の版の形） */
 export interface SaveData {
   readonly version: number;
   readonly roster: Roster;
   readonly dungeon: DungeonState;
+  readonly records: GameRecords;
 }
 
 /**
- * 古い版を直す関数の一覧。キーは「直す前の版」。値は、その版のデータを受け取り、1つ新しい版のデータを返す。
- * 例: 版 2 を作ったら { 1: (old) => ({ ...old, version: 2, 新しい項目: 初期値 }) } を足す。
+ * 古い版を直す時に使う定義データ（core は src/data を読まないので、呼ぶ側から渡す）。
+ * - starterEquipment: ジョブごとの最初の装備（装備の id）。版 3 で、各ユニットの今のジョブの物を配って付ける
+ * - startingGold: 最初の所持金
+ * - equipment: 装備の定義（配った物をどの枠に付けるかを引く）
  */
-export type SaveMigrations = Readonly<Record<number, (old: Record<string, unknown>) => Record<string, unknown>>>;
+export interface SaveMigrationContext {
+  readonly starterEquipment: Readonly<Record<string, readonly string[]>>;
+  readonly startingGold: number;
+  readonly equipment: readonly Pick<EquipmentDefinition, 'id' | 'slot'>[];
+}
+
+/**
+ * 古い版を直す関数の一覧。キーは「直す前の版」。値は、その版のデータ（と定義データ）を受け取り、1つ新しい版のデータを返す。
+ * 例: 版 4 を作ったら { 3: (old) => ({ ...old, version: 4, 新しい項目: 初期値 }) } を足す。
+ */
+export type SaveMigrations = Readonly<
+  Record<number, (old: Record<string, unknown>, context: SaveMigrationContext) => Record<string, unknown>>
+>;
 
 export const SAVE_MIGRATIONS: SaveMigrations = {
   /** 版 1 → 2: ダンジョンの記録を足す（挑戦中なし、クリアなし） */
   1: (old) => ({ ...old, version: 2, dungeon: { run: null, clears: {} } }),
+  /** 版 2 → 3: 所持金・所持品・装備の枠・記録を足す。各ユニットに今のジョブの最初の装備を配って付ける */
+  2: (old, context) => {
+    const roster = (old.roster ?? {}) as { units?: unknown };
+    if (!Array.isArray(roster.units)) return { ...old, version: 3 };
+    let seq = 1;
+    const items: { uid: string; itemId: string }[] = [];
+    const units = roster.units.map((raw: unknown) => {
+      const u = raw as Record<string, unknown>;
+      const equipment: Record<string, string | null> = { weapon: null, armor: null, accessory: null };
+      for (const itemId of context.starterEquipment[String(u.jobId)] ?? []) {
+        const slot = context.equipment.find((e) => e.id === itemId)?.slot;
+        if (!slot || equipment[slot] !== null) continue;
+        const uid = `i${seq++}`;
+        items.push({ uid, itemId });
+        equipment[slot] = uid;
+      }
+      return { ...u, equipment };
+    });
+    return {
+      ...old,
+      version: 3,
+      roster: { ...roster, units, gold: context.startingGold, items, nextItemSeq: seq },
+      records: { trainingWins: {} },
+    };
+  },
 };
 
-export function createSaveData(roster: Roster, dungeon: DungeonState): SaveData {
-  return { version: SAVE_VERSION, roster, dungeon };
+export function createSaveData(roster: Roster, dungeon: DungeonState, records: GameRecords): SaveData {
+  return { version: SAVE_VERSION, roster, dungeon, records };
 }
 
 /** 読み込みに失敗した理由（画面ではなく、開発者向けの記録に使う） */
@@ -50,6 +102,7 @@ export type LoadFailure = 'notObject' | 'noVersion' | 'newerVersion' | 'noMigrat
  */
 export function migrateSaveData(
   raw: unknown,
+  context: SaveMigrationContext,
   migrations: SaveMigrations = SAVE_MIGRATIONS,
   currentVersion: number = SAVE_VERSION,
 ): { ok: true; data: SaveData; migratedFrom: number } | { ok: false; reason: LoadFailure } {
@@ -61,11 +114,28 @@ export function migrateSaveData(
   for (let v = from; v < currentVersion; v++) {
     const step = migrations[v];
     if (!step) return { ok: false, reason: 'noMigration' };
-    data = step(data);
+    data = step(data, context);
   }
   if (!looksLikeRoster(data.roster)) return { ok: false, reason: 'badShape' };
   if (!looksLikeDungeon(data.dungeon)) return { ok: false, reason: 'badShape' };
-  return { ok: true, data: { version: currentVersion, roster: data.roster, dungeon: data.dungeon }, migratedFrom: from };
+  if (!looksLikeRecords(data.records)) return { ok: false, reason: 'badShape' };
+  return {
+    ok: true,
+    data: { version: currentVersion, roster: data.roster, dungeon: data.dungeon, records: data.records },
+    migratedFrom: from,
+  };
+}
+
+/** 記録として最低限の形をしているか */
+function looksLikeRecords(value: unknown): value is GameRecords {
+  if (typeof value !== 'object' || value === null) return false;
+  const wins = (value as Record<string, unknown>).trainingWins;
+  return (
+    typeof wins === 'object' &&
+    wins !== null &&
+    !Array.isArray(wins) &&
+    Object.values(wins).every((n) => Number.isInteger(n) && (n as number) >= 0)
+  );
 }
 
 /** ダンジョンの記録として最低限の形をしているか */
@@ -90,8 +160,16 @@ function looksLikeDungeon(value: unknown): value is DungeonState {
 /** 部隊のデータとして最低限の形をしているか（中身がルールどおりかは progression.ts の validateRoster で確かめる） */
 function looksLikeRoster(value: unknown): value is Roster {
   if (typeof value !== 'object' || value === null) return false;
-  const units = (value as { units?: unknown }).units;
+  const v = value as { units?: unknown; gold?: unknown; items?: unknown; nextItemSeq?: unknown };
+  const units = v.units;
   if (!Array.isArray(units) || units.length === 0) return false;
+  if (typeof v.gold !== 'number' || typeof v.nextItemSeq !== 'number' || !Array.isArray(v.items)) return false;
+  const itemsOk = v.items.every((i: unknown) => {
+    if (typeof i !== 'object' || i === null) return false;
+    const r = i as Record<string, unknown>;
+    return typeof r.uid === 'string' && typeof r.itemId === 'string';
+  });
+  if (!itemsOk) return false;
   return units.every((u: unknown) => {
     if (typeof u !== 'object' || u === null) return false;
     const r = u as Record<string, unknown>;
@@ -105,7 +183,9 @@ function looksLikeRoster(value: unknown): value is Roster {
       typeof r.jobs === 'object' &&
       r.jobs !== null &&
       typeof r.slots === 'object' &&
-      r.slots !== null
+      r.slots !== null &&
+      typeof r.equipment === 'object' &&
+      r.equipment !== null
     );
   });
 }

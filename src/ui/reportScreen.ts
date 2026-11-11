@@ -20,6 +20,16 @@ export interface ReportExtras {
   readonly notes?: readonly string[];
   /** 目立たせる短い文（初めてのクリアなど） */
   readonly highlights?: readonly string[];
+  /**
+   * 手に入れたゴールドと戦利品（フェーズ2-4）。goldTotal は受け取った後の所持金、items は装備の名前。
+   * special は、ボスからの初回の報酬のように目立たせる物（items の後ろに、印を付けて並べる）
+   */
+  readonly spoils?: {
+    readonly gold: number;
+    readonly goldTotal: number;
+    readonly items: readonly string[];
+    readonly special?: readonly string[];
+  };
 }
 
 /** 勝利のボーナスを数え上げる時間（ミリ秒） */
@@ -31,6 +41,7 @@ const BONUS_COUNT_MS = 700;
  * - 「この戦闘で得た合計」: ユニットごとの経験値と JP。勝った時は、戦闘中の分から始めて、勝利のボーナスを数え上げて見せる。
  * - 「レベルが上がったユニット」: キャラクターのレベル（勝利のボーナスで上がった分は、数え上げの後に足す）。
  *   ジョブのレベルが上がったことは、合計の行の名前の横に控えめに添える。
+ * - 「手に入れた物」: 勝った時のゴールドと戦利品（フェーズ2-4。負けた時は「なし」）。
  * - 下のボタン（actions）: 訓練戦なら「拠点へ戻る」、ダンジョンなら「次へ進む」「編成を変える」など。
  * 画面全体はスクロールさせない（横向きと PC は左右2列）。数え上げが終わると、画面の箱に data-done="true" が付く（自動プレイ用）。
  */
@@ -48,7 +59,8 @@ export function showReportScreen(
   box.dataset.screen = 'result';
   const info = el('div', 'screen-col report-info');
   if (extras.heading) info.append(el('p', 'report-heading', extras.heading));
-  const title = el('h1', `screen-title result-title ${report.victory ? 'result-win' : 'result-lose'}`);
+  const long = (extras.title ?? '').length > 6;
+  const title = el('h1', `screen-title result-title ${report.victory ? 'result-win' : 'result-lose'}${long ? ' long' : ''}`);
   title.textContent = extras.title ?? (report.victory ? TEXT.result.player : TEXT.result.enemy);
   info.append(title);
   for (const h of extras.highlights ?? []) info.append(el('p', 'report-highlight', h));
@@ -120,6 +132,25 @@ export function showReportScreen(
 
   // 横向きと PC では、レベルが上がったユニットをボタンと同じ右の列に置く（縦の長さを分ける）
   const menu = el('div', 'screen-col report-actions');
+  if (extras.spoils) {
+    const sp = extras.spoils;
+    const spoils = el('div', 'report-spoils');
+    const special = sp.special ?? [];
+    spoils.dataset.gold = String(sp.gold);
+    spoils.dataset.items = String(sp.items.length + special.length);
+    if (sp.gold > 0 || sp.items.length > 0 || special.length > 0) {
+      spoils.append(el('span', 'report-gold', TEXT.report.goldGain(sp.gold, sp.goldTotal)));
+      for (const name of sp.items) spoils.append(el('span', 'report-chip loot', name));
+      for (const name of special) {
+        const chip = el('span', 'report-chip loot special', TEXT.report.specialItem(name));
+        chip.title = TEXT.report.bossItem(name);
+        spoils.append(chip);
+      }
+    } else {
+      spoils.append(el('span', 'screen-note', TEXT.report.noSpoils));
+    }
+    menu.append(el('h2', 'report-section-title', TEXT.report.spoilsTitle), spoils);
+  }
   menu.append(upsTitle, ups);
   const [first, ...rest] = actions;
   if (first) menu.append(screenButton(first.label, first.onClick, { className: first.primary ? 'primary big' : first.danger ? 'danger big' : 'big' }));

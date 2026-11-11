@@ -31,4 +31,6 @@ export const battleRules: BattleRules = {
   knockback: { fallDamagePercentPerHeight: 8, blockedDamagePercent: 8 },
   /** 罠。落石は最大 HP の 20% のダメージ（切り捨て、最小 1。守りで減る）。ぬかるみの鈍足は status.slow の数値 */
   trap: { rockfallDamagePercent: 20 },
+  /** 武器を装備していない時（素手）の通常攻撃: 隣接マス、高さの差 2 以内（フェーズ2-4） */
+  unarmedAttack: { kind: 'melee', maxHeightDiff: 2 },
 };

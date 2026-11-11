@@ -11,7 +11,7 @@ import type {
   UnitState,
 } from '../core/battleTypes';
 import { attackableTargets, attackRangeTiles, previewAttack, strikeOf, weaponFits, type AttackPreview } from '../core/combat';
-import { isSilencedFor, mpCostOf, passiveIdOf } from '../core/effects';
+import { isSilencedFor, mpCostOf, passiveIdOf, statusBlocker } from '../core/effects';
 import { directionToward, type Coord, type Direction } from '../core/geometry';
 import { chargeArea, hasMpFor, inSpellRange, previewSpellAt, spellOf, spellRangeTiles, targetCenter } from '../core/magic';
 import { reachableTiles, unitAt } from '../core/movement';
@@ -219,7 +219,14 @@ export function createBattleController(start: ActionResult, deps: BattleControll
     if (p.evadePenalty > 0) notes.push(TEXT.preview.evade(abilityName(passiveIdOf(target, 'evade') ?? ''), p.evadePenalty));
     if (p.protectPercent !== 100) notes.push(TEXT.preview.protect(p.protectPercent));
     if (p.interrupts) notes.push(TEXT.preview.interrupts);
-    if (p.inflicts) notes.push(TEXT.preview.inflicts(TEXT.statuses[p.inflicts]));
+    if (p.inflicts) {
+      const blocker = statusBlocker(target, p.inflicts);
+      notes.push(
+        blocker
+          ? TEXT.preview.blocked(TEXT.equipment[blocker.id]?.name ?? blocker.id, TEXT.statuses[p.inflicts])
+          : TEXT.preview.inflicts(TEXT.statuses[p.inflicts]),
+      );
+    }
     if (p.knockback) {
       const kb = p.knockback;
       extraRows.push({
@@ -449,15 +456,21 @@ export function createBattleController(start: ActionResult, deps: BattleControll
                 ? [abilityName(passiveIdOf(u, 'magicShell')!)]
                 : []),
             ];
+            const blocker = spell.effect === 'status' ? statusBlocker(u, spell.inflicts!) : undefined;
             const interrupts =
-              spell.inflicts === 'silence' && u.id !== unit.id && u.charging && spellOf(u, u.charging.spellId).kind === 'magic';
+              !blocker && spell.inflicts === 'silence' && u.id !== unit.id && u.charging && spellOf(u, u.charging.spellId).kind === 'magic';
             return {
               name: unitName(r.unitId, u.jobId),
               team: u.team,
               amount: r.amount,
               hp: r.hp,
               maxHp: u.stats.maxHp,
-              statusText: spell.effect === 'status' ? TEXT.spellPreview.status(TEXT.statuses[spell.inflicts!]) : undefined,
+              statusText:
+                spell.effect !== 'status'
+                  ? undefined
+                  : blocker
+                    ? TEXT.preview.blocked(TEXT.equipment[blocker.id]?.name ?? blocker.id, TEXT.statuses[spell.inflicts!])
+                    : TEXT.spellPreview.status(TEXT.statuses[spell.inflicts!]),
               note:
                 [
                   r.side ? TEXT.spellPreview.angle(TEXT.sides[r.side], TEXT.preview.heightPercent(r.heightPercent ?? 0)) : '',
@@ -563,6 +576,11 @@ export function createBattleController(start: ActionResult, deps: BattleControll
           break;
         case 'statusExpired':
           labels.setStatuses(ev.unitId, statusesAfter(ev.unitId));
+          break;
+        case 'statusBlocked':
+          // 装備で状態変化を防いだ時は、装備の名前と「沈黙を防いだ」を短く表示する
+          labels.popText(ev.unitId, TEXT.equipmentBlocked(TEXT.equipment[ev.itemId]?.name ?? ev.itemId, TEXT.statuses[ev.status]), 'reaction');
+          await view.wait(0.35);
           break;
         case 'reaction':
           // リアクションが発動した時は、アビリティの名前を短く表示する

@@ -1,7 +1,7 @@
 import type { MapDefinition } from '../../../core/map';
 import type { BattleSite } from '../../../core/sortie';
 import { archer, mage, warrior } from '../../jobs';
-import { enemyUnit } from '../enemyUnits';
+import { enemyUnit, kit } from '../enemyUnits';
 
 /**
  * ダンジョン「はじまりの遺跡」第1戦「入口」: 8×8 の小さめのマップ。勝利は敵の全滅。敵は4体（レベル 1、受動的なアビリティなし）。
@@ -48,11 +48,13 @@ export const ruinsEntrance: BattleSite = {
   tiers: [
     {
       id: 'main',
+      // 勝った時の報酬（フェーズ2-4）
+      reward: { gold: 120, loot: [{ itemId: 'spring-boots', percent: 15 }, { itemId: 'mana-charm', percent: 15 }] },
       units: [
-        enemyUnit({ id: 'r1-warrior-1', job: warrior, x: 3, z: 2, level: 1 }),
-        enemyUnit({ id: 'r1-archer-1', job: archer, x: 1, z: 0, level: 1 }),
-        enemyUnit({ id: 'r1-warrior-2', job: warrior, x: 4, z: 2, level: 1 }),
-        enemyUnit({ id: 'r1-mage-1', job: mage, x: 6, z: 0, level: 1, abilities: ['wind'] }),
+        enemyUnit({ id: 'r1-warrior-1', job: warrior, x: 3, z: 2, level: 1, equipment: kit(warrior, 1) }),
+        enemyUnit({ id: 'r1-archer-1', job: archer, x: 1, z: 0, level: 1, equipment: kit(archer, 1) }),
+        enemyUnit({ id: 'r1-warrior-2', job: warrior, x: 4, z: 2, level: 1, equipment: kit(warrior, 1) }),
+        enemyUnit({ id: 'r1-mage-1', job: mage, x: 6, z: 0, level: 1, abilities: ['wind'], equipment: kit(mage, 1) }),
       ],
     },
   ],

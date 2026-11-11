@@ -11,10 +11,16 @@
  * - 最大 HP・移動力・ジャンプ力を変えるもの（重装・早足・身軽）は、戦闘の開始時に能力値へ反映する。
  * - それ以外（反撃・身かわし・魔力の殻・瞑想・集中・早口・節約）は、その場面の計算で効く。
  *
- * 数値は src/data から受け取る（BattleRules.status と、受動的なアビリティの定義）。計算はすべて整数で、端数は切り捨て。
+ * 装備の効果（フェーズ2-4。主に装飾品）:
+ * - 状態変化を防ぐ（その状態変化が付かない）。
+ * - 詠唱中に受けるダメージの増加を打ち消す。
+ *
+ * 数値は src/data から受け取る（BattleRules.status と、受動的なアビリティ・装備の定義）。計算はすべて整数で、端数は切り捨て。
  */
 import type {
   BattleRules,
+  EquipmentDefinition,
+  EquipmentEffect,
   PassiveDefinition,
   PassiveEffect,
   SpellDefinition,
@@ -72,6 +78,32 @@ export function passiveIdOf(unit: Pick<UnitState, 'passives'>, kind: PassiveEffe
   return unit.passives.find((p) => p.effect.kind === kind)?.id;
 }
 
+/** 装備の特別な効果のうち、種類が kind のものを持つ装備（なければ undefined） */
+export function equipmentWithEffect(
+  unit: { readonly equipment?: readonly EquipmentDefinition[] },
+  match: (e: EquipmentEffect) => boolean,
+): EquipmentDefinition | undefined {
+  return (unit.equipment ?? []).find((item) => (item.effects ?? []).some(match));
+}
+
+/** 装備でその状態変化を防ぐ時は、防いだ装備（なければ undefined） */
+export function statusBlocker(
+  unit: { readonly equipment?: readonly EquipmentDefinition[] },
+  status: StatusId,
+): EquipmentDefinition | undefined {
+  return equipmentWithEffect(unit, (e) => e.kind === 'statusImmunity' && e.status === status);
+}
+
+/** 詠唱中のユニットが受けるダメージの倍率（%）。詠唱中でない時と、装備で打ち消している時は 100 */
+export function chargingPercentOf(
+  rules: BattleRules,
+  target: Pick<UnitState, 'charging'> & { readonly equipment?: readonly EquipmentDefinition[] },
+): number {
+  if (!target.charging) return 100;
+  if (equipmentWithEffect(target, (e) => e.kind === 'steadyCasting')) return 100;
+  return rules.chargingDamagePercent;
+}
+
 /** 戦闘の開始時の能力値に、受動的なアビリティ（重装・早足・身軽）を反映する */
 export function applyPassiveStats(stats: UnitStats, passives: readonly PassiveDefinition[]): UnitStats {
   let result = stats;
@@ -109,17 +141,17 @@ export function castSpeedOf(unit: Pick<UnitState, 'passives'>, spell: SpellDefin
 }
 
 /**
- * 受けるダメージの最終的な値。元のダメージに、詠唱中の倍率 → 守り → 魔力の殻（魔法の時だけ）の順に掛けて、
+ * 受けるダメージの最終的な値。元のダメージに、詠唱中の倍率（装備で打ち消せる） → 守り → 魔力の殻（魔法の時だけ）の順に掛けて、
  * そのたびに切り捨てる。最後に最小値（rules.minimumDamage）を下回らないようにする。
  */
 export function damageTaken(
   rules: BattleRules,
-  target: Pick<UnitState, 'charging' | 'statuses' | 'passives'>,
+  target: Pick<UnitState, 'charging' | 'statuses' | 'passives'> & { readonly equipment?: readonly EquipmentDefinition[] },
   amount: number,
   options: { magical?: boolean; ignoreCharging?: boolean } = {},
 ): number {
   let d = amount;
-  if (target.charging && !options.ignoreCharging) d = Math.floor((d * rules.chargingDamagePercent) / 100);
+  if (!options.ignoreCharging) d = Math.floor((d * chargingPercentOf(rules, target)) / 100);
   if (hasStatus(target, 'protect')) d = Math.floor((d * rules.status.protect.damageTakenPercent) / 100);
   const shell = options.magical ? passiveEffect(target, 'magicShell') : undefined;
   if (shell) d = Math.floor((d * shell.damageTakenPercent) / 100);
