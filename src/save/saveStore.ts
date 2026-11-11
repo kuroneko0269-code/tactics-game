@@ -1,5 +1,5 @@
 /**
- * セーブの出入口。部隊の状態の保存・読み込み・消去は、すべてここを通す。
+ * セーブの出入口。部隊の状態とダンジョンの記録の保存・読み込み・消去は、すべてここを通す。
  *
  * 今は端末の中（ブラウザの localStorage）に保存する。フェーズ6 でサーバーに保存先を切り替える時は、
  * SaveBackend を差し替えるだけで済むようにしている（画面や戦闘の処理は、保存先を知らない）。
@@ -7,6 +7,7 @@
  */
 import { createSaveData, migrateSaveData, type LoadFailure } from '../core/saveData';
 import { validateRoster, type GameCatalog, type ProgressionRules, type Roster } from '../core/progression';
+import type { DungeonState } from '../core/dungeon';
 
 /** 保存先。文字列を1つ読み書きできればよい */
 export interface SaveBackend {
@@ -15,10 +16,16 @@ export interface SaveBackend {
   remove(): void;
 }
 
+/** 保存するもの: 部隊の育成の状態と、ダンジョンの進み具合・クリアの記録 */
+export interface GameSave {
+  readonly roster: Roster;
+  readonly dungeon: DungeonState;
+}
+
 export interface SaveStore {
-  /** 保存してある部隊。なければ（または読めなければ）undefined */
-  load(): Roster | undefined;
-  save(roster: Roster): void;
+  /** 保存してある部隊とダンジョンの記録。なければ（または読めなければ）undefined */
+  load(): GameSave | undefined;
+  save(save: GameSave): void;
   /** 保存してあるデータを消す（「はじめから」） */
   clear(): void;
 }
@@ -85,10 +92,10 @@ export function createSaveStore(
         onLoadFailure('invalidRoster');
         return undefined;
       }
-      return result.data.roster;
+      return { roster: result.data.roster, dungeon: result.data.dungeon };
     },
-    save(roster) {
-      backend.write(JSON.stringify(createSaveData(roster)));
+    save({ roster, dungeon }) {
+      backend.write(JSON.stringify(createSaveData(roster, dungeon)));
     },
     clear() {
       backend.remove();

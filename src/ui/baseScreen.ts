@@ -3,7 +3,8 @@ import { TEXT } from './text';
 
 /**
  * 拠点の画面（仮の見た目）: 「出撃」「編成」と「はじめから」。
- * 出撃を押すと、訓練戦（敵の強さの段階を選ぶ）とダンジョン（戦闘を選ぶ）のどちらに行くかを選ぶ。
+ * 出撃を押すと、訓練戦（敵の強さの段階を選ぶ）とダンジョン（3連戦に挑む・再開する）のどちらに行くかを選ぶ。
+ * ダンジョンをクリアしたことがあれば、拠点の画面にクリアの回数を出す。
  * はじめからは、確認してから部隊を最初の状態に戻す。
  */
 export interface BaseScreenHandlers {
@@ -12,9 +13,11 @@ export interface BaseScreenHandlers {
   readonly tiers: readonly { readonly id: string; readonly level: number }[];
   /** ダンジョン。battles は第1戦から順に、マップの id と勝利条件の短い説明 */
   readonly dungeon: { readonly id: string; readonly battles: readonly { readonly mapId: string; readonly objective: string }[] };
+  /** ダンジョンの今の記録（挑戦中なら次の戦闘の番号（0 から）、クリアの回数） */
+  dungeonStatus(): { readonly nextBattle: number | null; readonly clears: number };
   onSortie(tierId: string): void;
-  /** ダンジョンの index 番目（0 から）の戦闘に出撃する */
-  onDungeonBattle(index: number): void;
+  /** ダンジョンに挑む。fresh なら第1戦から（挑戦中のものはやめる）、そうでなければ挑戦中の戦闘から再開 */
+  onDungeon(fresh: boolean): void;
   onRoster(): void;
   onNewGame(): void;
 }
@@ -24,11 +27,12 @@ export interface BaseScreen {
 }
 
 export function createBaseScreen(root: HTMLElement, handlers: BaseScreenHandlers): BaseScreen {
-  const render = (view: 'menu' | 'sortie' | 'tiers' | 'dungeon' | 'confirm') => {
+  const render = (view: 'menu' | 'sortie' | 'tiers' | 'dungeon' | 'restart' | 'confirm') => {
     root.innerHTML = '';
     root.hidden = false;
     const box = el('div', 'screen-box base-screen');
-    box.dataset.screen = view === 'menu' || view === 'confirm' ? 'base' : view === 'sortie' ? 'sortie' : view;
+    box.dataset.screen = view === 'menu' || view === 'confirm' ? 'base' : view;
+    const status = handlers.dungeonStatus();
     const dungeonName = TEXT.dungeons[handlers.dungeon.id] ?? handlers.dungeon.id;
     if (view === 'sortie') {
       box.append(el('h1', 'screen-title', TEXT.base.sortie));
@@ -44,17 +48,38 @@ export function createBaseScreen(root: HTMLElement, handlers: BaseScreenHandlers
       box.append(menu, screenButton(TEXT.base.back, () => render('menu')));
     } else if (view === 'dungeon') {
       box.append(el('h1', 'screen-title', dungeonName));
-      box.append(el('p', 'screen-note', TEXT.base.chooseBattle(dungeonName)));
-      const menu = el('div', 'screen-menu');
+      box.append(el('p', 'screen-note', TEXT.base.dungeonIntro));
+      box.append(el('p', 'dungeon-record', TEXT.base.clears(status.clears)));
+      const list = el('ol', 'dungeon-battles');
       handlers.dungeon.battles.forEach((b, i) => {
-        menu.append(
-          screenButton(TEXT.base.battleLabel(i + 1, TEXT.mapNames[b.mapId] ?? b.mapId), () => handlers.onDungeonBattle(i), {
-            className: 'big tier',
-            sub: TEXT.base.battleHelp(b.objective),
-          }),
-        );
+        const li = el('li', status.nextBattle === i ? 'current' : '');
+        li.append(el('strong', '', TEXT.base.battleLabel(i + 1, TEXT.mapNames[b.mapId] ?? b.mapId)), el('span', '', TEXT.base.battleHelp(b.objective)));
+        list.append(li);
       });
+      box.append(list);
+      const menu = el('div', 'screen-menu');
+      if (status.nextBattle !== null) {
+        const b = handlers.dungeon.battles[status.nextBattle]!;
+        menu.append(
+          screenButton(TEXT.base.resume(status.nextBattle + 1, TEXT.mapNames[b.mapId] ?? b.mapId), () => handlers.onDungeon(false), {
+            className: 'primary big',
+            sub: TEXT.base.inProgress(status.nextBattle + 1),
+          }),
+          screenButton(TEXT.base.restart, () => render('restart')),
+        );
+      } else {
+        menu.append(screenButton(TEXT.base.challenge, () => handlers.onDungeon(true), { className: 'primary big' }));
+      }
       box.append(menu, screenButton(TEXT.base.back, () => render('sortie')));
+    } else if (view === 'restart') {
+      box.append(el('h1', 'screen-title', dungeonName));
+      box.append(el('p', 'screen-warning', TEXT.base.confirmRestart));
+      const menu = el('div', 'screen-menu');
+      menu.append(
+        screenButton(TEXT.base.cancel, () => render('dungeon')),
+        screenButton(TEXT.base.confirmRestartYes, () => handlers.onDungeon(true), { className: 'danger' }),
+      );
+      box.append(menu);
     } else if (view === 'menu') {
       box.append(el('h1', 'screen-title', TEXT.base.title));
       const menu = el('div', 'screen-menu');
@@ -62,7 +87,10 @@ export function createBaseScreen(root: HTMLElement, handlers: BaseScreenHandlers
         screenButton(TEXT.base.sortie, () => render('sortie'), { className: 'primary big' }),
         screenButton(TEXT.base.roster, () => handlers.onRoster(), { className: 'big' }),
       );
-      box.append(menu, el('p', 'screen-note', TEXT.base.saved));
+      box.append(menu);
+      if (status.clears > 0) box.append(el('p', 'dungeon-cleared', TEXT.base.clearedBadge(dungeonName, status.clears)));
+      else if (status.nextBattle !== null) box.append(el('p', 'screen-note', `${dungeonName}: ${TEXT.base.inProgress(status.nextBattle + 1)}`));
+      box.append(el('p', 'screen-note', TEXT.base.saved));
       box.append(screenButton(TEXT.base.newGame, () => render('confirm'), { className: 'quiet' }));
     } else if (view === 'tiers') {
       box.append(el('h1', 'screen-title', TEXT.base.sortie));

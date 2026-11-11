@@ -11,6 +11,16 @@ import {
   type Roster,
 } from './core/progression';
 import { createMap, type MapDefinition } from './core/map';
+import {
+  clearCount,
+  EMPTY_DUNGEON_STATE,
+  finishRunBattle,
+  grantClearReward,
+  normalizeDungeonState,
+  retreat,
+  startRun,
+  type DungeonState,
+} from './core/dungeon';
 import { buildSortie, type BattleSite } from './core/sortie';
 import { strikes, spells } from './data/abilities';
 import { passives } from './data/passives';
@@ -43,9 +53,10 @@ import { createUnitLabels, type UnitLabels } from './ui/unitLabels';
  * 入口。定義データ（data）を戦闘ルールと育成の計算（core）に渡し、
  * 3D 表示（render）と画面（ui）、保存（save）を組み立てる。
  *
- * 画面の流れ: 拠点 →（出撃: 訓練戦なら敵の強さ、ダンジョンなら戦闘を選ぶ）→ 出撃前の配置 → 戦闘 → 結果 → 拠点。
- * 拠点 →（編成）→ 拠点。
- * 部隊の状態は、戦闘が終わった時と編成を変えた時に、端末へ自動で保存する。
+ * 画面の流れ: 拠点 →（出撃: 訓練戦なら敵の強さを選ぶ）→ 出撃前の配置 → 戦闘 → 結果 → 拠点。拠点 →（編成）→ 拠点。
+ * ダンジョン: 拠点 →（出撃: 挑む・再開する）→ 配置 → 戦闘 → 戦闘の間（結果・編成）→ 次の戦闘 … → クリアの画面 → 拠点。
+ * 負けたら、やり直すか撤退するかを選ぶ。
+ * 部隊の状態とダンジョンの進み具合は、戦闘が終わった時と編成を変えた時に、端末へ自動で保存する（戦闘の途中は保存しない）。
  */
 type ScreenName = 'base' | 'roster' | 'deploy' | 'battle' | 'result';
 
@@ -76,10 +87,18 @@ function main(): void {
     console.warn(`セーブデータを読み込めませんでした（${reason}）。はじめからにします`),
   );
   if (validateRoster(initialRoster, catalog, progressionRules).length > 0) throw new Error('最初の部隊の定義が正しくありません');
-  let roster: Roster = store.load() ?? initialRoster;
+  const loaded = store.load();
+  let roster: Roster = loaded?.roster ?? initialRoster;
+  /** ダンジョンの進み具合とクリアの記録（戦闘の間で保存する） */
+  let dungeonState: DungeonState = normalizeDungeonState(loaded?.dungeon ?? EMPTY_DUNGEON_STATE, [ruinsDungeon]);
+  const persist = () => store.save({ roster, dungeon: dungeonState });
   const updateRoster = (next: Roster) => {
     roster = next;
-    store.save(roster);
+    persist();
+  };
+  const updateDungeon = (next: DungeonState) => {
+    dungeonState = next;
+    persist();
   };
 
   // シード値（乱数の種）。URL に ?seed=123 と付けると、最初の戦闘を再現できる
@@ -119,6 +138,8 @@ function main(): void {
     view.setOverlays(tiles);
   };
   let battle: ActiveBattle | undefined;
+  /** 開発中だけ: 今の戦闘が決着した時に呼ぶ処理（自動プレイで、ダンジョンの流れを確かめる時に決着を早める） */
+  let currentFinish: ((state: BattleState) => void) | undefined;
   const setScreen = (name: ScreenName) => {
     screen = name;
     document.body.dataset.screen = name;
@@ -151,23 +172,35 @@ function main(): void {
         objective: (b.objectives?.victory ?? [{ kind: 'defeatAll' as const }]).map((c) => victoryText(c)).join('／'),
       })),
     },
-    onSortie: (tierId) => startSortie(site, tierId),
-    onDungeonBattle: (index) => startSortie(ruinsDungeon.battles[index]!, 'main'),
-    onRoster: () => {
-      setScreen('roster');
-      rosterScreen.show();
+    dungeonStatus: () => ({
+      nextBattle: dungeonState.run?.dungeonId === ruinsDungeon.id ? dungeonState.run.battle : null,
+      clears: clearCount(dungeonState, ruinsDungeon.id),
+    }),
+    onSortie: (tierId) => startSortie(site, tierId, finishBattle),
+    onDungeon: (fresh) => {
+      if (fresh || dungeonState.run?.dungeonId !== ruinsDungeon.id) updateDungeon(startRun(dungeonState, ruinsDungeon.id));
+      playDungeonBattle();
     },
+    onRoster: () => showRoster(showBase),
     onNewGame: () => {
       store.clear();
       roster = initialRoster;
+      dungeonState = EMPTY_DUNGEON_STATE;
     },
   });
+  /** 編成の画面の「戻る」の行き先（拠点か、ダンジョンの戦闘の間の画面） */
+  let rosterReturn: () => void = () => showBase();
+  const showRoster = (back: () => void) => {
+    rosterReturn = back;
+    setScreen('roster');
+    rosterScreen.show();
+  };
   const rosterScreen = createRosterScreen(screenEl, {
     catalog,
     rules: progressionRules,
     roster: () => roster,
     update: updateRoster,
-    onBack: () => showBase(),
+    onBack: () => rosterReturn(),
   });
   const showBase = () => {
     endBattle();
@@ -175,27 +208,108 @@ function main(): void {
     base.show();
   };
 
-  /** 戦闘が終わった: 経験値と JP を部隊に反映して保存し、結果の画面を出す */
+  const jobOf = (id: string) => findUnit(roster, id).jobId;
+  const canLearn = (id: string) => {
+    const u = findUnit(roster, id);
+    const job = catalog.jobs.find((j) => j.id === u.jobId)!;
+    return [...(job.abilities ?? []), ...(job.passives ?? [])].some(
+      (a) => learnRefusal(u, job.id, a.id, catalog, progressionRules) === null,
+    );
+  };
+  /** 勝敗の表示を少し見せてから、結果の画面へ */
+  const afterResultPause = (fn: () => void) =>
+    window.setTimeout(() => {
+      endBattle();
+      fn();
+    }, 1200);
+
+  /** 訓練戦が終わった: 経験値と JP を部隊に反映して保存し、結果の画面を出す */
   const finishBattle = (state: BattleState) => {
     const result = applyBattleResult(roster, state, catalog, progressionRules);
     updateRoster(result.roster);
-    const jobOf = (id: string) => findUnit(roster, id).jobId;
-    const canLearn = (id: string) => {
-      const u = findUnit(roster, id);
-      const job = catalog.jobs.find((j) => j.id === u.jobId)!;
-      return [...(job.abilities ?? []), ...(job.passives ?? [])].some(
-        (a) => learnRefusal(u, job.id, a.id, catalog, progressionRules) === null,
-      );
-    };
-    // 勝敗の表示を少し見せてから、結果の画面へ
-    window.setTimeout(() => {
+    afterResultPause(() => {
       setScreen('result');
-      showReportScreen(screenEl, result.report, jobOf, canLearn, showBase);
-    }, 1200);
+      showReportScreen(screenEl, result.report, jobOf, canLearn, [{ label: TEXT.report.toBase, onClick: showBase, primary: true }]);
+    });
+  };
+
+  /** ダンジョンの挑戦中の戦闘に出撃する */
+  const playDungeonBattle = () => {
+    const run = dungeonState.run;
+    if (!run) return showBase();
+    startSortie(ruinsDungeon.battles[run.battle]!, 'main', finishDungeonBattle);
+  };
+  const battleTitle = (index: number) => {
+    const b = ruinsDungeon.battles[index]!;
+    return { n: index + 1, mapName: TEXT.mapNames[b.map.id] ?? b.map.id };
+  };
+
+  /**
+   * ダンジョンの戦闘が終わった: 経験値と JP を反映し、進み具合を進めて保存してから、戦闘の間の画面を出す。
+   * 勝てば「次へ進む」「編成を変える」「拠点へ戻る（続きは次回）」、負ければ「やり直す」「編成を変える」「撤退」。
+   * 最後の戦闘に勝てば、クリアの報酬（JP）を配って記録し、クリアの画面を出す。
+   */
+  const finishDungeonBattle = (state: BattleState) => {
+    const played = dungeonState.run!.battle;
+    const result = applyBattleResult(roster, state, catalog, progressionRules);
+    const progress = finishRunBattle(dungeonState, ruinsDungeon, result.report.victory);
+    roster = progress.outcome.kind === 'cleared' ? grantClearReward(result.roster, ruinsDungeon) : result.roster;
+    dungeonState = progress.state;
+    persist();
+    const outcome = progress.outcome;
+    const t = battleTitle(played);
+    const dungeonName = TEXT.dungeons[ruinsDungeon.id] ?? ruinsDungeon.id;
+    const show = () => {
+      setScreen('result');
+      const heading = TEXT.report.dungeonTitle(t.n, t.mapName);
+      if (outcome.kind === 'cleared') {
+        showReportScreen(screenEl, result.report, jobOf, canLearn, [{ label: TEXT.report.toBase, onClick: showBase, primary: true }], {
+          heading,
+          title: TEXT.report.clearTitle(dungeonName),
+          highlights: [...(outcome.firstClear ? [TEXT.report.firstClear] : []), TEXT.report.reward(ruinsDungeon.clearRewardJp)],
+          notes: [],
+        });
+      } else if (outcome.kind === 'next') {
+        const next = battleTitle(outcome.battle);
+        showReportScreen(
+          screenEl,
+          result.report,
+          jobOf,
+          canLearn,
+          [
+            { label: TEXT.report.next(next.n, next.mapName), onClick: playDungeonBattle, primary: true },
+            { label: TEXT.report.editRoster, onClick: () => showRoster(show) },
+            { label: TEXT.report.suspend, onClick: showBase },
+          ],
+          { heading, notes: [TEXT.report.healed] },
+        );
+      } else {
+        showReportScreen(
+          screenEl,
+          result.report,
+          jobOf,
+          canLearn,
+          [
+            { label: TEXT.report.retry, onClick: playDungeonBattle, primary: true },
+            { label: TEXT.report.editRoster, onClick: () => showRoster(show) },
+            {
+              label: TEXT.report.retreat,
+              danger: true,
+              onClick: () => {
+                updateDungeon(retreat(dungeonState));
+                showBase();
+              },
+            },
+          ],
+          { heading, notes: [TEXT.report.lostNote] },
+        );
+      }
+    };
+    afterResultPause(show);
   };
 
   /** 出撃: 出撃前の配置の画面を出し、「戦闘開始」で戦闘を始める */
-  const startSortie = (target: BattleSite, tierId: string) => {
+  const startSortie = (target: BattleSite, tierId: string, onFinished: (state: BattleState) => void) => {
     endBattle();
     const seed = nextSeed;
     nextSeed = randomSeed();
@@ -219,7 +333,8 @@ function main(): void {
         setScreen('battle');
         const start = begin(final);
         shell.view.sync(start.state);
-        active.controller = createController(shell, start, finishBattle);
+        active.controller = createController(shell, start, onFinished);
+        currentFinish = onFinished;
       },
     });
   };
@@ -325,6 +440,20 @@ function main(): void {
       screen: () => screen,
       /** 部隊の状態 */
       roster: () => roster,
+      /** ダンジョンの進み具合とクリアの記録 */
+      dungeon: () => dungeonState,
+      /**
+       * 今の戦闘を、指定した陣営の勝ちで終わらせる（ダンジョンの流れ（戦闘の間・やり直し・クリア）を短い時間で確かめるため）。
+       * ここまでに行った行動の経験値と JP は入る
+       */
+      finishBattle: (winner: 'player' | 'enemy') => {
+        const st = battle?.controller?.state;
+        const finish = currentFinish;
+        if (!st || !finish) throw new Error('戦闘中ではありません');
+        battle!.controller!.dispose();
+        currentFinish = undefined;
+        finish({ ...st, winner, turn: null });
+      },
       state: () => battle?.controller?.state ?? null,
       mode: () => (battle?.deploy ? 'deploy' : (battle?.controller?.mode ?? 'none')),
       modeDetail: () => battle?.controller?.modeDetail ?? { kind: 'none' },
@@ -354,6 +483,7 @@ function main(): void {
         useMap(mapDefinitionOf(result.state.map.id));
         setScreen('battle');
         // 確認用の場面なので、決着しても部隊には反映しない
+        currentFinish = undefined;
         battle = createActiveBattle(result, () => {});
       },
     };

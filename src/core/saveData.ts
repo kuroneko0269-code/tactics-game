@@ -6,17 +6,24 @@
  *   読み込む時は、古い版から順に直して、今の版の形にする。
  * - 保存先（端末の中か、将来のサーバーか）は扱わない。保存と読み込みの出入口は src/save/saveStore.ts。
  *   ここはブラウザの機能を使わない計算だけなので、将来サーバーでもそのまま使える。
- * - 戦闘の途中の状態は保存しない（部隊の育成の状態だけ）。
+ * - 戦闘の途中の状態は保存しない（部隊の育成の状態と、ダンジョンの進み具合・クリアの記録だけ）。
+ *
+ * 版の歴史:
+ * - 版 1（フェーズ2-1a）: 部隊（roster）だけ。
+ * - 版 2（フェーズ2-2b）: ダンジョンの記録（dungeon。挑戦中のダンジョンと次の戦闘、クリアの回数）を追加。
+ *   版 1 のデータは「挑戦中なし、クリアなし」として直す（部隊はそのまま）。
  */
+import type { DungeonState } from './dungeon';
 import type { Roster } from './progression';
 
 /** 今のセーブデータの版 */
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 
 /** セーブデータ（今の版の形） */
 export interface SaveData {
   readonly version: number;
   readonly roster: Roster;
+  readonly dungeon: DungeonState;
 }
 
 /**
@@ -25,11 +32,13 @@ export interface SaveData {
  */
 export type SaveMigrations = Readonly<Record<number, (old: Record<string, unknown>) => Record<string, unknown>>>;
 
-/** 版 1 が最初の版なので、今は直す処理はない */
-export const SAVE_MIGRATIONS: SaveMigrations = {};
+export const SAVE_MIGRATIONS: SaveMigrations = {
+  /** 版 1 → 2: ダンジョンの記録を足す（挑戦中なし、クリアなし） */
+  1: (old) => ({ ...old, version: 2, dungeon: { run: null, clears: {} } }),
+};
 
-export function createSaveData(roster: Roster): SaveData {
-  return { version: SAVE_VERSION, roster };
+export function createSaveData(roster: Roster, dungeon: DungeonState): SaveData {
+  return { version: SAVE_VERSION, roster, dungeon };
 }
 
 /** 読み込みに失敗した理由（画面ではなく、開発者向けの記録に使う） */
@@ -55,7 +64,27 @@ export function migrateSaveData(
     data = step(data);
   }
   if (!looksLikeRoster(data.roster)) return { ok: false, reason: 'badShape' };
-  return { ok: true, data: { version: currentVersion, roster: data.roster }, migratedFrom: from };
+  if (!looksLikeDungeon(data.dungeon)) return { ok: false, reason: 'badShape' };
+  return { ok: true, data: { version: currentVersion, roster: data.roster, dungeon: data.dungeon }, migratedFrom: from };
+}
+
+/** ダンジョンの記録として最低限の形をしているか */
+function looksLikeDungeon(value: unknown): value is DungeonState {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Record<string, unknown>;
+  const run = v.run;
+  const runOk =
+    run === null ||
+    (typeof run === 'object' &&
+      typeof (run as Record<string, unknown>).dungeonId === 'string' &&
+      Number.isInteger((run as Record<string, unknown>).battle));
+  const clears = v.clears;
+  const clearsOk =
+    typeof clears === 'object' &&
+    clears !== null &&
+    !Array.isArray(clears) &&
+    Object.values(clears).every((n) => Number.isInteger(n) && (n as number) >= 0);
+  return runOk && clearsOk;
 }
 
 /** 部隊のデータとして最低限の形をしているか（中身がルールどおりかは progression.ts の validateRoster で確かめる） */
