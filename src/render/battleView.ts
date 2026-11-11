@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import type { BattleEvent, BattleState, SpellElement, Team } from '../core/battleTypes';
+import type { BattleEvent, BattleState, SpellElement, Team, TrapKind, UnitState } from '../core/battleTypes';
 import { DIRECTION_VECTORS, DIRECTIONS, type Coord, type Direction } from '../core/geometry';
-import type { MapView, ReservedTile, TileCoord, TileMark } from './mapView';
+import type { MapView, OverlayTile, ReservedTile, TileCoord, TileMark } from './mapView';
 import { createPuppet, YAW_OF, type Puppet, type PuppetLook } from './puppet';
 import { judgeTap, type TapCandidates, type TapHit } from './tapJudge';
 import { createTweens, easeInOut, easeOutCubic } from './tweens';
@@ -57,6 +57,12 @@ export interface BattleView {
   /** ユニットの体の中ほどの画面座標（px）。自動テスト用 */
   unitScreenPosition(unitId: string): { x: number; y: number };
   update(deltaSeconds: number, elapsedSeconds: number): void;
+  /** 戦闘の間ずっと出しておく目印（到達するマス・増援の予告・見えている罠） */
+  setOverlays(tiles: readonly OverlayTile[]): void;
+  /** 増援が現れる（その場に光りながら浮かび上がる） */
+  animateAppear(unit: UnitState): Promise<void>;
+  /** 罠が発動する（落石は上から岩が落ち、ぬかるみと脱力の罠はマスとユニットが光る） */
+  animateTrap(event: Extract<BattleEvent, { type: 'trapTriggered' }>): Promise<void>;
   /** ユニットや目印をシーンから取り除く（戦闘を終えて拠点へ戻る時） */
   dispose(): void;
 }
@@ -79,6 +85,8 @@ export const ELEMENT_COLORS: Record<SpellElement, number> = {
   light: 0xffe56b,
   none: 0xd9d9d9,
 };
+/** 罠が発動した時の光の色（ぬかるみは土色、脱力の罠は紫） */
+const TRAP_COLORS: Record<TrapKind, number> = { rockfall: 0x8c7b6a, mud: 0x8a5a24, drain: 0xb04df0 };
 const HEAD_HEIGHT = 1.05;
 /**
  * タップした点の周りで調べる点（px）。指の太さぶんのずれを考え、タップした点のマスが選べない時に、
@@ -108,7 +116,8 @@ export function createBattleView(options: {
   const tweens = createTweens();
   const visuals = new Map<string, UnitVisual>();
 
-  for (const unit of options.initial.units) {
+  /** ユニットの見た目を作る（戦闘の開始時と、増援が現れた時） */
+  const addVisual = (unit: Pick<UnitState, 'id' | 'jobId' | 'team' | 'x' | 'z' | 'facing'>) => {
     const look = JOB_LOOKS[unit.jobId] ?? JOB_LOOKS.warrior!;
     const puppet = createPuppet({ ...look, body: TEAM_COLORS[unit.team].body });
     puppet.group.add(teamRing(TEAM_COLORS[unit.team].ring));
@@ -124,8 +133,12 @@ export function createBattleView(options: {
     chargeRing.raycast = () => {};
     puppet.group.add(chargeRing);
     scene.add(puppet.group);
-    visuals.set(unit.id, { puppet, coord: { x: unit.x, z: unit.z }, alive: true, chargeRing });
-  }
+    const v: UnitVisual = { puppet, coord: { x: unit.x, z: unit.z }, alive: true, chargeRing };
+    visuals.set(unit.id, v);
+    place(v, unit);
+    puppet.setFacing(unit.facing);
+    return v;
+  };
 
   // 魔法の発動の光の柱（マスごとに使い回す）
   const burstGeometry = new THREE.CylinderGeometry(0.42, 0.42, 1, 12, 1, true);
@@ -154,6 +167,13 @@ export function createBattleView(options: {
     v.puppet.group.position.copy(mapView.tileTop(c.x, c.z));
     v.puppet.group.userData.tileCoord = { x: c.x, z: c.z } satisfies TileCoord;
   };
+
+  for (const unit of options.initial.units) addVisual(unit);
+
+  // 落石の岩（使い回す）
+  const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.22), new THREE.MeshLambertMaterial({ color: 0x7d6f60 }));
+  rock.visible = false;
+  scene.add(rock);
 
   // 手番のユニットの頭上で上下する目印
   const activeMarker = new THREE.Mesh(
@@ -262,7 +282,7 @@ export function createBattleView(options: {
     },
     sync(state) {
       for (const unit of state.units) {
-        const v = visual(unit.id);
+        const v = visuals.get(unit.id) ?? addVisual(unit);
         place(v, unit);
         v.puppet.setFacing(unit.facing);
         v.alive = unit.hp > 0;
@@ -277,6 +297,44 @@ export function createBattleView(options: {
       }
     },
     setMarks: (marks) => mapView.setMarks(marks),
+    setOverlays: (tiles) => mapView.setOverlays(tiles),
+    async animateAppear(unit) {
+      const v = visuals.get(unit.id) ?? addVisual(unit);
+      place(v, unit);
+      v.alive = unit.hp > 0;
+      v.puppet.group.visible = true;
+      const glow = new THREE.Color(0xffffff);
+      await tweens.play(0.5, (t) => {
+        v.puppet.setOpacity(t);
+        v.puppet.body.position.y = 0.4 * (1 - easeOutCubic(t));
+        v.puppet.setGlow(glow, 1 - t);
+      });
+      v.puppet.body.position.y = 0;
+      v.puppet.setOpacity(1);
+      v.puppet.setGlow(glow, 0);
+    },
+    async animateTrap(event) {
+      const top = mapView.tileTop(event.x, event.z);
+      const v = event.unitId ? visual(event.unitId) : undefined;
+      if (event.trap === 'rockfall') {
+        rock.visible = true;
+        await tweens.play(0.35, (t) => {
+          rock.position.set(top.x, top.y + 0.5 + 2.2 * (1 - t * t), top.z);
+          rock.rotation.set(t * 4, t * 3, 0);
+        });
+        rock.visible = false;
+        if (v) await tweens.play(0.3, (t) => v.puppet.setFlash(1 - t));
+        return;
+      }
+      if (!v) return void (await tweens.wait(0.3));
+      const color = new THREE.Color(TRAP_COLORS[event.trap]);
+      await tweens.play(0.6, (t) => {
+        v.puppet.setGlow(color, Math.sin(Math.PI * t));
+        v.puppet.body.position.y = -0.08 * Math.sin(Math.PI * t);
+      });
+      v.puppet.setGlow(color, 0);
+      v.puppet.body.position.y = 0;
+    },
     setReserved(tiles) {
       mapView.setReserved(tiles.map((t): ReservedTile => ({ x: t.x, z: t.z, color: ELEMENT_COLORS[t.element] })));
     },
@@ -520,9 +578,10 @@ export function createBattleView(options: {
     dispose() {
       for (const v of visuals.values()) scene.remove(v.puppet.group);
       for (const m of bursts) scene.remove(m);
-      scene.remove(activeMarker, arrowGroup, projectile);
+      scene.remove(activeMarker, arrowGroup, projectile, rock);
       mapView.setMarks([]);
       mapView.setReserved([]);
+      mapView.setOverlays([]);
     },
   };
 }

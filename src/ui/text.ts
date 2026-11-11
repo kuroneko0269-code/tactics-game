@@ -14,7 +14,74 @@ export const TEXT = {
 
   mapNames: {
     'twin-hills': 'ふたつの丘',
+    'ruins-entrance': '入口',
+    'ruins-corridor': '崩れた回廊',
+    'ruins-altar': '祭壇の間',
   } as Readonly<Record<string, string>>,
+
+  /** ダンジョンの名前（名称は仮） */
+  dungeons: {
+    ruins: 'はじまりの遺跡',
+  } as Readonly<Record<string, string>>,
+
+  /** 勝敗条件の表示（フェーズ2-2） */
+  objectives: {
+    title: '勝敗条件',
+    open: '勝敗条件を見る',
+    close: '閉じる',
+    victory: '勝利',
+    defeat: '敗北',
+    notes: 'ほか',
+    /** 常に出す短い文の先頭 */
+    summaryVictory: (text: string) => `勝利: ${text}`,
+    defeatAll: '敵の全滅',
+    defeatUnit: (name: string) => `${name}の撃破`,
+    reachTile: '味方のだれかが光る輪のマスに到達',
+    reachTileShort: '光る輪のマスに到達',
+    surviveTurns: (n: number) => `${n}手番を耐える`,
+    allDefeated: '味方の全滅',
+    unitDefeated: (name: string) => `${name}が倒れる`,
+    turnLimit: (n: number) => `${n}手番を過ぎる`,
+    /** 手番数の条件の残り（今の手番を含む） */
+    turnsLeft: (n: number) => `残り ${n} 手番`,
+    /** 増援の予告（after: 何手番後に現れるか。0 ならこの手番の後） */
+    reinforcement: (count: number, after: number) =>
+      after <= 0 ? `増援 ${count} 体: この手番の後に現れる（赤い枠のマス）` : `増援 ${count} 体: ${after} 手番後に現れる（赤い枠のマス）`,
+    reinforcementShort: (after: number) => (after <= 0 ? '増援 まもなく' : `増援 あと ${after} 手番`),
+    /** 撃破の対象の敵の情報の欄に出す札 */
+    targetTag: '★ 撃破の対象',
+    /** 頭上の札 */
+    targetBadge: '★',
+    /** 敵の全滅は常に勝利、味方の全滅は常に敗北 */
+    alwaysNote: '敵が全滅しても勝利、味方が全滅すると敗北です',
+  },
+
+  /** マップ上のイベントのメッセージ（messageId で引く） */
+  messages: {
+    ruinsEntranceIntro: '遺跡の入口を守る敵がいる。高い所を取って戦おう',
+    ruinsCorridorIntro: '回廊の奥の扉を目指せ。後ろから敵が迫ってくる',
+    reinforcementBehind: '後ろから足音が近づいてくる……',
+    ruinsAltarIntro: '祭壇の主が強力な魔法を唱える。予約された範囲から逃げるか、詠唱を止めよう',
+    ruinsAltarRage: '祭壇の主が仲間を呼んだ！',
+  } as Readonly<Record<string, string>>,
+
+  /** 罠（フェーズ2-2） */
+  traps: {
+    rockfall: '落石',
+    mud: 'ぬかるみ',
+    drain: '体から力が抜けた',
+  } as Readonly<Record<string, string>>,
+  /** 脱力の罠でレベルが変わった時の表示 */
+  levelChange: (from: number, to: number) => `Lv ${from} → ${to}`,
+  appeared: '増援',
+
+  /** 出撃前の配置の画面（フェーズ2-2） */
+  deploy: {
+    hint: '味方を2人続けてタップすると、位置を入れ替えます',
+    selected: (name: string) => `${name}と入れ替える味方をタップ`,
+    start: '戦闘開始',
+    back: '戻る',
+  },
 
   terrain: {
     grass: '草地',
@@ -59,6 +126,7 @@ export const TEXT = {
     slowArrow: '足止めの矢',
     seal: '封じ',
     protectPrayer: '守りの祈り',
+    inferno: '業火',
     counter: '反撃',
     evade: '身かわし',
     magicShell: '魔力の殻',
@@ -81,6 +149,7 @@ export const TEXT = {
     aimedShot: '狙',
     seal: '封',
     protectPrayer: '守',
+    inferno: '業',
   } as Readonly<Record<string, string>>,
 
   /** 行動アビリティの短い説明（編成の画面で、習得する前に見る） */
@@ -169,6 +238,7 @@ export const TEXT = {
     'e-archer-1': '敵の弓使い',
     'e-mage-1': '敵の魔術師',
     'e-healer-1': '敵の癒し手',
+    'r3-boss': '祭壇の主',
   } as Readonly<Record<string, string>>,
 
   /** 攻撃対象から見た、攻撃側の位置 */
@@ -349,6 +419,15 @@ export const TEXT = {
     confirmNewGameYes: '消して、はじめから',
     cancel: 'やめる',
     chooseTier: (mapName: string) => `${mapName}で戦う。敵の強さを選ぶ`,
+    /** 出撃先の選択 */
+    chooseSortie: 'どこへ出撃しますか',
+    training: '訓練戦',
+    trainingHelp: (mapName: string) => `${mapName}で、敵の強さを選んで戦う`,
+    dungeon: (name: string) => name,
+    dungeonHelp: '3つの戦闘。戦闘ごとに目的が違う',
+    chooseBattle: (name: string) => `${name}: 戦う場所を選ぶ（今は1戦ずつ。3連戦は次の版で）`,
+    battleLabel: (n: number, mapName: string) => `第${n}戦「${mapName}」`,
+    battleHelp: (objective: string) => `勝利: ${objective}`,
     back: '戻る',
     saved: '部隊の状態は、この端末に自動で保存されます',
   },
@@ -360,6 +439,8 @@ export const TEXT = {
     exp: (n: number) => `経験値 +${n}`,
     jp: (job: string, n: number) => `${job}の JP +${n}`,
     levelUp: (before: number, after: number) => `レベルアップ！ Lv ${before} → ${after}`,
+    /** 脱力の罠でレベルが下がった（成長値の仕組みは説明しない） */
+    levelDown: (before: number, after: number) => `体から力が抜けた。Lv ${before} → ${after}`,
     jobLevelUp: (job: string, before: number, after: number) => `${job}のレベルアップ！ ${before} → ${after}`,
     toBase: '拠点へ戻る',
     canLearn: '習得できるアビリティがあります',

@@ -28,7 +28,10 @@ export function showReportScreen(
     const job = TEXT.jobs[u.jobId] ?? u.jobId;
     li.append(el('strong', 'report-name', unitName(u.unitId, jobOf(u.unitId))));
     li.append(el('span', 'report-gain', `${TEXT.report.exp(u.exp)} ・ ${TEXT.report.jp(job, u.jp)}`));
-    if (u.levelAfter > u.levelBefore) li.append(el('span', 'report-up', TEXT.report.levelUp(u.levelBefore, u.levelAfter)));
+    // 脱力の罠で下がったレベル（成長値の仕組みは説明しない）
+    if (u.levelDrops > 0) li.append(el('span', 'report-down', TEXT.report.levelDown(u.levelBefore, u.levelBefore - u.levelDrops)));
+    const from = u.levelBefore - u.levelDrops;
+    if (u.levelAfter > from) li.append(el('span', 'report-up', TEXT.report.levelUp(from, u.levelAfter)));
     if (u.jobLevelAfter > u.jobLevelBefore) {
       li.append(el('span', 'report-up', TEXT.report.jobLevelUp(job, u.jobLevelBefore, u.jobLevelAfter)));
     }

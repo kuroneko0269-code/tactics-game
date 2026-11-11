@@ -22,6 +22,13 @@ export interface MapView {
   setMarks(marks: readonly TileMark[]): void;
   /** 詠唱中の魔法が予約している範囲を、属性の色で薄く表示する。渡さなかったマスは表示を消す */
   setReserved(tiles: readonly ReservedTile[]): void;
+  /**
+   * 戦闘の間ずっと出しておく目印（到達するマス・増援の予告・見えている罠）。渡さなかったマスは消す。
+   * 目印はタップの判定に関わらない
+   */
+  setOverlays(tiles: readonly OverlayTile[]): void;
+  /** マップの見た目をシーンから外す時に、使っていた部品を片付ける */
+  dispose(): void;
   update(elapsedSeconds: number): void;
   readonly center: THREE.Vector3;
   readonly radius: number;
@@ -62,6 +69,21 @@ const MARK_STYLE: Record<TileMarkKind, { color: number; opacity: number; pulse: 
   spellArea: { color: 0xff3df0, opacity: 0.7, pulse: 0.2 },
   push: { color: 0xffa21f, opacity: 0.8, pulse: 0.25 },
 };
+/** 戦闘の間ずっと出しておく目印の種類（goal: 到達するマス、warning: 増援の予告、trap-*: 見えている罠） */
+export type OverlayKind = 'goal' | 'warning' | 'trap-rockfall' | 'trap-mud' | 'trap-drain';
+
+export interface OverlayTile extends TileCoord {
+  readonly kind: OverlayKind;
+}
+
+const OVERLAY_STYLE: Record<OverlayKind, { color: number; inner: number; outer: number; diamond: boolean }> = {
+  goal: { color: 0xffd23d, inner: 0.22, outer: 0.44, diamond: false },
+  warning: { color: 0xff3b2f, inner: 0.3, outer: 0.44, diamond: true },
+  'trap-rockfall': { color: 0x8c7b6a, inner: 0, outer: 0.2, diamond: true },
+  'trap-mud': { color: 0x6b4a22, inner: 0, outer: 0.2, diamond: true },
+  'trap-drain': { color: 0xb04df0, inner: 0, outer: 0.2, diamond: true },
+};
+
 /** 予約されている範囲の濃さ */
 const RESERVED_OPACITY = 0.3;
 
@@ -139,6 +161,21 @@ export function createMapView(map: BattleMap): MapView {
     return { plate, material, frameMaterial };
   });
 
+  // 戦闘の間ずっと出しておく目印：マスの上面に浮かべた輪（ひし形）。種類ごとに形と色を変える
+  const overlayGroup = new THREE.Group();
+  group.add(overlayGroup);
+  const overlayGeometries = new Map<OverlayKind, THREE.BufferGeometry>();
+  const overlayGeometry = (kind: OverlayKind) => {
+    let g = overlayGeometries.get(kind);
+    if (!g) {
+      const st = OVERLAY_STYLE[kind];
+      g = new THREE.RingGeometry(st.inner, st.outer, st.diamond ? 4 : 32).rotateX(-Math.PI / 2);
+      overlayGeometries.set(kind, g);
+    }
+    return g;
+  };
+  let overlays: { mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>; kind: OverlayKind }[] = [];
+
   const radius = Math.hypot(map.width, map.depth) / 2;
   const heightRange = maxHeight * HEIGHT_STEP + BASE_THICKNESS;
 
@@ -177,8 +214,47 @@ export function createMapView(map: BattleMap): MapView {
         m.plate.visible = true;
       }
     },
+    setOverlays(tiles) {
+      for (const o of overlays) {
+        overlayGroup.remove(o.mesh);
+        o.mesh.material.dispose();
+      }
+      overlays = tiles.map((t) => {
+        const material = new THREE.MeshBasicMaterial({
+          color: OVERLAY_STYLE[t.kind].color,
+          transparent: true,
+          opacity: 0.9,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        });
+        const mesh = new THREE.Mesh(overlayGeometry(t.kind), material);
+        const top = tileTop(t.x, t.z);
+        mesh.position.set(top.x, top.y + 0.03, top.z);
+        mesh.renderOrder = 2;
+        // 目印はタップの判定に関わらない
+        mesh.raycast = () => {};
+        overlayGroup.add(mesh);
+        return { mesh, kind: t.kind };
+      });
+    },
+    dispose() {
+      for (const o of overlays) o.mesh.material.dispose();
+      overlays = [];
+      for (const g of overlayGeometries.values()) g.dispose();
+      for (const g of geometryCache.values()) g.dispose();
+      markGeometry.dispose();
+      frameGeometry.dispose();
+    },
     update(elapsed) {
       const wave = Math.sin(elapsed * 4);
+      for (const o of overlays) {
+        if (o.kind === 'goal') {
+          o.mesh.scale.setScalar(1 + 0.08 * Math.sin(elapsed * 3));
+          o.mesh.rotation.y = elapsed * 0.6;
+        } else if (o.kind === 'warning') {
+          o.mesh.material.opacity = 0.55 + 0.4 * Math.abs(Math.sin(elapsed * 5));
+        }
+      }
       for (const m of reservedMeshes) {
         if (m.plate.visible) m.material.opacity = RESERVED_OPACITY + 0.08 * Math.sin(elapsed * 2);
       }

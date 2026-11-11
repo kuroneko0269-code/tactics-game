@@ -41,6 +41,8 @@ export interface CameraRig {
   /** 毎フレーム呼ぶ。経過秒を渡す */
   update(deltaSeconds: number): void;
   resize(width: number, height: number): void;
+  /** 別のマップに切り替えた時に、マップの大きさを入れ直す（拡大率と視点の位置も最初の状態に戻す） */
+  setMap(options: CameraRigOptions): void;
 }
 
 export type HeightLevel = 0 | 1 | 2;
@@ -82,7 +84,9 @@ const SMOOTHING = 9;
  */
 const SAFE_BOX = { left: -0.72, right: 0.72, bottom: -0.45, top: 0.42 };
 
-export function createCameraRig(options: CameraRigOptions): CameraRig {
+export function createCameraRig(initial: CameraRigOptions): CameraRig {
+  /** マップの大きさ（setMap で入れ直す） */
+  const options: CameraRigOptions = { ...initial };
   const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
   const raycaster = new THREE.Raycaster();
   const ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), -options.target.y);
@@ -221,6 +225,15 @@ export function createCameraRig(options: CameraRigOptions): CameraRig {
     reset() {
       goalZoom = initialZoom();
       goalPan.set(0, 0);
+    },
+    setMap(next) {
+      Object.assign(options, next);
+      ground.constant = -options.target.y;
+      // 新しいマップでは、前のマップの拡大率と位置から滑らかに動かさず、すぐに最初の状態にする
+      zoom = goalZoom = initialZoom();
+      pan.set(0, 0);
+      goalPan.set(0, 0);
+      place();
     },
     focusOn(points) {
       if (points.length > 0 && !points.every((p) => inSafeBox(p))) {
