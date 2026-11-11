@@ -77,7 +77,11 @@ const FULL_DUNGEON = args['full-dungeon'] === 'true';
  */
 const QUICK = args.quick === 'true';
 /** 画面全体がスクロールしないかを確かめる画面サイズ（各画面を開いて調べるだけなので短い） */
-const LAYOUT_VIEWPORTS = (args.layouts ?? 'portrait,small,landscape,pc').split(',').filter(Boolean);
+/**
+ * 画面全体がスクロールしないかを確かめる画面サイズ。短くした版（CI）は、縦向きより厳しい「小さめのスマホ」と、横向き・PC の3つ
+ * （ブラウザを同時に動かす数を抑えて、CI の検査全体を5分以内に収めるため）。全体は縦向きも含めた4つ
+ */
+const LAYOUT_VIEWPORTS = (args.layouts ?? (QUICK ? 'small,landscape,pc' : 'portrait,small,landscape,pc')).split(',').filter(Boolean);
 
 const VIEWPORT_OPTIONS = {
   portrait: { label: 'スマホ縦向き', ...devices['iPhone 13'] },
@@ -1727,19 +1731,14 @@ async function checkLayouts(browser, baseUrl, name, core) {
   await inspect('sortie');
   await press(text.base.training);
   await inspect('tiers');
-  await press(text.tiers.easy.name);
-  await startFromDeploy();
-  await inspect('battle');
-  await finish('player');
-  await inspect('result');
-  await press(text.report.toBase);
-  // ダンジョン: 挑む → 戦闘の間（3つのボタン）→ 負けた時 → クリア
-  await screenIs('base');
-  await press(text.base.sortie);
+  // 訓練戦の配置と戦闘の画面は、ダンジョンと同じ作りなので、ダンジョンの第1戦で確かめる（戦闘を1つ減らして時間を抑える）
+  await press(text.base.back);
   await press(text.dungeons.ruins);
   await inspect('dungeon');
+  // ダンジョン: 挑む → 配置 → 戦闘 → 戦闘の間（3つのボタン）→ 負けた時 → クリア
   await press(text.base.challenge);
   await startFromDeploy();
+  await inspect('battle');
   await finish('player');
   await inspect('dungeon-between');
   await press(text.report.next(2, text.mapNames[core.data.dungeon.battles[1].map.id]));
