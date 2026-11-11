@@ -5,6 +5,7 @@ import { jobs } from '../data/jobs';
 import { progressionRules } from '../data/progression';
 import { initialRoster } from '../data/roster';
 import { changeJob, findUnit, gainJp, learnAbility, replaceUnit, setPassive } from '../core/progression';
+import { EMPTY_DUNGEON_STATE } from '../core/dungeon';
 import { createSaveStore, type SaveBackend } from './saveStore';
 
 const catalog = { jobs, spells, strikes, passives };
@@ -23,7 +24,7 @@ const memory = (): SaveBackend & { text: string | null } => {
 };
 
 describe('セーブの出入口', () => {
-  it('部隊を保存して読み込むと、元に戻る（版の番号も保存される）', () => {
+  it('部隊とダンジョンの記録を保存して読み込むと、元に戻る（版の番号も保存される）', () => {
     const backend = memory();
     const store = createSaveStore(backend, catalog, progressionRules);
     expect(store.load()).toBeUndefined();
@@ -31,9 +32,10 @@ describe('セーブの出入口', () => {
     u = learnAbility(u, 'warrior', 'powerStrike', catalog, progressionRules);
     u = changeJob(u, 'archer', catalog, progressionRules);
     const roster = replaceUnit(initialRoster, u);
-    store.save(roster);
-    expect(JSON.parse(backend.text!).version).toBe(1);
-    expect(store.load()).toEqual(roster);
+    const dungeon = { run: { dungeonId: 'ruins', battle: 2 }, clears: { ruins: 1 } };
+    store.save({ roster, dungeon });
+    expect(JSON.parse(backend.text!).version).toBe(2);
+    expect(store.load()).toEqual({ roster, dungeon });
     store.clear();
     expect(store.load()).toBeUndefined();
   });
@@ -51,7 +53,7 @@ describe('セーブの出入口', () => {
     expect(reasons).toEqual(['invalidJson', 'invalidRoster', 'newerVersion']);
   });
 
-  it('フェーズ2-1a のセーブデータ（版 1）は、そのまま読み込めて、育てた状態が残る。受動的なアビリティを付けて保存し直せる', () => {
+  it('フェーズ2-1a のセーブデータ（版 1）は、版 2 に直して読み込めて、育てた状態が残る。受動的なアビリティを付けて保存し直せる', () => {
     // 2-1a の版が保存した形そのまま（リアクション・サポート・ムーブの枠は空）
     const saved21a = {
       version: 1,
@@ -79,11 +81,12 @@ describe('セーブの出入口', () => {
     const store = createSaveStore(backend, catalog, progressionRules, (r) => reasons.push(r));
     const loaded = store.load();
     expect(reasons).toEqual([]);
-    expect(loaded).toEqual(saved21a.roster);
+    expect(loaded).toEqual({ roster: saved21a.roster, dungeon: EMPTY_DUNGEON_STATE });
     // 2-1a で貯めた戦士の JP（ジョブのレベル 6）で、戦士の反撃を習得して、弓使いのまま付けられる
-    let u = learnAbility(findUnit(loaded!, 'hero-1'), 'warrior', 'counter', catalog, progressionRules);
+    let u = learnAbility(findUnit(loaded!.roster, 'hero-1'), 'warrior', 'counter', catalog, progressionRules);
     u = setPassive(u, 'reaction', 'counter', catalog);
-    store.save(replaceUnit(loaded!, u));
-    expect(findUnit(store.load()!, 'hero-1').slots).toEqual({ secondary: 'warrior', reaction: 'counter', support: null, movement: null });
+    store.save({ roster: replaceUnit(loaded!.roster, u), dungeon: loaded!.dungeon });
+    expect(JSON.parse(backend.text!).version).toBe(2);
+    expect(findUnit(store.load()!.roster, 'hero-1').slots).toEqual({ secondary: 'warrior', reaction: 'counter', support: null, movement: null });
   });
 });

@@ -29,12 +29,15 @@
 // - 出撃は「訓練戦」→ 敵の強さ → 出撃前の配置の画面。最初の出撃で、味方を2人続けてタップして位置を入れ替え、
 //   もう一度入れ替えて元に戻してから「戦闘開始」を押す（core だけの計算と同じ配置で戦うため）。
 // - ダンジョン「はじまりの遺跡」の第2戦の場面を用意して、見えない罠を踏む（発動して見えるようになり、移動をやり直せない）、
-//   増援の予告の目印と出現、到達するマスへの移動で勝利、を確かめる。第3戦の配置の画面（ボスの撃破が勝利条件）も開く。
+//   増援の予告の目印と出現、到達するマスへの移動で勝利、を確かめる。
+// - 最後に、遺跡の3連戦を第1戦からクリアまで通す（戦闘の間の結果と編成、第2戦で負けてやり直す、読み込み直して第3戦から再開、
+//   クリアの画面と報酬・記録）。戦闘は開発用の決着で早める。--full-dungeon で、3戦とも画面のタップで戦う（手元向け）。
 //
 // 使い方:
 //   npm run autoplay                          スマホ縦向きと横向きで実行
 //   npm run autoplay -- --viewports=portrait,landscape,pc
 //   npm run autoplay -- --seed=123 --screenshots=autoplay-output --headed
+//   npm run autoplay -- --viewports=portrait --full-dungeon   ダンジョンの3連戦もすべてタップで戦う
 //
 // 開発用サーバー（vite）をこのスクリプトの中で起動する。画面の状態は、開発中だけ用意される
 // window.__tactics（src/main.ts）から読む。
@@ -62,6 +65,11 @@ const FINGER_ERROR_PX = Number(args.finger ?? 8);
 const BATTLE_TIMEOUT_MS = Number(args.timeout ?? 12 * 60 * 1000);
 /** 1戦の後（結果・編成・再び出撃・読み込み直し）にかけてよい時間の上限 */
 const AFTER_BATTLE_TIMEOUT_MS = 6 * 60 * 1000;
+/**
+ * ダンジョンの3連戦を、すべて画面のタップで戦う（時間がかかるので手元で実行する。約15分）。
+ * 省くと、ダンジョンの戦闘は開発用の決着（window.__tactics.finishBattle）で早めて、戦闘の間の流れだけを確かめる（CI はこちら）
+ */
+const FULL_DUNGEON = args['full-dungeon'] === 'true';
 
 const VIEWPORT_OPTIONS = {
   portrait: { label: 'スマホ縦向き', ...devices['iPhone 13'] },
@@ -174,7 +182,11 @@ async function main() {
           `強打 ✔、突き飛ばし ${r.knockbacks}回、反撃 ${r.counters}回、受動的なアビリティの習得と付け替え ${r.passives}回、読み込み直し ✔、はじめから ✔`,
       );
       console.log(
-        `  勝敗条件・イベント・罠: 配置の入れ替え ${r.swaps}回、罠の発動 ${r.traps}回、増援の出現 ${r.appeared}体、到達で勝利 ${r.reached}回、第3戦の配置の画面 ✔`,
+        `  勝敗条件・イベント・罠: 配置の入れ替え ${r.swaps}回、罠の発動 ${r.traps}回、増援の出現 ${r.appeared}体、到達で勝利 ${r.reached}回`,
+      );
+      console.log(
+        `  ダンジョン: 第1戦からクリアまで ✔（戦闘 ${r.dungeonBattles}回、うちタップで戦った ${r.dungeonTapped}回）、` +
+          `負けた後のやり直し ${r.retries}回、編成の画面への行き来 ✔、読み込み直して再開 ✔、クリアの報酬と記録 ✔`,
       );
       const f = r.finger;
       const sum = (o) => Object.values(o).reduce((a, b) => a + b, 0);
@@ -247,6 +259,9 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
     counters: 0,
     passives: 0,
     swaps: 0,
+    dungeonBattles: 0,
+    dungeonTapped: 0,
+    retries: 0,
     traps: 0,
     appeared: 0,
     reached: 0,
@@ -711,7 +726,13 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
       const before = await tileProbe();
       await drag({ x: center.x - 60, y: center.y - 40 }, { x: center.x + 60, y: center.y + 40 });
       await waitCameraIdle();
-      const after = await tileProbe();
+      let after = await tileProbe();
+      // 小さなマップでは、視点が動ける範囲の端にいて動かないことがある。その時は逆向きにドラッグする
+      if (Math.hypot(after.x - before.x, after.y - before.y) <= 20) {
+        await drag({ x: center.x + 60, y: center.y + 40 }, { x: center.x - 60, y: center.y - 40 });
+        await waitCameraIdle();
+        after = await tileProbe();
+      }
       check(Math.hypot(after.x - before.x, after.y - before.y) > 20, 'ドラッグで視点が動きませんでした');
       return 'ドラッグで視点を移動';
     },
@@ -824,6 +845,8 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   await waitForInput();
   const initialCamera = await getCamera();
   await screenshot('00-start');
+  /** 今の戦闘を、味方の手番は画面のタップで（AI と同じ動かし方で）、決着まで進める */
+  const playByTaps = async () => {
   let lastTurn = -1;
   for (;;) {
     check(Date.now() < deadline, `時間切れ（${BATTLE_TIMEOUT_MS / 1000}秒）`);
@@ -986,6 +1009,8 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
       throw new CheckError(`想定していない行動: ${JSON.stringify(action)}`);
     }
   }
+  };
+  await playByTaps();
 
   // ---- 結果の照合 ----
   const final = await getState();
@@ -1307,20 +1332,6 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   await sameRoster(pd.expected, '受動的なアビリティを付けて読み込み直した後');
   check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
 
-  // ---- 第3戦「祭壇の間」の配置の画面: ボスの撃破が勝利条件で、ボスに撃破の対象の札が付く。「戻る」で拠点へ ----
-  await pressButton(text.base.sortie);
-  await pressButton(text.dungeons.ruins);
-  await waitFor('ダンジョンの戦闘を選ぶ', () => document.querySelector('[data-screen="dungeon"]') !== null);
-  await pressButton(text.base.battleLabel(3, text.mapNames['ruins-altar']));
-  await waitDeploy();
-  const altarPanel = await page.locator('.objective-panel').textContent();
-  check(altarPanel.includes(text.objectives.defeatUnit(text.unitNames['r3-boss'])), `第3戦の勝敗条件が出ていません（${altarPanel}）`);
-  check((await page.locator('.unit-label-target').count()) === 1, 'ボスに撃破の対象の札が付いていません');
-  await screenshot('altar-deploy');
-  await pressButton(text.objectives.close);
-  await pressButton(text.deploy.back);
-  await waitFor('拠点', () => window.__tactics.screen() === 'base');
-
   // ---- 「はじめから」: 確認の後、最初の部隊に戻る（読み込み直しても最初のまま） ----
   await pressButton(text.base.newGame);
   await waitFor('はじめからの確認', () => document.querySelector('.screen-warning') !== null);
@@ -1333,6 +1344,128 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   await page.reload();
   await page.waitForFunction(() => window.__tactics?.screen() === 'base', null, { timeout: 30000 });
   await sameRoster(core.data.roster, '「はじめから」の後に読み込み直した後');
+  check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
+
+  // ---- ダンジョン「はじまりの遺跡」の3連戦（フェーズ2-2b） ----
+  // 第1戦 → 戦闘の間（結果・編成の画面への行き来）→ 第2戦で負ける → やり直して勝つ → 読み込み直して第3戦から再開
+  // → 第3戦（ボスの撃破が勝利条件・ボスの★）→ クリアの画面（初めてのクリア・報酬の JP）→ 拠点にクリアの記録。
+  // 戦闘そのものは、--full-dungeon の時は画面のタップで戦い、そうでなければ開発用の決着で早める（CI の時間を抑えるため）
+  deadline = Date.now() + AFTER_BATTLE_TIMEOUT_MS + (FULL_DUNGEON ? 40 * 60 * 1000 : 0);
+  const dungeonSite = (i) => core.data.dungeon.battles[i];
+  const getDungeon = () => T(() => window.__tactics.dungeon());
+  const startDungeonBattle = async (i) => {
+    await waitDeploy();
+    const panel = await page.locator('.objective-panel').textContent();
+    const victory = dungeonSite(i).objectives.victory[0];
+    const want =
+      victory.kind === 'defeatUnit' ? text.objectives.defeatUnit(text.unitNames[victory.unitId]) : victory.kind === 'reachTile' ? text.objectives.reachTile : text.objectives.defeatAll;
+    check(panel.includes(want), `第${i + 1}戦の勝敗条件が出ていません（${panel}）`);
+    if (victory.kind === 'defeatUnit') check((await page.locator('.unit-label-target').count()) === 1, 'ボスに撃破の対象の札が付いていません');
+    await screenshot(`dungeon-${i + 1}-deploy`);
+    await pressButton(text.objectives.close);
+    await pressButton(text.deploy.start);
+    await waitFor('ダンジョンの戦闘の開始', () => window.__tactics.screen() === 'battle' && window.__tactics.state() !== null);
+    const st = await getState();
+    check(st.map.id === dungeonSite(i).map.id, `第${i + 1}戦のマップが違います（${st.map.id}）`);
+    // 戦闘の間で全回復している（全員の HP と MP が最大）
+    check(st.units.filter((u) => u.team === 'player').every((u) => u.hp === u.stats.maxHp && u.mp === u.stats.maxMp), `第${i + 1}戦の開始時に全回復していません`);
+  };
+  /** ダンジョンの戦闘を決着させる。tap なら画面のタップで、そうでなければ開発用の決着で（winner の勝ち） */
+  const resolveDungeonBattle = async (winner, tap) => {
+    stats.dungeonBattles++;
+    if (tap) {
+      stats.dungeonTapped++;
+      await playByTaps();
+    } else {
+      await waitForInput();
+      await T((w) => window.__tactics.finishBattle(w), winner);
+    }
+    await waitFor('戦闘の間の画面', () => window.__tactics.screen() === 'result');
+  };
+  const resultTitle = () => page.locator('.report-screen .result-title').textContent();
+
+  await pressButton(text.base.sortie);
+  await pressButton(text.dungeons.ruins);
+  await waitFor('ダンジョンの画面', () => document.querySelector('[data-screen="dungeon"]') !== null);
+  await screenshot('dungeon-start');
+  await pressButton(text.base.challenge);
+  check(JSON.stringify((await getDungeon()).run) === JSON.stringify({ dungeonId: 'ruins', battle: 0 }), '挑戦の開始が保存されていません');
+  // 第1戦（全滅）
+  await startDungeonBattle(0);
+  await resolveDungeonBattle('player', FULL_DUNGEON);
+  let won = (await resultTitle()) === text.result.player;
+  for (let attempt = 0; !won && attempt < 3; attempt++) {
+    stats.retries++;
+    await pressButton(text.report.retry);
+    await startDungeonBattle(0);
+    await resolveDungeonBattle('player', FULL_DUNGEON);
+    won = (await resultTitle()) === text.result.player;
+  }
+  check(won, '第1戦に勝てませんでした');
+  check((await getDungeon()).run?.battle === 1, '第1戦の後の進み具合が保存されていません');
+  await screenshot('dungeon-1-result');
+  // 戦闘の間: 編成の画面へ行って戻る
+  await pressButton(text.report.editRoster);
+  await waitFor('編成の画面', () => window.__tactics.screen() === 'roster');
+  await pressButton(text.roster.back);
+  await waitFor('戦闘の間の画面に戻る', () => window.__tactics.screen() === 'result');
+  const next2 = text.report.next(2, text.mapNames[dungeonSite(1).map.id]);
+  await pressButton(next2);
+  // 第2戦（到達）: まず負けて、やり直す。負けても進み具合はそのまま
+  await startDungeonBattle(1);
+  await resolveDungeonBattle('enemy', false);
+  check((await resultTitle()) === text.result.enemy, '第2戦の負けの画面が出ていません');
+  check((await getDungeon()).run?.battle === 1, '負けた後の進み具合が変わっています');
+  await screenshot('dungeon-2-lost');
+  stats.retries++;
+  await pressButton(text.report.retry);
+  await startDungeonBattle(1);
+  await resolveDungeonBattle('player', FULL_DUNGEON);
+  won = (await resultTitle()) === text.result.player;
+  for (let attempt = 0; !won && attempt < 3; attempt++) {
+    stats.retries++;
+    await pressButton(text.report.retry);
+    await startDungeonBattle(1);
+    await resolveDungeonBattle('player', FULL_DUNGEON);
+    won = (await resultTitle()) === text.result.player;
+  }
+  check(won, '第2戦に勝てませんでした');
+  check((await getDungeon()).run?.battle === 2, '第2戦の後の進み具合が保存されていません');
+  // ページを読み込み直すと拠点から。ダンジョンの画面で第3戦から再開できる
+  await page.reload();
+  await page.waitForFunction(() => window.__tactics?.screen() === 'base', null, { timeout: 30000 });
+  check((await getDungeon()).run?.battle === 2, '読み込み直した後に進み具合が残っていません');
+  await pressButton(text.base.sortie);
+  await pressButton(text.dungeons.ruins);
+  const resume3 = text.base.resume(3, text.mapNames[dungeonSite(2).map.id]);
+  await screenshot('dungeon-resume');
+  await pressButton(resume3);
+  // 第3戦（ボスの撃破）→ クリア
+  const jpBefore = await T(() => window.__tactics.roster().units.map((u) => u.jobs[u.jobId].jp));
+  await startDungeonBattle(2);
+  await resolveDungeonBattle('player', FULL_DUNGEON);
+  for (let attempt = 0; (await resultTitle()) === text.result.enemy && attempt < 3; attempt++) {
+    stats.retries++;
+    await pressButton(text.report.retry);
+    await startDungeonBattle(2);
+    await resolveDungeonBattle('player', FULL_DUNGEON);
+  }
+  const clearTitle = text.report.clearTitle(text.dungeons.ruins);
+  check((await resultTitle()) === clearTitle, `クリアの画面が出ていません（${await resultTitle()}）`);
+  const clearText = await page.locator('.report-screen').textContent();
+  check(clearText.includes(text.report.firstClear) && clearText.includes(text.report.reward(core.data.dungeon.clearRewardJp)), 'クリアの画面に初めてのクリアと報酬がありません');
+  const jpAfter = await T(() => window.__tactics.roster().units.map((u) => u.jobs[u.jobId].jp));
+  // 報酬の JP（とこの戦闘で得た JP）が、全員の今のジョブに入っている
+  check(jpAfter.every((jp, i) => jp >= jpBefore[i] + core.data.dungeon.clearRewardJp), `クリアの報酬の JP が入っていません（${jpBefore} → ${jpAfter}）`);
+  check(JSON.stringify(await getDungeon()) === JSON.stringify({ run: null, clears: { ruins: 1 } }), 'クリアの記録が違います');
+  await screenshot('dungeon-clear');
+  await pressButton(text.report.toBase);
+  await waitFor('拠点', () => window.__tactics.screen() === 'base');
+  const baseText = await page.locator('.base-screen').textContent();
+  check(baseText.includes(text.base.clearedBadge(text.dungeons.ruins, 1)), `拠点にクリアの記録が出ていません（${baseText}）`);
+  await page.reload();
+  await page.waitForFunction(() => window.__tactics?.screen() === 'base', null, { timeout: 30000 });
+  check(JSON.stringify(await getDungeon()) === JSON.stringify({ run: null, clears: { ruins: 1 } }), '読み込み直した後にクリアの記録が残っていません');
   check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
 
   await context.close();
