@@ -434,15 +434,68 @@ export interface UnitPlacement {
    * 敵の強さの段階の調整に使う（例: 「やさしい」の敵の癒し手は MP が少ない）
    */
   readonly statBonus?: Partial<UnitStats>;
+  /** 部隊のユニットの経験値と JP（渡すと、戦闘中に経験値と JP を得てレベルが上がる。敵には渡さない） */
+  readonly progress?: PlacementProgress;
 }
 
 /**
- * 戦闘中に実行した行動（攻撃・魔法・技）の記録。戦闘の後の経験値の計算に使う。
- * targetLevel は相手（味方に使ったなら、その味方）のレベル。ally は味方に使った行動か。
+ * 戦闘中に経験値と JP を得るユニット（部隊のユニット）の進み具合。敵のユニットは持たない（経験値も JP も得ない）。
+ * 経験値と JP は、行動した時点でここに入り、経験値が貯まればその場でレベルが上がる（成長値と能力値も変わる）。
+ * 戦闘が終わった時に、部隊（Roster）へ書き戻す（progression.ts の applyBattleResult）。
  */
-export interface ActionRecord {
-  readonly targetLevel: number;
-  readonly ally: boolean;
+export interface UnitProgressState {
+  /** 今のレベルの中で貯まっている経験値 */
+  readonly exp: number;
+  /** 今のジョブの使える JP */
+  readonly jp: number;
+  /** 今のジョブの JP の累計（ジョブのレベルを決める） */
+  readonly jpTotal: number;
+  /** この戦闘で得た経験値の合計（結果の画面に出す） */
+  readonly gainedExp: number;
+  /** この戦闘で得た JP の合計 */
+  readonly gainedJp: number;
+}
+
+/** 部隊のユニットを戦場に出す時に渡す、経験値と JP の今の値 */
+export interface PlacementProgress {
+  readonly exp: number;
+  readonly jp: number;
+  readonly jpTotal: number;
+}
+
+/** 育成の数値（src/data に置く）。計算は progression.ts。戦闘中の経験値と JP にも使うので、戦闘の状態にも持たせる */
+export interface ProgressionRules {
+  /** キャラクターのレベルの上限 */
+  readonly maxLevel: number;
+  /** レベル L から L+1 に上がるのに必要な経験値 = expBase + expPerLevel × (L − 1) */
+  readonly expBase: number;
+  readonly expPerLevel: number;
+  /** 攻撃・魔法・技を1回実行するたびに得る経験値（相手のレベルによる増減の前） */
+  readonly expPerAction: number;
+  /** 味方に使う行動（回復・守りなど）で得る経験値（相手のレベルによる増減の前） */
+  readonly expPerSupportAction: number;
+  /** 勝利した時に、倒れたユニットを含む全員が得る経験値（敵のレベルによる増減の前） */
+  readonly expVictory: number;
+  /**
+   * 相手のレベルによる増減。倍率（%）=（相手のレベル + expLevelOffset）× 100 ÷（自分のレベル + expLevelOffset）（切り捨て）。
+   * 上限は expLevelPercentMax。増減の後は切り捨てで、最低でも 1
+   */
+  readonly expLevelOffset: number;
+  readonly expLevelPercentMax: number;
+  /** 攻撃・魔法・技を1回実行するたびに、今のジョブに入る JP */
+  readonly jpPerAction: number;
+  /** 勝利した時に、全員の今のジョブに入る JP */
+  readonly jpVictoryBonus: number;
+  /**
+   * ジョブのレベルが上がる JP の累計。[i] はレベル i + 2 になる累計（長さ 7 なら、レベル 1〜8）
+   */
+  readonly jobLevelJp: readonly number[];
+  /** 能力ごとの成長値の上限（能力値の 1/100 単位） */
+  readonly growthCap: GrowthValues;
+  /** 成長の点数の重み。能力値 1 ぶんの成長を何点と数えるか */
+  readonly growthWeights: GrowthValues;
+  /** 成長の点数の合計の上限 */
+  readonly growthTotalCap: number;
 }
 
 /** 1戦ぶんの定義（src/data に置く） */
@@ -456,6 +509,8 @@ export interface BattleSetup {
   readonly events?: readonly MapEventDefinition[];
   /** 罠 */
   readonly traps?: readonly TrapPlacement[];
+  /** 育成の数値。渡すと、progress を持つユニットが戦闘中に経験値と JP を得る */
+  readonly progression?: ProgressionRules;
 }
 
 export interface UnitState {
@@ -468,13 +523,27 @@ export interface UnitState {
   /** 0 になったら戦闘不能 */
   readonly hp: number;
   readonly ct: number;
+  /**
+   * 今の能力値 = ジョブの基本値（baseStats）+ 成長値（growth）+ 補正（statBonus）に、受動的なアビリティ（重装・早足・身軽）を反映したもの。
+   * 戦闘中にレベルが上がる（下がる）と、計算し直す
+   */
   readonly stats: UnitStats;
   readonly attack: AttackProfile;
   readonly mp: number;
-  /** 戦闘の開始時のキャラクターのレベル（経験値の計算に使う。戦闘の計算には使わない） */
+  /** 今のキャラクターのレベル（戦闘中に上がることも、脱力の罠で下がることもある） */
   readonly level: number;
-  /** この戦闘で脱力の罠によって下がったレベルの数（今のレベル = level − levelDrops。戦闘の後に部隊へ反映する） */
+  /** この戦闘で脱力の罠によって下がったレベルの数（結果の画面に出す） */
   readonly levelDrops: number;
+  /** ジョブの基本の能力値 */
+  readonly baseStats: UnitStats;
+  /** 成長値（レベルが上がると、growthRates ぶん増える） */
+  readonly growth: GrowthValues;
+  /** 今のジョブの成長率 */
+  readonly growthRates: GrowthValues;
+  /** 能力値の補正（敵の強さの段階の調整。なければ空） */
+  readonly statBonus: Partial<UnitStats>;
+  /** 経験値と JP の進み具合（部隊のユニットだけ。敵は null） */
+  readonly progress: UnitProgressState | null;
   /** 武器の種類。合わないアビリティは使えない */
   readonly weapon: WeaponType | null;
   /** 行動アビリティのコマンド（主コマンドが先頭）。画面のメニューの並び */
@@ -490,8 +559,8 @@ export interface UnitState {
   readonly passives: readonly PassiveDefinition[];
   /** 付いている状態変化 */
   readonly statuses: readonly StatusState[];
-  /** この戦闘で実行した行動（攻撃・魔法・技）の記録。戦闘の後の経験値と JP の計算に使う */
-  readonly actions: readonly ActionRecord[];
+  /** この戦闘で経験値を得た行動（攻撃・技・発動した魔法）の回数（バランス確認の集計に使う） */
+  readonly actionCount: number;
   /** 詠唱中の魔法。詠唱していなければ null */
   readonly charging: ChargeState | null;
   /** 直前の自分の手番で移動したか（AI が「動いていない相手」を見分けるため） */
@@ -524,6 +593,8 @@ export interface BattleState {
   readonly winner: Team | null;
   /** 乱数生成器の内部状態（rng.ts の getState の値） */
   readonly rngState: number;
+  /** 育成の数値（戦闘中の経験値・JP・レベルアップに使う）。なければ、戦闘中に経験値と JP は入らない */
+  readonly progression: ProgressionRules | null;
   /** これまでに始まった手番の数 */
   readonly turnNumber: number;
   /** 最後に通常攻撃か魔法の指定があった手番（なければ 0）。AI がにらみ合いを見分けるため */
@@ -680,6 +751,34 @@ export type BattleEvent =
       /** 増援が現れた（unit は現れた時点のユニットの状態） */
       readonly type: 'unitAppeared';
       readonly unit: UnitState;
+    }
+  | {
+      /**
+       * 行動（攻撃・技・発動した魔法）で経験値と JP を得た。exp と jp は得た量。
+       * 反撃・中断・不発・対象のいない魔法では起きない。敵のユニットでは起きない
+       */
+      readonly type: 'progressGained';
+      readonly unitId: string;
+      readonly exp: number;
+      readonly jp: number;
+    }
+  | {
+      /** キャラクターのレベルが上がった（from から to へ）。能力値と、増えた分だけ増えた今の HP・MP */
+      readonly type: 'leveledUp';
+      readonly unitId: string;
+      readonly from: number;
+      readonly to: number;
+      readonly stats: UnitStats;
+      readonly hp: number;
+      readonly mp: number;
+    }
+  | {
+      /** ジョブのレベルが上がった */
+      readonly type: 'jobLeveledUp';
+      readonly unitId: string;
+      readonly jobId: string;
+      readonly from: number;
+      readonly to: number;
     }
   | { readonly type: 'turnEnded'; readonly unitId: string; readonly facing: Direction; readonly ct: number }
   | {

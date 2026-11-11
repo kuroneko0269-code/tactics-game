@@ -209,40 +209,74 @@ describe('JP とジョブのレベル', () => {
     expect(learnRefusal(gainJp(u, 'archer', 500), 'archer', 'aimedShot', catalog, rules)).toBeNull();
   });
 
-  it('戦闘の結果: 行動ごとの経験値と JP、勝てば倒れたユニットを含む全員に追加の経験値と JP。負けても得た分は持ち帰れる', () => {
+  /** 戦闘中の進み具合（戦闘中に得た経験値と JP を、戦闘の後に部隊へ書き戻す） */
+  const progressOf = (exp: number, jp: number, jpTotal: number, gainedExp: number, gainedJp: number) => ({ exp, jp, jpTotal, gainedExp, gainedJp });
+
+  it('戦闘の結果: 戦闘中に得た経験値・JP・レベルを部隊へ書き戻し、勝てば倒れたユニットを含む全員に勝利のボーナス。負けても戦闘中の分は持ち帰れる', () => {
     const roster: Roster = { units: [recruit(), { ...recruit('archer'), id: 'u2', jobs: { archer: { jp: 0, jpTotal: 0, learned: [] } } }] };
+    const grown = levelTimes(recruit(), 1).growth;
     const battle = (winner: 'player' | 'enemy'): BattleState => {
       const s = makeState({
         heights: [[0, 0, 0, 0]],
         units: [
-          { id: 'u1', team: 'player', x: 0, z: 0 },
-          { id: 'u2', team: 'player', job: testArcher, x: 1, z: 0, hp: 0 },
+          // u1 は戦闘中に 120 の経験値で Lv 2 に上がり、20 残っている。JP は 240
+          { id: 'u1', team: 'player', x: 0, z: 0, level: 2, growth: grown, progress: progressOf(20, 240, 240, 120, 240) },
+          // u2 は倒れる前に 30 の経験値と 60 JP
+          { id: 'u2', team: 'player', job: testArcher, x: 1, z: 0, hp: 0, progress: progressOf(30, 60, 60, 30, 60) },
           { id: 'e', team: 'enemy', x: 3, z: 0 },
         ],
       });
-      // u1 は同じレベル（Lv 1）の相手に 12 回、u2 は倒れる前に 3 回
-      const acts = (n: number) => Array.from({ length: n }, () => ({ targetLevel: 1, ally: false }));
-      const records: Record<string, ReturnType<typeof acts>> = { u1: acts(12), u2: acts(3), e: acts(9) };
-      return { ...s, winner, turn: null, units: s.units.map((u) => ({ ...u, actions: records[u.id]! })) };
+      return { ...s, winner, turn: null, units: s.units.map((u) => ({ ...u, actionCount: u.id === 'u1' ? 12 : 3 })) };
     };
     const won = applyBattleResult(roster, battle('player'), catalog, rules);
     expect(won.report.victory).toBe(true);
     const u1 = won.roster.units[0]!;
-    // 経験値 12 × 10 + 勝利 20 = 140 → Lv 2（必要 100）で 40 残る
+    // 戦闘の後: Lv 2 で 20 + 勝利 18（自分 Lv 2・敵 Lv 1 の倍率 91%）= 38
     expect(u1.level).toBe(2);
-    expect(u1.exp).toBe(40);
-    expect(u1.jobs.warrior).toEqual({ jp: 12 * 20 + 50, jpTotal: 290, learned: [] });
-    expect(won.report.units[0]).toMatchObject({ unitId: 'u1', actions: 12, exp: 140, jp: 290, levelBefore: 1, levelAfter: 2, jobLevelBefore: 1, jobLevelAfter: 3 });
+    expect(u1.exp).toBe(20 + Math.floor((20 * 91) / 100));
+    expect(u1.growth).toEqual(grown);
+    expect(u1.jobs.warrior).toEqual({ jp: 240 + 50, jpTotal: 290, learned: [] });
+    expect(won.report.units[0]).toMatchObject({
+      unitId: 'u1',
+      actions: 12,
+      battleExp: 120,
+      battleJp: 240,
+      bonusExp: 18,
+      bonusJp: 50,
+      exp: 138,
+      jp: 290,
+      levelBefore: 1,
+      levelAfterBattle: 2,
+      levelAfter: 2,
+      jobLevelBefore: 1,
+      jobLevelAfterBattle: 2,
+      jobLevelAfter: 3,
+    });
     // 倒れていた u2 にも勝利の経験値と JP が入る
-    expect(won.report.units[1]).toMatchObject({ unitId: 'u2', exp: 3 * 10 + 20, jp: 3 * 20 + 50 });
+    expect(won.report.units[1]).toMatchObject({ unitId: 'u2', exp: 30 + 20, jp: 60 + 50 });
 
     const lost = applyBattleResult(roster, battle('enemy'), catalog, rules);
     expect(lost.report.victory).toBe(false);
-    expect(lost.report.units[0]!.exp).toBe(120);
+    expect(lost.report.units[0]).toMatchObject({ exp: 120, jp: 240, bonusExp: 0, bonusJp: 0 });
     expect(lost.roster.units[0]!.level).toBe(2);
-    expect(lost.roster.units[0]!.jobs.warrior!.jp).toBe(12 * 20);
+    expect(lost.roster.units[0]!.exp).toBe(20);
+    expect(lost.roster.units[0]!.jobs.warrior!.jp).toBe(240);
     // 敵のユニットは部隊に入らない
     expect(lost.roster.units.map((u) => u.id)).toEqual(['u1', 'u2']);
+  });
+
+  it('勝利のボーナスでレベルが上がることもある（結果の画面で、戦闘の後とボーナスの後を分けて見せる）', () => {
+    const roster: Roster = { units: [recruit()] };
+    const s = makeState({
+      heights: [[0, 0, 0, 0]],
+      units: [
+        { id: 'u1', team: 'player', x: 0, z: 0, progress: progressOf(95, 0, 80, 95, 80) },
+        { id: 'e', team: 'enemy', x: 3, z: 0 },
+      ],
+    });
+    const result = applyBattleResult(roster, { ...s, winner: 'player', turn: null }, catalog, rules);
+    expect(result.report.units[0]).toMatchObject({ levelAfterBattle: 1, levelAfter: 2, jobLevelAfterBattle: 1, jobLevelAfter: 2 });
+    expect(result.roster.units[0]!.exp).toBe(15);
   });
 
   it('経験値は相手のレベルによって増減する。高い相手ほど多く、低い相手ほど少なく、最低でも 1。上限あり', () => {
@@ -251,18 +285,18 @@ describe('JP とジョブのレベル', () => {
     expect(expLevelPercent(1, 8, rules)).toBe(163);
     expect(expLevelPercent(30, 18, rules)).toBe(70);
     expect(expLevelPercent(1, 50, rules)).toBe(200);
-    expect(actionExp({ targetLevel: 8, ally: false }, 1, rules)).toBe(16);
-    expect(actionExp({ targetLevel: 1, ally: false }, 50, rules)).toBe(1);
-    // 味方に使った行動は、元の量が expPerSupportAction（その味方のレベルで増減）
-    expect(actionExp({ targetLevel: 5, ally: true }, 5, rules)).toBe(15);
-    expect(actionExp({ targetLevel: 15, ally: true }, 5, rules)).toBe(Math.floor((15 * 166) / 100));
+    expect(actionExp(false, 1, 8, rules)).toBe(16);
+    expect(actionExp(false, 50, 1, rules)).toBe(1);
+    // 味方に使う行動は、元の量が expPerSupportAction
+    expect(actionExp(true, 5, 5, rules)).toBe(15);
+    expect(actionExp(true, 5, 15, rules)).toBe(Math.floor((15 * 166) / 100));
 
     // 勝利の経験値は、敵の最も高いレベルで増減する
     const roster: Roster = { units: [recruit()] };
     const s = makeState({
       heights: [[0, 0, 0, 0]],
       units: [
-        { id: 'u1', team: 'player', x: 0, z: 0 },
+        { id: 'u1', team: 'player', x: 0, z: 0, progress: progressOf(0, 0, 0, 0, 0) },
         { id: 'e1', team: 'enemy', x: 2, z: 0, level: 8 },
         { id: 'e2', team: 'enemy', x: 3, z: 0, level: 3, hp: 0 },
       ],
@@ -270,23 +304,23 @@ describe('JP とジョブのレベル', () => {
     const result = applyBattleResult(roster, { ...s, winner: 'player', turn: null }, catalog, rules);
     expect(result.report.units[0]!.exp).toBe(Math.floor((20 * 163) / 100));
   });
-  it('脱力の罠で下がったレベルは、勝ち負けに関わらず戦闘の後も残る（経験値より先に levelDown で反映する）', () => {
-    const grown = { ...levelTimes(recruit(), 4), exp: 30 };
-    const roster: Roster = { units: [grown] };
+
+  it('脱力の罠で下がったレベル（戦闘中にその場で下がる）は、勝ち負けに関わらず戦闘の後も残る', () => {
+    const roster: Roster = { units: [{ ...levelTimes(recruit(), 4), exp: 30 }] };
+    const lowered = levelTimes(recruit(), 2);
     const s = makeState({
       heights: [[0, 0, 0, 0]],
       units: [
-        { id: 'u1', team: 'player', x: 0, z: 0, level: 5, levelDrops: 2 },
-        { id: 'e', team: 'enemy', x: 3, z: 0, level: 5 },
+        { id: 'u1', team: 'player', x: 0, z: 0, level: 3, levelDrops: 2, growth: lowered.growth, progress: progressOf(0, 0, 0, 0, 0) },
+        { id: 'e', team: 'enemy', x: 3, z: 0, level: 3 },
       ],
     });
     for (const winner of ['player', 'enemy'] as const) {
       const result = applyBattleResult(roster, { ...s, winner, turn: null }, catalog, rules);
       const u = result.roster.units[0]!;
-      // Lv 5 → 3（経験値は 0 に戻る）。勝てば勝利の経験値 20 が入るが、レベルは上がらない
       expect(u.level).toBe(3);
       expect(u.exp).toBe(winner === 'player' ? 20 : 0);
-      expect(u.growth).toEqual(levelTimes(recruit(), 2).growth);
+      expect(u.growth).toEqual(lowered.growth);
       expect(result.report.units[0]).toMatchObject({ levelBefore: 5, levelAfter: 3, levelDrops: 2 });
     }
   });

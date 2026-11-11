@@ -9,7 +9,7 @@ import type {
   TrapPlacement,
   UnitPlacement,
 } from './battleTypes';
-import { currentLevel, judgeOutcome, judgeTurnOutcome, spawnTile, turnsRemaining } from './scenario';
+import { judgeOutcome, judgeTurnOutcome, spawnTile, turnsRemaining } from './scenario';
 import { flat, makeState, testJobs, testSpells, testStrikes } from './testSupport';
 
 /** テスト用の戦闘を始める（10×10 の平らなマップ） */
@@ -395,13 +395,27 @@ describe('罠', () => {
     expect(r.state.units.find((u) => u.id === 'e')!.statuses.map((s) => s.id)).toEqual(['slow']);
   });
 
-  it('脱力の罠: レベルが 1 下がる（何度でも。レベル 1 より下にはならない）', () => {
-    const r = applyAction(trapState('drain'), { type: 'move', x: 2, z: 2 });
+  it('脱力の罠: その場でレベルが 1 下がり、成長値と能力値も下がる（何度でも。レベル 1 より下にはならない）', () => {
+    const growth = { maxHp: 1200, maxMp: 0, attack: 240, magic: 0, speed: 20 };
+    const base = trapState('drain');
+    const state = {
+      ...base,
+      units: base.units.map((u) =>
+        u.id === 'p'
+          ? { ...u, growth, growthRates: { maxHp: 300, maxMp: 0, attack: 60, magic: 0, speed: 4 }, stats: { ...u.stats, maxHp: 62, attack: 22 }, hp: 62 }
+          : u,
+      ),
+    };
+    const r = applyAction(state, { type: 'move', x: 2, z: 2 });
     expect(r.events).toContainEqual(expect.objectContaining({ type: 'trapTriggered', trap: 'drain', level: { from: 5, to: 4 } }));
     const p = r.state.units.find((u) => u.id === 'p')!;
-    expect(p.level).toBe(5);
+    expect(p.level).toBe(4);
     expect(p.levelDrops).toBe(1);
-    expect(currentLevel(p)).toBe(4);
+    expect(p.growth).toEqual({ maxHp: 900, maxMp: 0, attack: 180, magic: 0, speed: 16 });
+    // 能力値 = 基本値（HP 50、攻撃力 20）+ 成長値。今の HP は最大を超えないように抑える
+    expect(p.stats.maxHp).toBe(59);
+    expect(p.stats.attack).toBe(21);
+    expect(p.hp).toBe(59);
     // レベル 1 のユニットは下がらない
     const low = applyAction(trapState('drain', 'p', 1), { type: 'move', x: 2, z: 2 });
     expect(low.events).toContainEqual(expect.objectContaining({ type: 'trapTriggered', level: { from: 1, to: 1 } }));

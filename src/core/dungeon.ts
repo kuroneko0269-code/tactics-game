@@ -5,7 +5,8 @@
  * - 戦闘の間で、HP と MP は全回復し、倒れたユニットも復帰する（戦闘は毎回、部隊の状態から組み立て直すため、何もしなくてもそうなる）。
  * - 勝てば次の戦闘へ進む。負けたら、同じ戦闘をやり直すか、撤退して拠点へ戻るかを選ぶ（どちらでも、得た経験値と JP は持ち帰れる）。
  * - 進み具合（次に戦う戦闘）は、戦闘の間で保存する。戦闘の途中の状態は保存しない（ページを閉じたら、その戦闘の最初から）。
- * - クリアすると、全員の今のジョブに報酬の JP を配り、クリアの回数を記録する（初めてのクリアかも分かる）。クリア後も何度でも挑める。
+ * - クリアすると、全員の今のジョブに報酬の JP を配り（初めてのクリアと2回目以降で量が違う）、クリアの回数を記録する。
+ *   クリア後も何度でも挑める。
  *
  * ここの状態（DungeonState）は、セーブデータにそのまま入る JSON の単純なデータ。
  */
@@ -17,8 +18,10 @@ export interface DungeonDefinition {
   readonly id: string;
   /** 第1戦から順に並べた戦闘。どれも敵の段階は1つ（id は main） */
   readonly battles: readonly BattleSite[];
-  /** クリアした時に、全員の今のジョブに配る JP */
+  /** 初めてクリアした時に、全員の今のジョブに配る JP */
   readonly clearRewardJp: number;
+  /** 2回目以降のクリアで配る JP */
+  readonly repeatClearRewardJp: number;
 }
 
 /** 挑戦中のダンジョン。battle は次に戦う戦闘の番号（0 が第1戦） */
@@ -82,10 +85,16 @@ export function finishRunBattle(
   };
 }
 
+/** クリアの報酬の JP（初めてのクリアなら clearRewardJp、2回目以降は repeatClearRewardJp） */
+export function clearRewardJp(dungeon: DungeonDefinition, firstClear: boolean): number {
+  return firstClear ? dungeon.clearRewardJp : dungeon.repeatClearRewardJp;
+}
+
 /** クリアの報酬: 全員の今のジョブに JP を配る */
-export function grantClearReward(roster: Roster, dungeon: DungeonDefinition): Roster {
+export function grantClearReward(roster: Roster, dungeon: DungeonDefinition, firstClear: boolean): Roster {
+  const jp = clearRewardJp(dungeon, firstClear);
   let next = roster;
-  for (const u of roster.units) next = replaceUnit(next, gainJp(u, u.jobId, dungeon.clearRewardJp));
+  for (const u of roster.units) next = replaceUnit(next, gainJp(u, u.jobId, jp));
   return next;
 }
 

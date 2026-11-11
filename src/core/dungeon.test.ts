@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   clearCount,
+  clearRewardJp,
   EMPTY_DUNGEON_STATE,
   finishRunBattle,
   grantClearReward,
@@ -19,7 +20,7 @@ const site = (id: string): BattleSite => ({
   playerSlots: [],
   tiers: [{ id: 'main', units: [] }],
 });
-const dungeon: DungeonDefinition = { id: 'd', battles: [site('a'), site('b'), site('c')], clearRewardJp: 300 };
+const dungeon: DungeonDefinition = { id: 'd', battles: [site('a'), site('b'), site('c')], clearRewardJp: 300, repeatClearRewardJp: 100 };
 
 describe('連戦のダンジョン', () => {
   it('勝つと次の戦闘へ進み、最後の戦闘に勝つとクリア（挑戦を終え、回数を記録する）', () => {
@@ -61,11 +62,16 @@ describe('連戦のダンジョン', () => {
       slots: { secondary: null, reaction: null, support: null, movement: null },
     });
     const roster: Roster = { units: [unit('a', 'warrior'), unit('b', 'mage')] };
-    const after = grantClearReward(roster, dungeon);
+    const after = grantClearReward(roster, dungeon, true);
     expect(after.units.map((u) => u.jobs[u.jobId])).toEqual([
       { jp: 310, jpTotal: 350, learned: [] },
       { jp: 310, jpTotal: 350, learned: [] },
     ]);
+    // 2回目以降のクリアは、報酬が少ない（初回 300、2回目以降 100）
+    expect(clearRewardJp(dungeon, true)).toBe(300);
+    expect(clearRewardJp(dungeon, false)).toBe(100);
+    const again = grantClearReward(after, dungeon, false);
+    expect(again.units.map((u) => u.jobs[u.jobId]!.jp)).toEqual([410, 410]);
   });
 
   it('読み込んだ記録のうち、今はないダンジョンや範囲の外の戦闘への挑戦は取り消す', () => {

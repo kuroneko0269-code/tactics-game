@@ -39,11 +39,6 @@ export interface Outcome {
 
 const onTiles = (tiles: readonly Coord[], c: Coord) => tiles.some((t) => t.x === c.x && t.z === c.z);
 
-/** 今のレベル（脱力の罠で下がった分を引く） */
-export function currentLevel(unit: Pick<UnitState, 'level' | 'levelDrops'>): number {
-  return unit.level - unit.levelDrops;
-}
-
 /**
  * 状態だけで決まる勝敗（手番数の条件は除く）。決着していなければ null。勝利を優先する。
  */

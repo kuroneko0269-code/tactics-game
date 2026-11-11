@@ -9,14 +9,13 @@
  * - ジョブのレベル: そのジョブで得た JP の累計で決まる。能力値には影響せず、アビリティの習得と解放条件に使う。
  * - アビリティは、ジョブごとの JP を消費して習得する。習得にそのジョブのレベルが必要なものもある。
  *   受動的なアビリティ（リアクション・サポート・ムーブ）は、習得するとジョブを問わず、種類ごとに1つ付けられる。
- * - 経験値: 行動のたびに、相手（味方に使ったなら、その味方）のレベルによって増減した経験値を得る。
- *   勝利すると、倒れたユニットを含む全員が、敵のレベルによって増減した経験値を得る。
+ * - 経験値と JP: 行動のたびに、戦闘中のその場で得る（battle.ts。相手のレベルによって経験値が増減する）。
+ *   戦闘が終わったら、戦闘中の値を部隊へ書き戻し、勝利していれば全員に勝利のボーナスを足す（applyBattleResult）。
  *
  * 計算はすべて整数。数値（成長率、必要な経験値など）は src/data から引数で受け取る。
  * 部隊の状態（Roster）は JSON にそのまま変換できる単純なデータにする（セーブにそのまま使うため）。
  */
 import type {
-  ActionRecord,
   BattleState,
   GrowthStat,
   GrowthValues,
@@ -24,6 +23,7 @@ import type {
   JobDefinition,
   PassiveDefinition,
   PassiveSlot,
+  ProgressionRules,
   SpellDefinition,
   StrikeDefinition,
   UnitCommand,
@@ -35,40 +35,8 @@ export const GROWTH_STATS: readonly GrowthStat[] = ['maxHp', 'maxMp', 'attack', 
 
 export const ZERO_GROWTH: GrowthValues = { maxHp: 0, maxMp: 0, attack: 0, magic: 0, speed: 0 };
 
-/** 育成の数値（src/data に置く） */
-export interface ProgressionRules {
-  /** キャラクターのレベルの上限 */
-  readonly maxLevel: number;
-  /** レベル L から L+1 に上がるのに必要な経験値 = expBase + expPerLevel × (L − 1) */
-  readonly expBase: number;
-  readonly expPerLevel: number;
-  /** 攻撃・魔法・技を1回実行するたびに得る経験値（相手のレベルによる増減の前） */
-  readonly expPerAction: number;
-  /** 味方に使った行動（回復・守りなど）で得る経験値（相手のレベルによる増減の前） */
-  readonly expPerSupportAction: number;
-  /** 勝利した時に、倒れたユニットを含む全員が得る経験値（敵のレベルによる増減の前） */
-  readonly expVictory: number;
-  /**
-   * 相手のレベルによる増減。倍率（%）=（相手のレベル + expLevelOffset）× 100 ÷（自分のレベル + expLevelOffset）（切り捨て）。
-   * 上限は expLevelPercentMax。増減の後は切り捨てで、最低でも 1
-   */
-  readonly expLevelOffset: number;
-  readonly expLevelPercentMax: number;
-  /** 攻撃・魔法・技を1回実行するたびに、今のジョブに入る JP */
-  readonly jpPerAction: number;
-  /** 勝利した時に、全員の今のジョブに入る JP */
-  readonly jpVictoryBonus: number;
-  /**
-   * ジョブのレベルが上がる JP の累計。[i] はレベル i + 2 になる累計（長さ 7 なら、レベル 1〜8）
-   */
-  readonly jobLevelJp: readonly number[];
-  /** 能力ごとの成長値の上限（能力値の 1/100 単位） */
-  readonly growthCap: GrowthValues;
-  /** 成長の点数の重み。能力値 1 ぶんの成長を何点と数えるか */
-  readonly growthWeights: GrowthValues;
-  /** 成長の点数の合計の上限 */
-  readonly growthTotalCap: number;
-}
+/** 育成の数値（src/data に置く）。戦闘の状態にも持たせるので、型は battleTypes.ts にある */
+export type { ProgressionRules };
 
 /** 1つのジョブでの進み具合 */
 export interface JobProgress {
@@ -242,10 +210,9 @@ export function scaledExp(base: number, ownLevel: number, targetLevel: number, r
   return Math.max(1, Math.floor((base * expLevelPercent(ownLevel, targetLevel, rules)) / 100));
 }
 
-/** 1回の行動で得る経験値。味方に使った行動は expPerSupportAction、それ以外は expPerAction が元の量 */
-export function actionExp(record: ActionRecord, ownLevel: number, rules: ProgressionRules): number {
-  const base = record.ally ? rules.expPerSupportAction : rules.expPerAction;
-  return scaledExp(base, ownLevel, record.targetLevel, rules);
+/** 1回の行動で得る経験値。味方に使う行動（回復・守り）は expPerSupportAction、それ以外は expPerAction が元の量 */
+export function actionExp(supportive: boolean, ownLevel: number, targetLevel: number, rules: ProgressionRules): number {
+  return scaledExp(supportive ? rules.expPerSupportAction : rules.expPerAction, ownLevel, targetLevel, rules);
 }
 
 /** 経験値を得る。必要な量に達するたびにレベルが上がる。レベルの上限では経験値は貯まらない */
@@ -515,17 +482,30 @@ export function validateRoster(roster: Roster, catalog: GameCatalog, rules: Prog
 /** 戦闘の後の、1人ぶんの成果 */
 export interface UnitBattleReport {
   readonly unitId: string;
-  /** 戦闘で実行した行動の回数 */
+  /** 戦闘で経験値を得た行動の回数 */
   readonly actions: number;
+  /** 得た経験値の合計（戦闘中 + 勝利のボーナス） */
   readonly exp: number;
+  /** 得た JP の合計（戦闘中 + 勝利のボーナス） */
   readonly jp: number;
+  /** 戦闘中に得た経験値と JP */
+  readonly battleExp: number;
+  readonly battleJp: number;
+  /** 勝利のボーナス（負けたら 0） */
+  readonly bonusExp: number;
+  readonly bonusJp: number;
   /** JP が入ったジョブ */
   readonly jobId: string;
+  /** 戦闘の前のレベル */
   readonly levelBefore: number;
+  /** 戦闘が終わった時点のレベル（勝利のボーナスの前） */
+  readonly levelAfterBattle: number;
+  /** 勝利のボーナスを足した後のレベル */
   readonly levelAfter: number;
-  /** 脱力の罠で下がったレベルの数（経験値より先に反映する） */
+  /** 脱力の罠で下がったレベルの数 */
   readonly levelDrops: number;
   readonly jobLevelBefore: number;
+  readonly jobLevelAfterBattle: number;
   readonly jobLevelAfter: number;
 }
 
@@ -535,11 +515,12 @@ export interface BattleReport {
 }
 
 /**
- * 戦闘で得た経験値と JP を部隊に反映する。負けても、その戦闘で得た分は持ち帰れる（勝利の追加の経験値と JP だけ入らない）。
- * battle の味方のユニットのうち、部隊にいるユニット（id が同じ）に反映する。
- * 経験値: 行動ごとに、相手のレベルによって増減した量（actionExp）。勝利すると、倒れたユニットを含む全員に、
- * 敵の最も高いレベルによって増減した expVictory。レベルの増減は、戦闘の開始時の自分のレベルで計算する。
- * 脱力の罠で下がったレベル（levelDrops）は、勝ち負けに関わらず、経験値を足す前に levelDown で反映する（戻らない）。
+ * 戦闘の結果を部隊に反映する。
+ * - 戦闘中に得た経験値と JP（とレベルアップ・脱力の罠で下がったレベル）は、戦闘中のユニットの値をそのまま部隊へ書き戻す。
+ *   負けても持ち帰れる。
+ * - 勝利すると、倒れたユニットを含む全員に、敵の最も高いレベルによって増減した expVictory と、jpVictoryBonus を足す
+ *   （自分のレベルは、戦闘が終わった時点のレベル）。
+ * battle の味方のユニットのうち、部隊にいて（id が同じ）、戦闘中の進み具合（progress）を持つユニットに反映する。
  */
 export function applyBattleResult(
   roster: Roster,
@@ -552,26 +533,37 @@ export function applyBattleResult(
   const reports: UnitBattleReport[] = [];
   let next = roster;
   for (const u of battle.units) {
-    if (u.team !== 'player') continue;
+    if (u.team !== 'player' || !u.progress) continue;
     const before = next.units.find((r) => r.id === u.id);
     if (!before) continue;
-    const actionTotal = u.actions.reduce((sum, a) => sum + actionExp(a, u.level, rules), 0);
-    const exp = actionTotal + (victory ? scaledExp(rules.expVictory, u.level, enemyLevel, rules) : 0);
-    const jp = u.actions.length * rules.jpPerAction + (victory ? rules.jpVictoryBonus : 0);
     const jobId = before.jobId;
-    let drained = before;
-    for (let i = 0; i < u.levelDrops; i++) drained = levelDown(drained, catalog);
-    const after = gainJp(gainExp(drained, exp, catalog, rules), jobId, jp);
+    const p = jobProgress(before, jobId);
+    const afterBattle: RosterUnit = {
+      ...before,
+      level: u.level,
+      exp: u.progress.exp,
+      growth: u.growth,
+      jobs: { ...before.jobs, [jobId]: { ...p, jp: u.progress.jp, jpTotal: u.progress.jpTotal } },
+    };
+    const bonusExp = victory ? scaledExp(rules.expVictory, afterBattle.level, enemyLevel, rules) : 0;
+    const bonusJp = victory ? rules.jpVictoryBonus : 0;
+    const after = gainJp(gainExp(afterBattle, bonusExp, catalog, rules), jobId, bonusJp);
     reports.push({
       unitId: u.id,
-      actions: u.actions.length,
-      exp,
-      jp,
+      actions: u.actionCount,
+      exp: u.progress.gainedExp + bonusExp,
+      jp: u.progress.gainedJp + bonusJp,
+      battleExp: u.progress.gainedExp,
+      battleJp: u.progress.gainedJp,
+      bonusExp,
+      bonusJp,
       jobId,
       levelBefore: before.level,
+      levelAfterBattle: afterBattle.level,
       levelAfter: after.level,
-      levelDrops: before.level - drained.level,
+      levelDrops: u.levelDrops,
       jobLevelBefore: jobLevel(before, jobId, rules),
+      jobLevelAfterBattle: jobLevel(afterBattle, jobId, rules),
       jobLevelAfter: jobLevel(after, jobId, rules),
     });
     next = replaceUnit(next, after);

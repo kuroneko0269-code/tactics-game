@@ -9,16 +9,20 @@ import type {
   BattleRules,
   BattleState,
   ChargeState,
+  GrowthValues,
   JobDefinition,
   PassiveDefinition,
+  ProgressionRules,
   ScenarioState,
   SpellDefinition,
   StatusState,
   StrikeDefinition,
   Team,
   UnitCommand,
+  UnitProgressState,
   UnitState,
 } from './battleTypes';
+import { ZERO_GROWTH } from './progression';
 import type { AiConfig, AiConfigs } from './ai';
 import type { Direction } from './geometry';
 import { createMap } from './map';
@@ -260,6 +264,9 @@ export interface TestUnit {
   statuses?: StatusState[];
   level?: number;
   levelDrops?: number;
+  /** 経験値と JP の進み具合（渡すと、戦闘中に経験値と JP を得る。state の progression も要る） */
+  progress?: UnitProgressState;
+  growth?: GrowthValues;
 }
 
 /** 平らなマップ（すべて高さ 0） */
@@ -279,6 +286,8 @@ export function makeState(options: {
   lastAggressionTurn?: number;
   /** 勝敗条件・イベント・罠（省くと全滅の条件だけ） */
   scenario?: Partial<ScenarioState>;
+  /** 育成の数値（渡すと、progress を持つユニットが戦闘中に経験値と JP を得る） */
+  progression?: ProgressionRules;
 }): BattleState {
   const map = createMap({
     id: 'test',
@@ -304,13 +313,18 @@ export function makeState(options: {
       mp: u.mp ?? job.stats.maxMp,
       level: u.level ?? 1,
       levelDrops: u.levelDrops ?? 0,
+      baseStats: job.stats,
+      growth: u.growth ?? ZERO_GROWTH,
+      growthRates: job.growth ?? ZERO_GROWTH,
+      statBonus: {},
+      progress: u.progress ?? null,
       weapon: job.weapon ?? null,
       commands,
       spells: testSpells.filter((sp) => ids.includes(sp.id)),
       strikes: testStrikes.filter((sp) => ids.includes(sp.id)),
       passives: (u.passives ?? []).map(testPassive),
       statuses: u.statuses ?? [],
-      actions: [],
+      actionCount: 0,
       charging: u.charging ?? null,
       movedLastTurn: u.movedLastTurn ?? false,
     };
@@ -331,6 +345,7 @@ export function makeState(options: {
       : null,
     winner: null,
     rngState: options.seed ?? 1,
+    progression: options.progression ?? null,
     turnNumber: options.turnNumber ?? 1,
     lastAggressionTurn: options.lastAggressionTurn ?? 0,
     scenario: {

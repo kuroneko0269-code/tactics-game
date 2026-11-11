@@ -7,7 +7,12 @@
  * 詠唱中に自分の手番が来たら、待機すれば詠唱を続け、移動か行動をすると詠唱は中断される（MP は戻らない）。
  * 行動には、通常攻撃のほかに行動アビリティ（強打のようにすぐ出る技と、詠唱のある魔法・狙い撃ち）がある。
  * アビリティは、必要な武器の種類が合わなければ使えない。
- * 攻撃・魔法・技を実行するたびに、ユニットの行動の記録（actions。相手のレベルなど）を残す（戦闘の後の経験値と JP に使う）。
+ * 経験値と JP（フェーズ2-3）: 部隊のユニット（progress を持つ）は、行動した時点で経験値と JP を得る。経験値が貯まれば、
+ * その場でレベルが上がり、成長値と能力値が変わる（最大 HP・MP が増えた分だけ、今の HP・MP も増える。全回復はしない）。
+ * - 攻撃・技は、当たっても外れても同じ量。相手のレベルで増減する。反撃では入らない。
+ * - 詠唱のある魔法・技は、発動した時に入る（中断・不発では入らない）。範囲に何体いても1回分で、
+ *   レベルによる増減は、効果が届いたユニット（味方・自分を含む）の中で最もレベルの高いユニットで計算する。誰もいなければ入らない。
+ * - 敵のユニットは得ない。
  * 勝敗は、戦闘ごとの勝敗条件で決まる（省くと全滅。判定は scenario.ts）。
  *
  * マップ上のイベント・罠・増援（フェーズ2-2）:
@@ -22,7 +27,6 @@
  * 反撃で手番のユニットが倒れたら、その手番はそこで終わる。
  */
 import type {
-  ActionRecord,
   ActionResult,
   BattleAction,
   BattleEvent,
@@ -35,7 +39,6 @@ import type {
   PendingReinforcement,
   ScenarioState,
   SpellDefinition,
-  SpellTarget,
   StatusId,
   StrikeDefinition,
   Team,
@@ -49,13 +52,20 @@ import type {
 import { attackableTargets, canReach, knockbackOutcome, previewAttack, strikeOf, weaponFits } from './combat';
 import { addStatus, applyPassiveStats, damageTaken, isSilencedFor, mpCostOf, passiveEffect, passiveIdOf, tickStatuses } from './effects';
 import { DIRECTIONS, directionToward, manhattan, type Coord } from './geometry';
-import { hasMpFor, isValidSpellTarget, previewSpellAt, spellArea, spellOf, targetCenter } from './magic';
-import { statsWithGrowth, ZERO_GROWTH } from './progression';
+import { hasMpFor, isValidSpellTarget, previewSpellAt, spellOf, targetCenter } from './magic';
+import {
+  actionExp,
+  addGrowth,
+  expToNext,
+  jobLevelFromJp,
+  statsWithGrowth,
+  subtractGrowth,
+  ZERO_GROWTH,
+} from './progression';
 import { createMap, getTile } from './map';
 import { isAlive, reachableTiles, unitAt } from './movement';
 import { createRng, restoreRng } from './rng';
 import {
-  currentLevel,
   DEFAULT_OBJECTIVES,
   enterTriggerDue,
   judgeOutcome,
@@ -132,6 +142,7 @@ export function startBattle(
     turn: null,
     winner: null,
     rngState: createRng(seed).getState(),
+    progression: setup.progression ?? null,
     turnNumber: 0,
     lastAggressionTurn: 0,
     scenario,
@@ -170,7 +181,9 @@ function buildUnit(
     if (!def) throw new Error(`ユニット ${p.id}: 受動的なアビリティ ${id} が見つかりません`);
     return def;
   });
-  const stats = applyPassiveStats(withBonus(statsWithGrowth(job.stats, p.growth ?? ZERO_GROWTH), p.statBonus), unitPassives);
+  const growth = p.growth ?? ZERO_GROWTH;
+  const statBonus = p.statBonus ?? {};
+  const stats = computeStats(job.stats, growth, statBonus, unitPassives);
   return {
     id: p.id,
     team: p.team,
@@ -185,16 +198,33 @@ function buildUnit(
     mp: stats.maxMp,
     level: p.level ?? 1,
     levelDrops: 0,
+    baseStats: job.stats,
+    growth,
+    growthRates: job.growth ?? ZERO_GROWTH,
+    statBonus,
+    progress: p.progress
+      ? { exp: p.progress.exp, jp: p.progress.jp, jpTotal: p.progress.jpTotal, gainedExp: 0, gainedJp: 0 }
+      : null,
     weapon: job.weapon ?? null,
     commands,
     spells: unitSpells,
     strikes: unitStrikes,
     passives: unitPassives,
     statuses: [],
-    actions: [],
+    actionCount: 0,
     charging: null,
     movedLastTurn: false,
   };
+}
+
+/** 能力値 = 基本値 + 成長値（100 で割って切り捨て）+ 補正、に受動的なアビリティ（重装・早足・身軽）を反映したもの */
+function computeStats(
+  base: UnitStats,
+  growth: UnitState['growth'],
+  bonus: Partial<UnitStats>,
+  passives: readonly PassiveDefinition[],
+): UnitStats {
+  return applyPassiveStats(withBonus(statsWithGrowth(base, growth), bonus), passives);
 }
 
 /** 能力値に補正を足す（0 より下にはしない） */
@@ -272,8 +302,9 @@ export function applyAction(state: BattleState, action: BattleAction): ActionRes
     case 'attack': {
       const target = getUnit(state, action.targetId);
       const strike = action.abilityId === undefined ? undefined : strikeOf(unit, action.abilityId);
-      let next = updateUnit(state, unit.id, { actions: [...unit.actions, { targetLevel: target.level, ally: false }] });
-      next = resolveWeaponAttack(next, unit.id, target.id, strike, false, events);
+      let next = resolveWeaponAttack(state, unit.id, target.id, strike, false, events);
+      // 当たっても外れても、同じ量の経験値と JP（反撃を受けて倒れても入る）
+      next = grantProgress(next, unit.id, target.level, false, events);
       next = runStateEvents(next, events);
       next = { ...next, turn: { ...turn, acted: true }, lastAggressionTurn: state.turnNumber };
       next = endIfDecided(next, events);
@@ -291,9 +322,9 @@ export function applyAction(state: BattleState, action: BattleAction): ActionRes
         ? { kind: 'unit' as const, unitId: action.target.unitId }
         : { kind: 'tile' as const, x: action.target.x, z: action.target.z };
       events.push({ type: 'castStarted', casterId: unit.id, spellId: spell.id, target, mp, casterFacing });
+      // 経験値と JP は、発動した時に入る（resolveCharge）
       const next = updateUnit(state, unit.id, {
         mp,
-        actions: [...unit.actions, spellReference(state, unit, spell, target)],
         facing: casterFacing,
         charging: { spellId: spell.id, target, progress: 0 },
       });
@@ -480,27 +511,65 @@ function resolveWeaponAttack(
   return next;
 }
 
+/** 支援の魔法（回復・味方に有利な状態変化）か。経験値の元の量が変わる */
+function isSupportive(state: BattleState, spell: SpellDefinition): boolean {
+  return spell.effect === 'heal' || (spell.effect === 'status' && !state.rules.status[spell.inflicts!].harmful);
+}
+
 /**
- * 魔法を指定した時の、経験値の計算に使う記録。相手（味方に使ったなら、その味方）のレベルを残す。
- * - ユニットを狙えば、そのユニット。マスを狙えば、そのマスにいるユニット。
- * - どちらでもなければ、範囲にいるユニット（詠唱者を除く）のうち、回復・守りなら味方、それ以外なら相手を優先して、レベルの高い方。
- * - 誰もいなければ、詠唱者自身のレベル。
+ * 行動の経験値と JP を、その場で与える（部隊のユニットだけ。敵や、進み具合を持たないユニットには、行動の回数を数えるだけ）。
+ * targetLevel は相手（範囲なら、効果が届いた中で最もレベルの高いユニット）のレベル。
  */
-function spellReference(state: BattleState, caster: UnitState, spell: SpellDefinition, target: SpellTarget): ActionRecord {
-  const supportive = spell.effect === 'heal' || (spell.effect === 'status' && !state.rules.status[spell.inflicts!].harmful);
-  const record = (u: UnitState): ActionRecord => ({ targetLevel: u.level, ally: u.team === caster.team });
-  if (target.kind === 'unit') return record(getUnit(state, target.unitId));
-  const center = targetCenter(state, target)!;
-  const onCenter = state.units.find((u) => isAlive(u) && u.x === center.x && u.z === center.z);
-  if (onCenter) return record(onCenter);
-  const area = spellArea(state.map, spell, center);
-  const inArea = state.units.filter(
-    (u) => isAlive(u) && u.id !== caster.id && area.some((t) => t.x === u.x && t.z === u.z),
-  );
-  const preferred = inArea.filter((u) => (u.team === caster.team) === supportive);
-  const pool = preferred.length > 0 ? preferred : inArea;
-  if (pool.length === 0) return { targetLevel: caster.level, ally: supportive };
-  return record(pool.reduce((a, b) => (b.level > a.level ? b : a)));
+function grantProgress(
+  state: BattleState,
+  unitId: string,
+  targetLevel: number,
+  supportive: boolean,
+  events: BattleEvent[],
+): BattleState {
+  const rules = state.progression;
+  const unit = getUnit(state, unitId);
+  // 行動の回数は、敵も含めて数える（バランス確認の集計用）
+  const counted = updateUnit(state, unitId, { actionCount: unit.actionCount + 1 });
+  if (!rules || !unit.progress) return counted;
+  const exp = actionExp(supportive, unit.level, targetLevel, rules);
+  const jp = rules.jpPerAction;
+  events.push({ type: 'progressGained', unitId, exp, jp });
+  const p = unit.progress;
+  let next = updateUnit(counted, unitId, {
+    progress: { ...p, exp: p.exp + exp, jp: p.jp + jp, jpTotal: p.jpTotal + jp, gainedExp: p.gainedExp + exp, gainedJp: p.gainedJp + jp },
+  });
+  // ジョブのレベル（JP の累計で決まる）
+  const jobFrom = jobLevelFromJp(p.jpTotal, rules);
+  const jobTo = jobLevelFromJp(p.jpTotal + jp, rules);
+  if (jobTo > jobFrom) events.push({ type: 'jobLeveledUp', unitId, jobId: unit.jobId, from: jobFrom, to: jobTo });
+  // 経験値が貯まったら、その場でレベルを上げる（何度でも）
+  for (;;) {
+    const u = getUnit(next, unitId);
+    const progress = u.progress!;
+    if (u.level >= rules.maxLevel) {
+      if (progress.exp !== 0) next = updateUnit(next, unitId, { progress: { ...progress, exp: 0 } });
+      break;
+    }
+    const need = expToNext(u.level, rules);
+    if (progress.exp < need) break;
+    const growth = addGrowth(u.growth, u.growthRates, rules);
+    const stats = computeStats(u.baseStats, growth, u.statBonus, u.passives);
+    // 最大 HP・MP が増えた分だけ、今の HP・MP も増やす（倒れているユニットは起き上がらない）
+    const alive = isAlive(u);
+    const hp = alive ? Math.max(0, u.hp + stats.maxHp - u.stats.maxHp) : 0;
+    const mp = Math.max(0, Math.min(stats.maxMp, u.mp + Math.max(0, stats.maxMp - u.stats.maxMp)));
+    events.push({ type: 'leveledUp', unitId, from: u.level, to: u.level + 1, stats, hp, mp });
+    next = updateUnit(next, unitId, {
+      level: u.level + 1,
+      growth,
+      stats,
+      hp,
+      mp,
+      progress: { ...progress, exp: progress.exp - need },
+    });
+  }
+  return next;
 }
 
 /** 決着していれば、勝敗を記録して手番をなくす */
@@ -573,10 +642,26 @@ function springTrap(
     events.push({ ...base, unitId, damage: 0, hp: unit.hp });
     return inflict(state, unitId, 'slow', events);
   }
-  const from = currentLevel(unit);
-  const drops = from > 1 ? unit.levelDrops + 1 : unit.levelDrops;
-  events.push({ ...base, unitId, damage: 0, hp: unit.hp, level: { from, to: unit.level - drops } });
-  return updateUnit(state, unitId, { levelDrops: drops });
+  // 脱力の罠: その場でレベルが 1 下がる（今のジョブの成長率ぶん成長値が減り、貯まっていた経験値は 0 に戻る。戦闘の後も戻らない）。
+  // 最大 HP・MP が減ったら、今の HP・MP は最大を超えないように抑える
+  const from = unit.level;
+  if (from <= 1) {
+    events.push({ ...base, unitId, damage: 0, hp: unit.hp, level: { from, to: from } });
+    return state;
+  }
+  const growth = subtractGrowth(unit.growth, unit.growthRates);
+  const stats = computeStats(unit.baseStats, growth, unit.statBonus, unit.passives);
+  const hp = Math.min(unit.hp, stats.maxHp);
+  events.push({ ...base, unitId, damage: 0, hp, level: { from, to: from - 1 } });
+  return updateUnit(state, unitId, {
+    level: from - 1,
+    levelDrops: unit.levelDrops + 1,
+    growth,
+    stats,
+    hp,
+    mp: Math.min(unit.mp, stats.maxMp),
+    progress: unit.progress ? { ...unit.progress, exp: 0 } : null,
+  });
 }
 
 /** イベントを起こす（起きた回数を数え、起きることを順に処理する） */
@@ -682,9 +767,13 @@ function resolveCharge(state: BattleState, casterId: string, events: BattleEvent
     tiles: preview.tiles,
     results: preview.results,
   });
+  // 経験値と JP: 効果が届いたユニットの中で最もレベルの高いユニットで計算する（誰もいなければ入らない）
+  const targetLevel = Math.max(0, ...preview.results.map((r) => getUnit(next, r.unitId).level));
+  const grant = (s: BattleState) =>
+    preview.results.length > 0 ? grantProgress(s, casterId, targetLevel, isSupportive(s, spell), events) : s;
   if (spell.effect === 'status') {
     for (const r of preview.results) next = inflict(next, r.unitId, spell.inflicts!, events);
-    return next;
+    return grant(next);
   }
   for (const r of preview.results) next = updateUnit(next, r.unitId, { hp: r.hp });
   for (const r of preview.results) {
@@ -696,7 +785,7 @@ function resolveCharge(state: BattleState, casterId: string, events: BattleEvent
     if (r.hp === 0) next = defeat(next, r.unitId, events);
     else if (r.amount > 0) next = meditate(next, r.unitId, events);
   }
-  return next;
+  return grant(next);
 }
 
 /** 時計を進め、途中で発動する魔法を発動しながら、次の手番を始める。途中で決着したらそこで止める */

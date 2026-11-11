@@ -36,6 +36,8 @@ export interface BattleHud {
   showObjectives(open: boolean): void;
   /** 短いメッセージを画面の上の方に数秒出す（マップ上のイベントなど） */
   showMessage(text: string): void;
+  /** レベルアップの短い演出（「レベルアップ！」とユニットの名前・新しいレベル）。操作は止めない */
+  showLevelUp(detail: string): void;
 }
 
 /** 勝敗条件の表示 */
@@ -133,6 +135,8 @@ export interface HudHandlers {
   readonly initialHeight: number;
   /** 向きのボタンを置く位置を求める */
   readonly facingScreen: FacingScreen;
+  /** レベル level から次のレベルに必要な経験値（上限のレベルなら undefined）。情報の欄に「次まで N EXP」を出すため */
+  readonly expToNext?: (level: number) => number | undefined;
 }
 
 export function createHud(root: HTMLElement, mapId: string, handlers: HudHandlers, targetIds: readonly string[] = []): BattleHud {
@@ -260,8 +264,12 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
   message.hidden = true;
   message.setAttribute('aria-live', 'polite');
   let messageTimer: number | undefined;
+  const levelUp = el('div', 'levelup-banner');
+  levelUp.hidden = true;
+  levelUp.setAttribute('aria-live', 'polite');
+  let levelUpTimer: number | undefined;
 
-  root.append(facingPad, top, preview, bottom, result, objectivePanel, message);
+  root.append(facingPad, top, preview, bottom, result, objectivePanel, message, levelUp);
 
   let infoState = { name: '', mapName: TEXT.mapNames[mapId] ?? mapId, targets: targetIds };
 
@@ -300,7 +308,7 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
       const name = el('strong', `team-text-${unit.team}`);
       name.textContent = `${infoState.name}`;
       const job = el('span', 'job');
-      job.textContent = ` ${TEXT.teams[unit.team]}・${TEXT.jobs[unit.jobId] ?? unit.jobId} ${TEXT.roster.level(unit.level - unit.levelDrops)}`;
+      job.textContent = ` ${TEXT.teams[unit.team]}・${TEXT.jobs[unit.jobId] ?? unit.jobId} ${TEXT.roster.level(unit.level)}`;
       const hp = el('div', 'info-hp');
       hp.append(`${TEXT.hp} ${unit.hp} / ${unit.stats.maxHp}`, hpBar(unit.hp, unit.stats.maxHp, unit.team));
       // MP は HP と並べて表示する（MP を持たないジョブは出さない）
@@ -308,6 +316,21 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
         const mp = el('span', 'info-mp');
         mp.append(`${TEXT.mp} ${unit.mp} / ${unit.stats.maxMp}`, mpBar(unit.mp, unit.stats.maxMp));
         hp.append(mp);
+      }
+      // 部隊のユニット: 次のレベルまでの経験値（棒）と、今のジョブの JP
+      let growthLine: HTMLElement | undefined;
+      if (unit.progress) {
+        growthLine = el('div', 'info-growth');
+        const need = handlers.expToNext?.(unit.level);
+        const bar = el('span', 'exp-bar');
+        const fill = el('span', 'exp-bar-fill');
+        fill.style.width = `${need ? Math.min(100, Math.floor((unit.progress.exp * 100) / need)) : 100}%`;
+        bar.append(fill);
+        const expText = el('span', 'info-exp');
+        expText.textContent = need === undefined ? TEXT.gain.maxLevel : TEXT.gain.expToNext(need - unit.progress.exp);
+        const jpText = el('span', 'info-jp');
+        jpText.textContent = TEXT.gain.jpHave(unit.progress.jp);
+        growthLine.append(bar, expText, jpText);
       }
       const stats = el('div', 'info-stats');
       stats.textContent = [
@@ -317,7 +340,7 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
         `${TEXT.stats.jump} ${unit.stats.jump}`,
         `${TEXT.stats.speed} ${unit.stats.speed}`,
       ].join(' ・ ');
-      info.append(name, job, hp, stats);
+      info.append(name, job, hp, ...(growthLine ? [growthLine] : []), stats);
       if (infoState.targets.includes(unit.id)) info.append(Object.assign(el('div', 'info-target'), { textContent: TEXT.objectives.targetTag }));
       if (unit.charging) {
         const spell = unit.spells.find((sp) => sp.id === unit.charging!.spellId);
@@ -466,6 +489,22 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
       messageTimer = window.setTimeout(() => {
         message.hidden = true;
       }, 2600);
+    },
+    showLevelUp(detail) {
+      levelUp.innerHTML = '';
+      const head = el('strong');
+      head.textContent = TEXT.gain.levelUp;
+      const sub = el('span');
+      sub.textContent = detail;
+      levelUp.append(head, sub);
+      levelUp.hidden = false;
+      levelUp.classList.remove('show');
+      void levelUp.offsetWidth;
+      levelUp.classList.add('show');
+      window.clearTimeout(levelUpTimer);
+      levelUpTimer = window.setTimeout(() => {
+        levelUp.hidden = true;
+      }, 1800);
     },
     showResult(winner, turns, onRetry) {
       result.hidden = !winner;
