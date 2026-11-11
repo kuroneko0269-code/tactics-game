@@ -466,10 +466,21 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
       check(p, `${what} の画面上の位置が分かりません`);
       if (await isTappable(p)) return p;
       const before = await snapshot();
-      // 中央からドラッグして、狙う点を中央へ引き寄せる（大きすぎる移動は数回に分ける）
+      // 中央からドラッグして、狙う点を中央へ引き寄せる（大きすぎる移動は数回に分ける）。
+      // 指を置く点が情報欄やボタンの上だとマップが動かないので、人がするように、マップの見えている所まで上下にずらして置く
       const dx = clamp(center.x - p.x, -viewport.width * 0.4, viewport.width * 0.4);
       const dy = clamp(center.y - p.y, -viewport.height * 0.3, viewport.height * 0.3);
-      await drag({ x: center.x - dx / 2, y: center.y - dy / 2 }, { x: center.x + dx / 2, y: center.y + dy / 2 });
+      let shift = 0;
+      for (const s of [0, 60, -60, 120, -120, 180]) {
+        const from = { x: center.x - dx / 2, y: center.y - dy / 2 + s };
+        const to = { x: center.x + dx / 2, y: center.y + dy / 2 + s };
+        const inside = (q) => q.y > 0 && q.y < viewport.height;
+        if (inside(from) && inside(to) && (await isTappable(from))) {
+          shift = s;
+          break;
+        }
+      }
+      await drag({ x: center.x - dx / 2, y: center.y - dy / 2 + shift }, { x: center.x + dx / 2, y: center.y + dy / 2 + shift });
       stats.cameraOps++;
       await waitCameraIdle();
       check((await snapshot()) === before, `ドラッグの終わりに、マスかユニットが誤って選ばれました（${what} へ寄せる時）`);
@@ -898,6 +909,14 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
     await pressButton(text.objectives.close);
     if (drill) {
       await screenshot('00-deploy');
+      // 敵をタップすると、情報の欄にその敵の装備が出る（フェーズ2-4）
+      const enemy = (await getDeploy()).state.units.find((u) => u.team === 'enemy' && u.equipment.length > 0);
+      await tapDeployUnit(enemy.id);
+      await waitFor('敵の情報の欄', () => document.querySelector('.info-equipment') !== null);
+      const equipText = await page.locator('.info-equipment').textContent();
+      const names = enemy.equipment.map((e) => text.equipment[e.id].name);
+      check(names.every((n) => equipText.includes(n)), `敵の情報の欄に装備が出ていません（${equipText} / ${names}）`);
+      await screenshot('00-deploy-enemy-info');
       // 2人を入れ替えて、もう一度入れ替えて元に戻す（core だけの計算と同じ配置で戦うため）
       await swapOnDeploy('hero-1', 'hero-3');
       await screenshot('00-deploy-swapped');

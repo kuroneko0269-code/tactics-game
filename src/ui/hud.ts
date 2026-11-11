@@ -354,8 +354,9 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
         line.textContent = TEXT.statusInfo(TEXT.statuses[st.id], TEXT.statusHelp[st.id], st.turns);
         info.append(line);
       }
-      // 装備（フェーズ2-4。敵のユニットも見られる）
-      if (unit.equipment.length > 0) {
+      // 敵の装備（フェーズ2-4）。味方の装備は編成の画面で見られるので、手番の間ずっと出る味方の欄は高くしない
+      // （縦向きでは、欄が高くなるとマップの見える範囲が減るため）
+      if (unit.team === 'enemy' && unit.equipment.length > 0) {
         const line = el('div', 'info-equipment');
         line.textContent = TEXT.equipmentInfo(unit.equipment.map((e) => TEXT.equipment[e.id]?.name ?? e.id));
         info.append(line);
