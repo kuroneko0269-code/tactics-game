@@ -18,15 +18,26 @@ export interface UnitLabels {
   popText(id: string, text: string, kind?: 'note' | 'reaction'): void;
   /** 付いている状態変化の小さな目印（頭上の HP の上に、1文字ずつ） */
   setStatuses(id: string, statuses: readonly StatusId[]): void;
+  /** ユニットを足す（増援が現れた時） */
+  addUnit(unit: LabelUnit): void;
+  /** 撃破の対象の敵に、頭上の札（★）を付ける */
+  setTargets(ids: readonly string[]): void;
 }
 
-export function createUnitLabels(
-  root: HTMLElement,
-  units: readonly { id: string; team: Team; hp: number; maxHp: number; mp: number; maxMp: number }[],
-): UnitLabels {
+export interface LabelUnit {
+  readonly id: string;
+  readonly team: Team;
+  readonly hp: number;
+  readonly maxHp: number;
+  readonly mp: number;
+  readonly maxMp: number;
+}
+
+export function createUnitLabels(root: HTMLElement, units: readonly LabelUnit[]): UnitLabels {
   root.innerHTML = '';
   const labels = new Map<string, { box: HTMLElement; hp: HTMLElement; mp: HTMLElement; statuses: HTMLElement; team: Team }>();
-  for (const u of units) {
+  const add = (u: LabelUnit) => {
+    if (labels.has(u.id)) return;
     const box = document.createElement('div');
     box.className = `unit-label team-${u.team}`;
     const hp = document.createElement('div');
@@ -39,7 +50,7 @@ export function createUnitLabels(
     box.append(hp, mp, statuses);
     root.append(box);
     labels.set(u.id, { box, hp, mp, statuses, team: u.team });
-  }
+  };
 
   const setHp = (id: string, hp: number, maxHp: number) => {
     const l = labels.get(id);
@@ -59,10 +70,12 @@ export function createUnitLabels(
     l.mp.append(mpBar(mp, maxMp));
     l.mp.title = `${TEXT.mp} ${mp} / ${maxMp}`;
   };
-  for (const u of units) {
+  const addUnit = (u: LabelUnit) => {
+    add(u);
     setHp(u.id, u.hp, u.maxHp);
     setMp(u.id, u.mp, u.maxMp);
-  }
+  };
+  for (const u of units) addUnit(u);
 
   const pop = (id: string, text: string, className: string) => {
     const l = labels.get(id);
@@ -83,6 +96,21 @@ export function createUnitLabels(
         if (!l) continue;
         l.box.style.transform = `translate(${a.x}px, ${a.y}px)`;
         l.box.classList.toggle('hidden', !a.visible);
+      }
+    },
+    addUnit,
+    setTargets(ids) {
+      for (const [id, l] of labels) {
+        let badge = l.box.querySelector<HTMLElement>('.unit-label-target');
+        if (ids.includes(id) && !badge) {
+          badge = document.createElement('div');
+          badge.className = 'unit-label-target';
+          badge.textContent = TEXT.objectives.targetBadge;
+          badge.title = TEXT.objectives.targetTag;
+          l.box.prepend(badge);
+        } else if (!ids.includes(id) && badge) {
+          badge.remove();
+        }
       }
     },
     popDamage: (id, damage) => pop(id, String(damage), 'damage'),

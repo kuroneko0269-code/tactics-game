@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { startBattle } from './battle';
 import { ZERO_GROWTH, type Roster } from './progression';
-import { buildSortie, interleaveTeams, type BattleSite } from './sortie';
+import { buildSortie, interleaveTeams, swapPlacements, type BattleSite } from './sortie';
 import { flat, testJobs, testRules, testSpells, testStrikes } from './testSupport';
 
 const site: BattleSite = {
@@ -57,5 +57,37 @@ describe('出撃', () => {
     expect(e2.stats.magic).toBe(testJobs[2]!.stats.magic + 5);
     expect(e2.spells.map((s) => s.id)).toEqual(['fire']);
     expect(() => buildSortie(site, 'nope', roster, { jobs: testJobs })).toThrow();
+  });
+
+  it('出撃前の配置: 味方2体の位置と向きを入れ替える（並び順は変えない）。敵や同じユニットとは入れ替えられない', () => {
+    const roster: Roster = { units: [unit('a', 'warrior'), unit('b', 'archer')] };
+    const setup = buildSortie({ ...site, playerSlots: [{ x: 0, z: 3, facing: 'north' }, { x: 1, z: 2, facing: 'east' }] }, 'easy', roster, {
+      jobs: testJobs,
+    });
+    const swapped = swapPlacements(setup, 'a', 'b');
+    expect(swapped.units.map((u) => u.id)).toEqual(setup.units.map((u) => u.id));
+    expect(swapped.units.find((u) => u.id === 'a')).toMatchObject({ x: 1, z: 2, facing: 'east' });
+    expect(swapped.units.find((u) => u.id === 'b')).toMatchObject({ x: 0, z: 3, facing: 'north' });
+    expect(swapPlacements(swapped, 'b', 'a')).toEqual(setup);
+    expect(() => swapPlacements(setup, 'a', 'e1')).toThrow();
+    expect(() => swapPlacements(setup, 'a', 'a')).toThrow();
+  });
+
+  it('戦場の勝敗条件・イベント・罠を、1戦の定義にそのまま渡す', () => {
+    const setup = buildSortie(
+      {
+        ...site,
+        objectives: { victory: [{ kind: 'defeatUnit', unitId: 'e2' }], defeat: [{ kind: 'allDefeated' }] },
+        traps: [{ x: 2, z: 2, kind: 'drain' }],
+        events: [{ id: 'm', trigger: { kind: 'turn', turn: 0 }, effects: [{ kind: 'message', messageId: 'x' }] }],
+      },
+      'easy',
+      { units: [unit('a', 'warrior')] },
+      { jobs: testJobs },
+    );
+    const { state } = startBattle(setup, testJobs, testRules, 1, testSpells, testStrikes);
+    expect(state.scenario.objectives.victory).toEqual([{ kind: 'defeatUnit', unitId: 'e2' }]);
+    expect(state.scenario.traps).toEqual([{ x: 2, z: 2, kind: 'drain', revealed: false }]);
+    expect(state.scenario.events[0]!.fired).toBe(1);
   });
 });

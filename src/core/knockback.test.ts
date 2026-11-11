@@ -353,6 +353,23 @@ describe('敵 AI が新しい行動アビリティを使う', () => {
     expect(chooseSealSpell(silenced, getUnit(silenced, 'm'), false)).toBeUndefined();
   });
 
+  it('封じは、相手の攻撃が届く位置からでも（届く相手が sealMaxDanger 体以下なら）、詠唱中の相手と回復魔法を使う相手には使う', () => {
+    const units: TestUnit[] = [
+      { id: 'm', team: 'enemy', job: testMage, x: 0, z: 0, commands: [{ jobId: 'mage', abilityIds: ['seal'] }] },
+      { id: 'pw', team: 'player', x: 2, z: 0 },
+      { id: 'ph', team: 'player', job: testHealer, x: 0, z: 4 },
+    ];
+    const state = makeState({ heights: flat(8, 8), units });
+    const m = getUnit(state, 'm');
+    // 戦士と癒し手の2体の攻撃が届くので、届かない位置からだけ（0）や 1 体までなら使えない
+    expect(chooseSealSpell(state, m, false)).toBeUndefined();
+    expect(chooseSealSpell(state, m, false, 1)).toBeUndefined();
+    expect(chooseSealSpell(state, m, false, 2)?.target).toEqual({ kind: 'unit', unitId: 'ph' });
+    // 回復魔法も詠唱もしない相手（魔術師で、詠唱していない）には、届く位置からは使わない
+    const mageOnly = makeState({ heights: flat(8, 8), units: [units[0]!, units[1]!, { id: 'pm', team: 'player', job: testMage, x: 0, z: 4 }] });
+    expect(chooseSealSpell(mageOnly, getUnit(mageOnly, 'm'), false, 2)).toBeUndefined();
+  });
+
   it('守りの祈りは、回復が要らない時に、相手の攻撃が届く位置にいる味方を2体以上守れるなら使う', () => {
     const state = makeState({
       heights: flat(8, 8),

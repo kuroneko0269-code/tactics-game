@@ -270,6 +270,26 @@ describe('JP とジョブのレベル', () => {
     const result = applyBattleResult(roster, { ...s, winner: 'player', turn: null }, catalog, rules);
     expect(result.report.units[0]!.exp).toBe(Math.floor((20 * 163) / 100));
   });
+  it('脱力の罠で下がったレベルは、勝ち負けに関わらず戦闘の後も残る（経験値より先に levelDown で反映する）', () => {
+    const grown = { ...levelTimes(recruit(), 4), exp: 30 };
+    const roster: Roster = { units: [grown] };
+    const s = makeState({
+      heights: [[0, 0, 0, 0]],
+      units: [
+        { id: 'u1', team: 'player', x: 0, z: 0, level: 5, levelDrops: 2 },
+        { id: 'e', team: 'enemy', x: 3, z: 0, level: 5 },
+      ],
+    });
+    for (const winner of ['player', 'enemy'] as const) {
+      const result = applyBattleResult(roster, { ...s, winner, turn: null }, catalog, rules);
+      const u = result.roster.units[0]!;
+      // Lv 5 → 3（経験値は 0 に戻る）。勝てば勝利の経験値 20 が入るが、レベルは上がらない
+      expect(u.level).toBe(3);
+      expect(u.exp).toBe(winner === 'player' ? 20 : 0);
+      expect(u.growth).toEqual(levelTimes(recruit(), 2).growth);
+      expect(result.report.units[0]).toMatchObject({ levelBefore: 5, levelAfter: 3, levelDrops: 2 });
+    }
+  });
 });
 
 describe('ジョブチェンジと副コマンド', () => {

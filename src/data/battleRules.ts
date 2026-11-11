@@ -29,4 +29,6 @@ export const battleRules: BattleRules = {
    * 落下: 高さの差 1 につき 8%（高さの差 2 なら 16%）。押し出せない時（マップの外・ほかのユニット・登れない段差）: 8%
    */
   knockback: { fallDamagePercentPerHeight: 8, blockedDamagePercent: 8 },
+  /** 罠。落石は最大 HP の 20% のダメージ（切り捨て、最小 1。守りで減る）。ぬかるみの鈍足は status.slow の数値 */
+  trap: { rockfallDamagePercent: 20 },
 };

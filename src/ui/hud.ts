@@ -27,6 +27,25 @@ export interface BattleHud {
   showFacingPad(unitId: string | undefined, selected?: Direction, onPick?: (direction: Direction) => void): void;
   /** 毎フレーム呼ぶ（向きのボタンを、カメラの動きに合わせて置き直す） */
   update(): void;
+  /**
+   * 勝敗条件の表示。summary は上に常に出す短い文（手番数の条件があれば残りの手番数を含む）。
+   * 押すと、勝利条件・敗北条件・増援の予告の一覧（ObjectivesView）を開く
+   */
+  setObjectives(view: ObjectivesView): void;
+  /** 勝敗条件の一覧を開く・閉じる */
+  showObjectives(open: boolean): void;
+  /** 短いメッセージを画面の上の方に数秒出す（マップ上のイベントなど） */
+  showMessage(text: string): void;
+}
+
+/** 勝敗条件の表示 */
+export interface ObjectivesView {
+  /** 常に出す短い文（例: 「勝利: ボスの撃破」「勝利: 奥の扉に到達 ・ 増援 あと 3 手番」） */
+  readonly summary: string;
+  readonly victory: readonly string[];
+  readonly defeat: readonly string[];
+  /** 補足（手番数の残り、増援の予告など） */
+  readonly notes: readonly string[];
 }
 
 /** 向きのボタンを置くための画面座標（BattleView.facingScreen と同じ形） */
@@ -116,7 +135,7 @@ export interface HudHandlers {
   readonly facingScreen: FacingScreen;
 }
 
-export function createHud(root: HTMLElement, mapId: string, handlers: HudHandlers): BattleHud {
+export function createHud(root: HTMLElement, mapId: string, handlers: HudHandlers, targetIds: readonly string[] = []): BattleHud {
   root.innerHTML = '';
 
   const top = el('div', 'hud-top');
@@ -203,13 +222,54 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
     }
   };
 
-  root.append(facingPad, top, preview, bottom, result);
+  // 勝敗条件: 上に短い文のボタンを常に出し、押すと一覧を開く
+  const objectiveBar = button('◎', TEXT.objectives.open, () => showObjectivesPanel(objectivePanel.hidden !== false), 'hud-button objective-bar');
+  objectiveBar.hidden = true;
+  top.append(objectiveBar);
+  const objectivePanel = el('div', 'panel objective-panel');
+  objectivePanel.hidden = true;
+  objectivePanel.setAttribute('role', 'dialog');
+  let objectives: ObjectivesView | undefined;
+  const renderObjectives = () => {
+    objectivePanel.innerHTML = '';
+    if (!objectives) return;
+    const title = el('div', 'objective-title');
+    title.textContent = TEXT.objectives.title;
+    objectivePanel.append(title);
+    const list = (label: string, items: readonly string[], cls: string) => {
+      const head = el('div', `objective-head ${cls}`);
+      head.textContent = label;
+      const ul = el('ul', 'objective-list');
+      for (const item of items) {
+        const li = el('li');
+        li.textContent = item;
+        ul.append(li);
+      }
+      objectivePanel.append(head, ul);
+    };
+    list(TEXT.objectives.victory, objectives.victory, 'victory');
+    list(TEXT.objectives.defeat, objectives.defeat, 'defeat');
+    if (objectives.notes.length > 0) list(TEXT.objectives.notes, objectives.notes, 'notes');
+    objectivePanel.append(button('', TEXT.objectives.close, () => showObjectivesPanel(false), 'hud-button action objective-close'));
+  };
+  const showObjectivesPanel = (open: boolean) => {
+    objectivePanel.hidden = !open || !objectives;
+    objectiveBar.setAttribute('aria-expanded', String(!objectivePanel.hidden));
+  };
+  const message = el('div', 'message-banner');
+  message.hidden = true;
+  message.setAttribute('aria-live', 'polite');
+  let messageTimer: number | undefined;
 
-  let infoState = { name: '', mapName: TEXT.mapNames[mapId] ?? mapId };
+  root.append(facingPad, top, preview, bottom, result, objectivePanel, message);
+
+  let infoState = { name: '', mapName: TEXT.mapNames[mapId] ?? mapId, targets: targetIds };
 
   return {
     setTurnOrder(entries) {
       order.innerHTML = '';
+      // 出撃前の配置の画面では、行動順の欄を出さない
+      order.hidden = entries.length === 0;
       const label = el('span', 'turn-order-label');
       label.textContent = TEXT.turnOrder;
       order.append(label);
@@ -232,7 +292,7 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
       info.innerHTML = '';
       const head = el('div', 'info-head');
       const turn = el('small');
-      turn.textContent = `${infoState.mapName} ・ ${TEXT.turnNumber(turnNumber)}`;
+      turn.textContent = turnNumber > 0 ? `${infoState.mapName} ・ ${TEXT.turnNumber(turnNumber)}` : infoState.mapName;
       head.append(turn);
       info.append(head);
       if (!unit) return;
@@ -240,7 +300,7 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
       const name = el('strong', `team-text-${unit.team}`);
       name.textContent = `${infoState.name}`;
       const job = el('span', 'job');
-      job.textContent = ` ${TEXT.teams[unit.team]}・${TEXT.jobs[unit.jobId] ?? unit.jobId} ${TEXT.roster.level(unit.level)}`;
+      job.textContent = ` ${TEXT.teams[unit.team]}・${TEXT.jobs[unit.jobId] ?? unit.jobId} ${TEXT.roster.level(unit.level - unit.levelDrops)}`;
       const hp = el('div', 'info-hp');
       hp.append(`${TEXT.hp} ${unit.hp} / ${unit.stats.maxHp}`, hpBar(unit.hp, unit.stats.maxHp, unit.team));
       // MP は HP と並べて表示する（MP を持たないジョブは出さない）
@@ -258,6 +318,7 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
         `${TEXT.stats.speed} ${unit.stats.speed}`,
       ].join(' ・ ');
       info.append(name, job, hp, stats);
+      if (infoState.targets.includes(unit.id)) info.append(Object.assign(el('div', 'info-target'), { textContent: TEXT.objectives.targetTag }));
       if (unit.charging) {
         const spell = unit.spells.find((sp) => sp.id === unit.charging!.spellId);
         const charging = el('div', `info-charging element-${spell?.element ?? 'fire'}`);
@@ -386,6 +447,25 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
     },
     update() {
       placeFacingPad();
+    },
+    setObjectives(view) {
+      objectives = view;
+      objectiveBar.hidden = false;
+      objectiveBar.querySelector('.label')!.textContent = view.summary;
+      objectiveBar.setAttribute('aria-label', `${TEXT.objectives.open}: ${view.summary}`);
+      renderObjectives();
+    },
+    showObjectives: (open) => showObjectivesPanel(open),
+    showMessage(text) {
+      message.textContent = text;
+      message.hidden = false;
+      message.classList.remove('show');
+      void message.offsetWidth;
+      message.classList.add('show');
+      window.clearTimeout(messageTimer);
+      messageTimer = window.setTimeout(() => {
+        message.hidden = true;
+      }, 2600);
     },
     showResult(winner, turns, onRetry) {
       result.hidden = !winner;

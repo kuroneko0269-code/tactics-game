@@ -23,6 +23,16 @@
  * - 守りの祈り（癒し手）: 回復が要らない時、相手の攻撃が届く位置にいる味方を2体以上（protectMinAllies）守れるなら使う。
  * - 反撃を付けた相手には、反撃で倒されてしまう攻撃はしない（その攻撃で相手を倒せる時を除く）。
  *
+ * 予約された範囲（フェーズ2-2）: 相手の詠唱中の攻撃魔法の範囲には、なるべく留まらない（攻撃・魔法・回復の位置と、近づく先）。
+ *
+ * 勝敗条件と罠（フェーズ2-2）:
+ * - 見えている罠のマスには止まらない（見えていない罠の位置は知らないものとして動く）。
+ * - 到達が勝利条件の戦闘: 敵は、到達するマスまでの歩数が、どの味方よりも近い位置に留まって道をふさぐ。
+ *   味方は、到達するマスへ移動できればそこへ移動し、攻撃できない手番は到達するマスへ近づく（単独で踏み込まない決まりは同じ）。
+ *   攻撃や魔法のためにも、到達するマスから遠ざかる位置へは動かない。
+ * - 撃破が勝利条件の戦闘: 撃破の対象になっている敵は前に出ない（最も近い相手との距離が縮まる位置へは動かない）。
+ *   相手の攻撃が届かない位置にいる間は、届かない位置からだけ魔法や攻撃をする（届く位置にいる時は、その場で戦う）。味方は、その敵を優先して攻撃し、攻撃できない手番はその敵へ近づく。
+ *
  * 味方側のユニットにも同じ思考を使える（テストやバランス確認で AI 同士を戦わせるため）。
  */
 import { activeUnit, applyAction } from './battle';
@@ -41,6 +51,7 @@ import { DIRECTION_VECTORS, DIRECTIONS, directionToward, manhattan, type Coord, 
 import { canCast, chargeArea, hasMpFor, previewSpellAt, spellRangeTiles } from './magic';
 import { getTile } from './map';
 import { canStep, isAlive, reachableTiles, unitAt } from './movement';
+import { goalTiles, isKnownTrap, targetUnitIds } from './scenario';
 
 /** AI の設定（数値は src/data に置く） */
 export interface AiConfig {
@@ -64,6 +75,11 @@ export interface AiConfig {
   readonly slowValue: number;
   /** 守りの祈りを使う目安。相手の攻撃が届く位置にいて、まだ守りの付いていない味方を、この数以上守れる時に使う */
   readonly protectMinAllies: number;
+  /**
+   * 封じを使ってよい位置: 相手の攻撃を届かせられる相手の数がこれ以下のマス（0 なら届かない位置からだけ）。
+   * 届く位置からは、魔法を詠唱中の相手と回復魔法を使う相手だけを狙う。省くと 0
+   */
+  readonly sealMaxDanger?: number;
 }
 
 /** 陣営ごとの AI の設定 */
@@ -89,12 +105,35 @@ export interface SpellPlan {
   readonly target: SpellTarget;
 }
 
-/** 移動先（今の位置を含む）の候補 */
+/**
+ * 移動先（今の位置を含む）の候補。見えている罠のマスには止まらない。
+ * 到達が勝利条件の戦闘では、味方は到達するマスから遠ざかる位置を選ばない（後ろの増援を追いかけて戻らないため）
+ */
 function candidatePositions(state: BattleState, unit: UnitState, canMove: boolean): Position[] {
   const here: Position = { x: unit.x, z: unit.z, steps: 0 };
   if (!canMove) return [here];
-  return [here, ...reachableTiles(state, unit).map((t) => ({ x: t.x, z: t.z, steps: t.path.length - 1 }))];
+  let moves = reachableTiles(state, unit).filter((t) => !isKnownTrap(state, t));
+  const goals = unit.team === 'player' ? goalTiles(state.scenario.objectives) : [];
+  if (goals.length > 0) {
+    const d = walkingDistances(state, goals, unit.stats.jump);
+    const far = (c: Coord) => d.get(keyOf(state, c)) ?? 1000;
+    moves = moves.filter((t) => far(t) <= far(here));
+  }
+  // 撃破の対象は前に出ない: 最も近い相手との距離が縮まる位置へは動かない
+  if (isObjectiveTarget(state, unit)) {
+    const gap = (c: Coord) => Math.min(1000, ...state.units.filter((u) => u.team !== unit.team && isAlive(u)).map((u) => manhattan(c, u)));
+    moves = moves.filter((t) => gap(t) >= gap(here));
+  }
+  return [here, ...moves.map((t) => ({ x: t.x, z: t.z, steps: t.path.length - 1 }))];
 }
+
+/** 撃破の対象になっている敵か（相手の攻撃が届く位置へ不用意に出ない） */
+const isObjectiveTarget = (state: BattleState, unit: UnitState) =>
+  unit.team === 'enemy' && targetUnitIds(state.scenario.objectives).includes(unit.id);
+
+/** unit から見て、撃破を狙う相手（味方の AI が、撃破の対象の敵を狙う） */
+const priorityTargetIds = (state: BattleState, unit: UnitState): readonly string[] =>
+  unit.team === 'player' ? targetUnitIds(state.scenario.objectives) : [];
 
 function heightOf(state: BattleState, c: Coord): number {
   return getTile(state.map, c.x, c.z)?.height ?? 0;
@@ -118,6 +157,23 @@ export function threatMap(state: BattleState, team: Team): Map<number, number> {
   return counts;
 }
 
+/**
+ * 相手の詠唱中の攻撃魔法が予約している範囲のマス（フェーズ2-2）。そこに留まると、発動した時に巻き込まれる。
+ * unit 自身を追いかけて狙っている魔法は、動いても逃げられないので数えない。
+ */
+export function reservedTiles(state: BattleState, unit: UnitState): Set<number> {
+  const tiles = new Set<number>();
+  for (const caster of state.units) {
+    if (!isAlive(caster) || caster.team === unit.team || !caster.charging) continue;
+    const spell = caster.spells.find((s) => s.id === caster.charging!.spellId);
+    if (spell?.effect !== 'damage') continue;
+    const target = caster.charging.target;
+    if (target.kind === 'unit' && target.unitId === unit.id) continue;
+    for (const t of chargeArea(state, caster)) tiles.add(keyOf(state, t));
+  }
+  return tiles;
+}
+
 /** 攻撃する位置と相手を選ぶ。攻撃できる相手がいなければ undefined。safeOnly なら攻撃の届かない位置からだけ */
 export function chooseAttack(
   state: BattleState,
@@ -127,10 +183,13 @@ export function chooseAttack(
   config?: AiConfig,
 ): AttackPlan | undefined {
   const threat = threatMap(state, unit.team);
+  const priority = priorityTargetIds(state, unit);
+  const reserved = reservedTiles(state, unit);
   let best: { plan: AttackPlan; score: number[] } | undefined;
   for (const pos of candidatePositions(state, unit, canMove)) {
     const danger = threat.get(keyOf(state, pos)) ?? 0;
     if (safeOnly && danger > 0) continue;
+    const inReserved = reserved.has(keyOf(state, pos)) ? 1 : 0;
     for (const target of attackableTargets(state, unit, pos)) {
       const preview = previewAttack(state, unit, target, pos);
       // 反撃で倒されてしまう攻撃は避ける（その攻撃で相手を倒せる時を除く）
@@ -138,6 +197,8 @@ export function chooseAttack(
       // 小さいほど良い。先頭の項目から順に比べる
       const score = [
         lethalCounter,
+        inReserved,
+        priority.includes(target.id) ? 0 : 1,
         target.charging ? 0 : 1,
         SIDE_RANK[preview.side],
         -heightOf(state, pos),
@@ -232,15 +293,19 @@ function damageSpellChoice(
   state: BattleState,
   unit: UnitState,
   canMove: boolean,
+  safeOnly = false,
 ): { plan: SpellPlan; net: number } | undefined {
   const spells = unit.spells.filter((s) => s.effect === 'damage' && canCast(unit, s));
   if (spells.length === 0) return undefined;
   const opponent: Team = unit.team === 'player' ? 'enemy' : 'player';
   const threat = threatMap(state, unit.team);
+  const priorityIds = priorityTargetIds(state, unit);
+  const reserved = reservedTiles(state, unit);
   let best: { plan: SpellPlan; score: number[]; net: number } | undefined;
   for (const pos of candidatePositions(state, unit, canMove)) {
     const self = { ...unit, x: pos.x, z: pos.z };
-    const danger = (threat.get(keyOf(state, pos)) ?? 0) > 0 ? 1 : 0;
+    const danger = (threat.get(keyOf(state, pos)) ?? 0) > 0 || reserved.has(keyOf(state, pos)) ? 1 : 0;
+    if (safeOnly && danger) continue;
     for (const spell of spells) {
       for (const center of spellRangeTiles(state.map, spell, pos)) {
         const preview = previewSpellAt(state, unit, spell, center, self);
@@ -248,6 +313,7 @@ function damageSpellChoice(
         let priority = 0;
         let damage = 0;
         let enemies = 0;
+        let objective = 0;
         for (const r of preview.results) {
           const u = r.unitId === unit.id ? self : state.units.find((x) => x.id === r.unitId)!;
           if (u.team === unit.team) {
@@ -258,6 +324,7 @@ function damageSpellChoice(
             enemies++;
             damage += r.amount;
             if (u.charging || !u.movedLastTurn) priority++;
+            if (priorityIds.includes(u.id)) objective++;
           }
         }
         if (enemies === 0 || net < 1) continue;
@@ -271,7 +338,7 @@ function damageSpellChoice(
         // 中心に敵がいれば、その敵を追いかける狙い方にできる（発動までに逃げられにくい）
         const target = targetFor(state, center, opponent);
         const follows = target.kind === 'unit' ? 0 : 1;
-        const score = [danger, -net, -priority, single, speed, follows, -damage, spell.mpCost, pos.steps, tieBreak(state, pos.x, pos.z, center.x, center.z)];
+        const score = [danger, -objective, -net, -priority, single, speed, follows, -damage, spell.mpCost, pos.steps, tieBreak(state, pos.x, pos.z, center.x, center.z)];
         if (!best || compareScores(score, best.score) < 0) {
           best = { plan: { position: { x: pos.x, z: pos.z }, spellId: spell.id, target }, score, net };
         }
@@ -289,7 +356,12 @@ const usesMagic = (u: UnitState) => u.spells.some((s) => s.kind === 'magic' && s
  * 魔法を使う相手で、沈黙が付いておらず、味方の封じがまだ向かっていない相手を狙う。
  * 魔法を詠唱中の相手（中断できる）→ 回復魔法を使う相手 → 移動の少ない位置 の順に選ぶ。狙いは相手を追いかける
  */
-export function chooseSealSpell(state: BattleState, unit: UnitState, canMove: boolean): SpellPlan | undefined {
+export function chooseSealSpell(
+  state: BattleState,
+  unit: UnitState,
+  canMove: boolean,
+  maxDanger = 0,
+): SpellPlan | undefined {
   const spells = unit.spells.filter((s) => s.effect === 'status' && s.inflicts === 'silence' && canCast(unit, s));
   if (spells.length === 0) return undefined;
   const pending = new Set<string>();
@@ -305,14 +377,17 @@ export function chooseSealSpell(state: BattleState, unit: UnitState, canMove: bo
   const threat = threatMap(state, unit.team);
   let best: { plan: SpellPlan; score: number[] } | undefined;
   for (const pos of candidatePositions(state, unit, canMove)) {
-    if ((threat.get(keyOf(state, pos)) ?? 0) > 0) continue;
+    const reach = threat.get(keyOf(state, pos)) ?? 0;
+    if (reach > maxDanger) continue;
     for (const spell of spells) {
       for (const o of targets) {
         const d = manhattan(pos, o);
         if (d < (spell.minRange ?? 0) || d > spell.range) continue;
         const chargingMagic = o.charging && o.spells.find((x) => x.id === o.charging!.spellId)?.kind === 'magic';
         const healer = o.spells.some((x) => x.effect === 'heal');
-        const score = [chargingMagic ? 0 : 1, healer ? 0 : 1, pos.steps, tieBreak(state, pos.x, pos.z, o.x, o.z)];
+        // 相手の攻撃が届く位置からは、魔法を詠唱中の相手か、回復魔法を使う相手だけを封じる（フェーズ2-2）
+        if (reach > 0 && !chargingMagic && !healer) continue;
+        const score = [chargingMagic ? 0 : 1, reach, healer ? 0 : 1, pos.steps, tieBreak(state, pos.x, pos.z, o.x, o.z)];
         if (!best || compareScores(score, best.score) < 0) {
           best = { plan: { position: { x: pos.x, z: pos.z }, spellId: spell.id, target: { kind: 'unit', unitId: o.id } }, score };
         }
@@ -404,10 +479,11 @@ export function chooseHealSpell(
     return undefined;
   }
   const threat = threatMap(state, unit.team);
+  const reserved = reservedTiles(state, unit);
   let best: { plan: SpellPlan; score: number[] } | undefined;
   for (const pos of candidatePositions(state, unit, canMove)) {
     const self = { ...unit, x: pos.x, z: pos.z };
-    const danger = (threat.get(keyOf(state, pos)) ?? 0) > 0 ? 1 : 0;
+    const danger = (threat.get(keyOf(state, pos)) ?? 0) > 0 || reserved.has(keyOf(state, pos)) ? 1 : 0;
     for (const spell of spells) {
       for (const center of spellRangeTiles(state.map, spell, pos)) {
         const preview = previewSpellAt(state, unit, spell, center, self);
@@ -468,15 +544,30 @@ function supportersNear(state: BattleState, unit: UnitState, pos: Coord, range: 
 export function chooseApproach(state: BattleState, unit: UnitState, config: AiConfig): Coord | undefined {
   const stance = config.stance ?? 'normal';
   if (stance === 'hold') return undefined;
-  const target = nearestOpponent(state, unit, unit);
-  if (!target) return undefined;
-  const distances = walkingDistances(state, target, unit.stats.jump);
-  const distanceTo = (c: Coord) => distances.get(keyOf(state, c)) ?? 1000 + manhattan(c, target);
-  // 癒し手は前に出ない。ただし癒し手しか残っていなければ、にらみ合いの時に前進する
-  const healer = isHealer(unit);
-  const advance = stance === 'advance' || ((!healer || onlyHealersLeft(state, unit)) && isStalemate(state, config));
+  const goals = unit.team === 'player' ? goalTiles(state.scenario.objectives) : [];
+  const priority = priorityTargetIds(state, unit)
+    .map((id) => state.units.find((u) => u.id === id))
+    .find((u): u is UnitState => u !== undefined && isAlive(u));
+  const target = priority ?? nearestOpponent(state, unit, unit);
+  if (!target && goals.length === 0) return undefined;
+  // 到達が勝利条件なら、味方は到達するマスを目指す。撃破の対象がいれば、その敵を目指す
+  const aim: readonly Coord[] = goals.length > 0 ? goals : [target!];
+  const distances = walkingDistances(state, aim, unit.stats.jump);
+  const distanceTo = (c: Coord) => distances.get(keyOf(state, c)) ?? 1000 + Math.min(...aim.map((a) => manhattan(c, a)));
+  // 敵は、到達するマスまでの歩数が、どの味方よりも近い位置に留まる（道をふさぐ）
+  const guarded = unit.team === 'enemy' ? goalTiles(state.scenario.objectives) : [];
+  const guard = guarded.length > 0 ? walkingDistances(state, guarded, unit.stats.jump) : undefined;
+  const guardOf = (c: Coord) => guard?.get(keyOf(state, c)) ?? 1000;
+  const guardLimit = guard
+    ? Math.min(...state.units.filter((u) => u.team !== unit.team && isAlive(u)).map((u) => guardOf(u))) - 1
+    : 0;
+  // 癒し手と撃破の対象は前に出ない。ただし癒し手しか残っていなければ、にらみ合いの時に前進する
+  const healer = isHealer(unit) || isObjectiveTarget(state, unit);
+  const advance =
+    stance === 'advance' || ((!healer || onlyHealersLeft(state, unit)) && isStalemate(state, config));
   const threat = advance ? undefined : threatMap(state, unit.team);
   const hereReach = threat?.get(keyOf(state, unit)) ?? 0;
+  const reserved = reservedTiles(state, unit);
 
   let best: { pos: Position; score: number[] } | undefined;
   for (const pos of candidatePositions(state, unit, true)) {
@@ -485,11 +576,28 @@ export function chooseApproach(state: BattleState, unit: UnitState, config: AiCo
     let danger = reach > 0 && (healer || reach > supportersNear(state, unit, pos, config.supportRange)) ? reach : 0;
     // すでに届く範囲にいるなら、今より届く相手が増えないマスへは進んでよい（下がって手番を無駄にしないため）
     if (!healer && hereReach > 0 && reach <= hereReach) danger = 0;
-    const score = [danger, distanceTo(pos), -heightOf(state, pos), pos.steps, tieBreak(state, pos.x, pos.z)];
+    const behind = guard ? Math.max(0, guardOf(pos) - guardLimit) : 0;
+    const inReserved = reserved.has(keyOf(state, pos)) ? 1 : 0;
+    const score = [inReserved, danger, behind, distanceTo(pos), -heightOf(state, pos), pos.steps, tieBreak(state, pos.x, pos.z)];
     if (!best || compareScores(score, best.score) < 0) best = { pos, score };
   }
   if (!best || best.pos.steps === 0) return undefined;
   return { x: best.pos.x, z: best.pos.z };
+}
+
+/** 封じの狙いが、魔法を詠唱中の相手か（詠唱を中断できる） */
+function isChargingMagic(state: BattleState, plan: SpellPlan): boolean {
+  if (plan.target.kind !== 'unit') return false;
+  const id = plan.target.unitId;
+  const o = state.units.find((u) => u.id === id);
+  return Boolean(o?.charging && o.spells.find((x) => x.id === o.charging!.spellId)?.kind === 'magic');
+}
+
+/** 封じの狙いが、回復魔法を使う相手か */
+function isHealerTarget(state: BattleState, plan: SpellPlan): boolean {
+  if (plan.target.kind !== 'unit') return false;
+  const id = plan.target.unitId;
+  return Boolean(state.units.find((u) => u.id === id)?.spells.some((x) => x.effect === 'heal'));
 }
 
 type Plan =
@@ -507,10 +615,20 @@ function choosePlan(state: BattleState, unit: UnitState, canMove: boolean, confi
     const attack = chooseAttack(state, unit, canMove, !onlyHealersLeft(state, unit), config);
     return attack && { kind: 'attack', ...attack };
   }
-  // 2体以上を巻き込める攻撃魔法 → 封じ → 1体を狙う攻撃魔法 の順
+  // 撃破の対象は、相手の攻撃が届かない位置からだけ行動する（すでに届く位置にいれば、どこからでも）
+  if (isObjectiveTarget(state, unit) && (threatMap(state, unit.team).get(keyOf(state, unit)) ?? 0) === 0) {
+    const safeSpell = damageSpellChoice(state, unit, canMove, true);
+    if (safeSpell) return { kind: 'cast', ...safeSpell.plan };
+    const seal = chooseSealSpell(state, unit, canMove);
+    if (seal) return { kind: 'cast', ...seal };
+    const attack = chooseAttack(state, unit, canMove, true, config);
+    return attack && { kind: 'attack', ...attack };
+  }
+  // 魔法を詠唱中の相手・回復魔法を使う相手への封じ → 2体以上を巻き込める攻撃魔法 → 封じ → 1体を狙う攻撃魔法 の順
+  const seal = chooseSealSpell(state, unit, canMove, config.sealMaxDanger ?? 0);
+  if (seal && (isChargingMagic(state, seal) || isHealerTarget(state, seal))) return { kind: 'cast', ...seal };
   const spell = damageSpellChoice(state, unit, canMove);
   if (spell && spell.net >= 2) return { kind: 'cast', ...spell.plan };
-  const seal = chooseSealSpell(state, unit, canMove);
   if (seal) return { kind: 'cast', ...seal };
   if (spell) return { kind: 'cast', ...spell.plan };
   const knock = chooseKnockback(state, unit, canMove);
@@ -528,6 +646,13 @@ export function decideNextAction(state: BattleState, config: AiConfig): BattleAc
 
   // 詠唱中なら、待機して詠唱を続ける
   if (turn.chargingAtStart && unit.charging) return endTurn;
+
+  // 到達が勝利条件なら、味方は到達するマスへ移動できればすぐに移動する
+  if (unit.team === 'player' && !turn.moved && (config.stance ?? 'normal') !== 'hold') {
+    const goals = goalTiles(state.scenario.objectives);
+    const reach = reachableTiles(state, unit).find((t) => goals.some((g) => g.x === t.x && g.z === t.z) && !isKnownTrap(state, t));
+    if (reach) return { type: 'move', x: reach.x, z: reach.z };
+  }
 
   if (!turn.acted) {
     const plan = choosePlan(state, unit, !turn.moved, config);
@@ -612,11 +737,12 @@ function nearestOpponent(state: BattleState, unit: UnitState, from: Coord): Unit
   return best;
 }
 
-/** goal から各マスまでの歩数（地形の高さだけを考え、ユニットは無視する） */
-function walkingDistances(state: BattleState, goal: Coord, jump: number): Map<number, number> {
+/** goal（複数ならいちばん近いもの）から各マスまでの歩数（地形の高さだけを考え、ユニットは無視する） */
+function walkingDistances(state: BattleState, goal: Coord | readonly Coord[], jump: number): Map<number, number> {
   const key = (c: Coord) => keyOf(state, c);
-  const result = new Map<number, number>([[key(goal), 0]]);
-  let frontier: Coord[] = [goal];
+  const goals: readonly Coord[] = Array.isArray(goal) ? goal : [goal as Coord];
+  const result = new Map<number, number>(goals.map((g) => [key(g), 0]));
+  let frontier: Coord[] = [...goals];
   for (let d = 1; frontier.length > 0; d++) {
     const next: Coord[] = [];
     for (const from of frontier) {

@@ -141,8 +141,26 @@ export const protectPrayer: SpellDefinition = {
   castSpeed: 50,
 };
 
+/**
+ * 業火: ダンジョン「はじまりの遺跡」のボスだけが使う、詠唱のとても長い強力な範囲の攻撃魔法（フェーズ2-2）。
+ * 範囲 2（中心から2歩、13マス）。どのジョブでも習得できない。
+ * 予約された範囲から逃げるか、突き飛ばしや封じで詠唱を止めるかの判断が生まれるように、発動までにほかのユニットの手番が5回前後入る遅さにした
+ */
+export const inferno: SpellDefinition = {
+  id: 'inferno',
+  kind: 'magic',
+  element: 'fire',
+  effect: 'damage',
+  power: 170,
+  mpCost: 20,
+  range: 5,
+  areaRadius: 2,
+  heightTolerance: 3,
+  castSpeed: 10,
+};
+
 /** 詠唱のある行動アビリティ（魔法と狙い撃ち） */
-export const spells: readonly SpellDefinition[] = [fire, wind, thunder, heal, bigHeal, aimedShot, seal, protectPrayer];
+export const spells: readonly SpellDefinition[] = [fire, wind, thunder, heal, bigHeal, aimedShot, seal, protectPrayer, inferno];
 
 /** 強打: 通常攻撃のダメージ 1.5 倍、命中率 -15。近接武器（剣・杖）が必要 */
 export const powerStrike: StrikeDefinition = {

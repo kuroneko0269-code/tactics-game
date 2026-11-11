@@ -430,3 +430,100 @@ describe('手番の終わりの向きの初期値', () => {
     expect(defaultFacing(alone, alone.units[0]!)).toBe('west');
   });
 });
+
+describe('AI: 勝敗条件と罠（フェーズ2-2）', () => {
+  it('見えている罠のマスには止まらない。見えていない罠は知らないものとして動く', () => {
+    const base = {
+      heights: flat(8, 1),
+      units: [
+        { id: 'e', team: 'enemy' as const, x: 0, z: 0 },
+        { id: 'p', team: 'player' as const, x: 7, z: 0 },
+      ],
+      lastAggressionTurn: -100,
+      turnNumber: 1,
+    };
+    const hidden = makeState({ ...base, scenario: { traps: [{ x: 3, z: 0, kind: 'rockfall', revealed: false }] } });
+    expect(chooseApproach(hidden, hidden.units[0]!, testAi)).toEqual({ x: 3, z: 0 });
+    const known = makeState({ ...base, scenario: { traps: [{ x: 3, z: 0, kind: 'rockfall', revealed: true }] } });
+    expect(chooseApproach(known, known.units[0]!, testAi)).toEqual({ x: 2, z: 0 });
+  });
+
+  it('到達が勝利条件: 味方は到達するマスへ移動できればすぐ移動し、できなければ前進する', () => {
+    const objectives = { victory: [{ kind: 'reachTile' as const, tiles: [{ x: 0, z: 0 }] }], defeat: [{ kind: 'allDefeated' as const }] };
+    const near = makeState({
+      heights: flat(8, 8),
+      units: [
+        { id: 'p', team: 'player', x: 2, z: 0 },
+        { id: 'e', team: 'enemy', x: 7, z: 7 },
+      ],
+      scenario: { objectives },
+    });
+    expect(decideNextAction(near, testAi)).toEqual({ type: 'move', x: 0, z: 0 });
+    // 待つ動かし方（hold）では動かない
+    expect(decideNextAction(near, { ...testAi, stance: 'hold' }).type).toBe('endTurn');
+    const far = makeState({
+      heights: flat(8, 8),
+      units: [
+        { id: 'p', team: 'player', x: 7, z: 4 },
+        { id: 'e', team: 'enemy', x: 7, z: 7 },
+      ],
+      scenario: { objectives },
+    });
+    // 敵（後ろ）ではなく、到達するマスの方へ進む
+    const dest = chooseApproach(far, far.units[0]!, testAi)!;
+    expect(dest.x + dest.z).toBe(7 + 4 - 3);
+  });
+
+  it('到達が勝利条件: 敵は、到達するマスまでの歩数がどの味方よりも近い位置に留まる', () => {
+    const objectives = { victory: [{ kind: 'reachTile' as const, tiles: [{ x: 0, z: 0 }] }], defeat: [{ kind: 'allDefeated' as const }] };
+    const state = makeState({
+      heights: flat(10, 1),
+      units: [
+        { id: 'e', team: 'enemy', x: 2, z: 0 },
+        { id: 'p', team: 'player', x: 9, z: 0 },
+      ],
+      scenario: { objectives },
+      turnNumber: 30,
+      lastAggressionTurn: 0,
+    });
+    // にらみ合いで前進する時も、味方（到達まで 9 歩）より到達するマスの近く（8 歩以内）に留まる
+    expect(chooseApproach(state, state.units[0]!, testAi)).toEqual({ x: 5, z: 0 });
+  });
+
+  it('撃破が勝利条件: 味方はその敵を優先して攻撃する。対象の敵は相手の攻撃が届く位置へ出ない', () => {
+    const objectives = { victory: [{ kind: 'defeatUnit' as const, unitId: 'boss' }], defeat: [{ kind: 'allDefeated' as const }] };
+    const state = makeState({
+      heights: flat(6, 6),
+      units: [
+        { id: 'p', team: 'player', x: 2, z: 2 },
+        { id: 'boss', team: 'enemy', x: 2, z: 1, hp: 50, facing: 'north' },
+        { id: 'guard', team: 'enemy', x: 3, z: 2, hp: 5, facing: 'east' },
+      ],
+      scenario: { objectives },
+    });
+    expect(chooseAttack(state, state.units[0]!, false)?.targetId).toBe('boss');
+    const noObjective = makeState({
+      heights: flat(6, 6),
+      units: [
+        { id: 'p', team: 'player', x: 2, z: 2 },
+        { id: 'boss', team: 'enemy', x: 2, z: 1, hp: 50, facing: 'north' },
+        { id: 'guard', team: 'enemy', x: 3, z: 2, hp: 5, facing: 'east' },
+      ],
+    });
+    expect(chooseAttack(noObjective, noObjective.units[0]!, false)?.targetId).toBe('guard');
+
+    const bossTurn = makeState({
+      heights: flat(10, 1),
+      units: [
+        { id: 'boss', team: 'enemy', x: 0, z: 0 },
+        { id: 'p', team: 'player', x: 9, z: 0 },
+      ],
+      scenario: { objectives },
+      turnNumber: 40,
+      lastAggressionTurn: 0,
+    });
+    // にらみ合いでも、相手の攻撃が届くマス（相手から 4 歩以内）には入らない
+    const dest = chooseApproach(bossTurn, bossTurn.units[0]!, testAi);
+    expect(dest === undefined || 9 - dest.x > 4).toBe(true);
+  });
+});

@@ -15,7 +15,9 @@ import { isSilencedFor, mpCostOf, passiveIdOf } from '../core/effects';
 import { directionToward, type Coord, type Direction } from '../core/geometry';
 import { chargeArea, hasMpFor, inSpellRange, previewSpellAt, spellOf, spellRangeTiles, targetCenter } from '../core/magic';
 import { reachableTiles, unitAt } from '../core/movement';
+import { targetUnitIds } from '../core/scenario';
 import { predictTimeline } from '../core/turnOrder';
+import { objectivesView, overlayTiles, type OverlayKind } from './objectives';
 import type { AttackPreviewView, BattleHud, HudAction, TurnOrderEntry } from './hud';
 import { TEXT, unitName } from './text';
 import type { UnitLabels } from './unitLabels';
@@ -43,6 +45,12 @@ export interface BattleViewPort {
   animateCast(event: Extract<BattleEvent, { type: 'castStarted' }>, element: SpellElement): Promise<void>;
   animateSpell(event: Extract<BattleEvent, { type: 'spellResolved' }>, onImpact: () => void): Promise<void>;
   animateDefeat(unitId: string): Promise<void>;
+  /** 戦闘の間ずっと出しておく目印（到達するマス・増援の予告・見えている罠） */
+  setOverlays(tiles: readonly { x: number; z: number; kind: OverlayKind }[]): void;
+  /** 増援が現れる */
+  animateAppear(unit: UnitState): Promise<void>;
+  /** 罠が発動する */
+  animateTrap(event: Extract<BattleEvent, { type: 'trapTriggered' }>): Promise<void>;
   wait(seconds: number): Promise<void>;
   /**
    * 指定したマス（とその上のユニット）が画面の見やすい範囲になければ、カメラをそこへ滑らかに寄せる。
@@ -162,6 +170,13 @@ export function createBattleController(start: ActionResult, deps: BattleControll
     view.setReserved(tiles);
   };
 
+  /** 勝敗条件の表示（残りの手番数・増援の予告）と、マップの目印（到達するマス・増援・見えている罠）を出し直す */
+  const showScenario = () => {
+    hud.setObjectives(objectivesView(state));
+    view.setOverlays(overlayTiles(state));
+    labels.setTargets(targetUnitIds(state.scenario.objectives));
+  };
+
   /** 手番開始時から詠唱中で、まだ中断を承諾していないか */
   const needsInterruptConfirm = () => {
     const t = turn();
@@ -249,6 +264,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
     hud.showFacingPad(undefined);
     hud.setUndoMove(undefined);
     showReserved();
+    showScenario();
     if (mode.kind === 'busy' || mode.kind === 'ended') {
       hud.setActions([]);
       return;
@@ -286,7 +302,8 @@ export function createBattleController(start: ActionResult, deps: BattleControll
         actions.push({ label: TEXT.buttons.wait, onClick: () => setMode(facingMode()), primary: Boolean(charging) });
         hud.setActions(actions);
         // 移動した直後は「移動をやり直す」を目立つ位置に出す（意図しないマスへ移動した時にすぐ戻せるように）
-        if (t.moved && !t.acted) hud.setUndoMove(() => void perform({ type: 'undoMove' }));
+        // 罠やイベントが起きた移動は取り消せない
+        if (t.moved && !t.acted && !t.moveLocked) hud.setUndoMove(() => void perform({ type: 'undoMove' }));
         break;
       }
       case 'confirmInterrupt': {
@@ -601,11 +618,51 @@ export function createBattleController(start: ActionResult, deps: BattleControll
           view.showFacingArrows(undefined);
           await view.turnTo(ev.unitId, ev.facing);
           break;
+        case 'trapTriggered': {
+          await view.focusTiles([ev]);
+          await view.animateTrap(ev);
+          if (ev.unitId) {
+            const u = getUnit(state, ev.unitId);
+            labels.popText(ev.unitId, TEXT.traps[ev.trap] ?? ev.trap, 'reaction');
+            if (ev.damage > 0) {
+              labels.popDamage(ev.unitId, ev.damage);
+              labels.setHp(ev.unitId, ev.hp, u.stats.maxHp);
+            }
+            if (ev.level) {
+              labels.popText(ev.unitId, TEXT.levelChange(ev.level.from, ev.level.to));
+              hud.showMessage(`${TEXT.traps.drain}（${unitName(u.id, u.jobId)} ${TEXT.levelChange(ev.level.from, ev.level.to)}）`);
+            }
+          }
+          showScenario();
+          await view.wait(0.35);
+          break;
+        }
+        case 'message':
+          hud.showMessage(TEXT.messages[ev.messageId] ?? ev.messageId);
+          await view.wait(0.9);
+          break;
+        case 'reinforcementWarned':
+          showScenario();
+          await view.focusTiles(ev.tiles);
+          await view.wait(0.6);
+          break;
+        case 'unitAppeared': {
+          const u = ev.unit;
+          labels.addUnit({ id: u.id, team: u.team, hp: u.hp, maxHp: u.stats.maxHp, mp: u.mp, maxMp: u.stats.maxMp });
+          await view.focusTiles([u]);
+          await view.animateAppear(u);
+          labels.popText(u.id, TEXT.appeared, 'reaction');
+          showScenario();
+          await view.wait(0.25);
+          break;
+        }
+        case 'eventFired':
         case 'battleEnded':
           break;
       }
     }
     showReserved();
+    showScenario();
   };
 
   const perform = async (action: BattleAction) => {

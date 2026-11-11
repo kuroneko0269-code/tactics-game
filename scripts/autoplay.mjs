@@ -25,6 +25,12 @@
 // - 最初の移動の後に「移動をやり直す」を押して戻れること、3手番に1回は向きを初期値（最も近い敵の方）から変えて
 //   向きのボタンを押すこと、向きのボタンが互いに重ならないこと、攻撃・魔法の予測がカメラのボタンに重ならないことも確かめる。
 //
+// 勝敗条件・イベント・罠・配置（フェーズ2-2）も確かめる:
+// - 出撃は「訓練戦」→ 敵の強さ → 出撃前の配置の画面。最初の出撃で、味方を2人続けてタップして位置を入れ替え、
+//   もう一度入れ替えて元に戻してから「戦闘開始」を押す（core だけの計算と同じ配置で戦うため）。
+// - ダンジョン「はじまりの遺跡」の第2戦の場面を用意して、見えない罠を踏む（発動して見えるようになり、移動をやり直せない）、
+//   増援の予告の目印と出現、到達するマスへの移動で勝利、を確かめる。第3戦の配置の画面（ボスの撃破が勝利条件）も開く。
+//
 // 使い方:
 //   npm run autoplay                          スマホ縦向きと横向きで実行
 //   npm run autoplay -- --viewports=portrait,landscape,pc
@@ -85,6 +91,7 @@ async function main() {
   const abilities = await server.ssrLoadModule('/src/data/abilities.ts');
   const data = {
     site: (await server.ssrLoadModule('/src/data/battles/twinHillsBattle.ts')).twinHillsBattle,
+    dungeon: (await server.ssrLoadModule('/src/data/battles/ruins/index.ts')).ruinsDungeon,
     jobs: (await server.ssrLoadModule('/src/data/jobs.ts')).jobs,
     spells: abilities.spells,
     strikes: abilities.strikes,
@@ -166,6 +173,9 @@ async function main() {
         `  育成: 結果の画面 ✔、習得 ${r.learned}回・ジョブチェンジ ${r.jobChanges}回・副コマンド ${r.subChanges}回、再び出撃 ✔、` +
           `強打 ✔、突き飛ばし ${r.knockbacks}回、反撃 ${r.counters}回、受動的なアビリティの習得と付け替え ${r.passives}回、読み込み直し ✔、はじめから ✔`,
       );
+      console.log(
+        `  勝敗条件・イベント・罠: 配置の入れ替え ${r.swaps}回、罠の発動 ${r.traps}回、増援の出現 ${r.appeared}体、到達で勝利 ${r.reached}回、第3戦の配置の画面 ✔`,
+      );
       const f = r.finger;
       const sum = (o) => Object.values(o).reduce((a, b) => a + b, 0);
       console.log(
@@ -236,6 +246,10 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
     knockbacks: 0,
     counters: 0,
     passives: 0,
+    swaps: 0,
+    traps: 0,
+    appeared: 0,
+    reached: 0,
   };
   /** 指に近いタップ（狙いの中央から少しずれる）の回数と、そのうち押し直しが必要だった回数（種類ごと） */
   const finger = {
@@ -385,43 +399,49 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
    * 人が「見えている部分」をタップするのと同じ。見つからなければ undefined。
    * unitId を渡すと、ユニットの体の中ほども候補にする。
    */
-  const visiblePointOf = (x, z, unitId) =>
+  const visiblePointOf = (x, z, unitId, strict = false) =>
     T(
-      ([x, z, unitId]) => {
+      ([x, z, unitId, strict]) => {
         const t = window.__tactics;
         const points = [...(unitId ? [t.unitScreen(unitId)] : []), ...t.tilePoints(x, z)];
-        // 隣のマスとの境目ぎりぎりの点は避ける（周り 2px でも同じマスが一番手前に写っている点だけを使う）
+        // 隣のマスとの境目ぎりぎりの点は避ける（周りでも同じマスが一番手前に写っている点だけを使う）
         // タップした時に選ばれるマスの第一候補（tapJudge.ts の規則）
         const firstAt = (px, py) => t.candidatesAt(px, py).coords[0];
-        const offsets = [
+        // 周り 2px と 4px でも同じマスが一番手前に写っている点を優先する（ユニットの体は待機中に少し揺れるので、
+        // 体のすぐ脇の点は避けたい）。4px の点がなければ 2px の点を使う（混み合った所では 4px の点がないことがある）
+        const near = [
           [0, 0],
           [2, 0],
           [-2, 0],
           [0, 2],
           [0, -2],
         ];
-        return points.find((p) => {
-          if (!window.__clearOfButtons([p.x, p.y])) return false;
-          return offsets.every(([dx, dy]) => {
+        const far = [...near, [4, 0], [-4, 0], [0, 4], [0, -4]];
+        const usable = (p, offsets) =>
+          window.__clearOfButtons([p.x, p.y]) &&
+          offsets.every(([dx, dy]) => {
             const first = firstAt(p.x + dx, p.y + dy);
             return first !== undefined && first.x === x && first.z === z;
           });
-        });
+        return points.find((p) => usable(p, far)) ?? (strict ? undefined : points.find((p) => usable(p, near)));
       },
-      [x, z, unitId],
+      [x, z, unitId, strict],
     );
 
   /** 狙うマスを画面に入れ、見えている部分を探す。完全に隠れていれば、人がするようにカメラを回す */
   const aimAt = async (x, z, unitId, what) => {
-    for (let turn = 0; turn < 4; turn++) {
-      await bringIntoView(() => T(([x, z]) => window.__tactics.tileScreen(x, z), [x, z]), what);
-      const p = await visiblePointOf(x, z, unitId);
-      if (p) return p;
-      const before = await snapshot();
-      await pressCameraButton('camera-rotate-right');
-      stats.cameraOps++;
-      await waitCameraIdle();
-      check((await snapshot()) === before, '回転ボタンで、マスかユニットが誤って選ばれました');
+    // まず 4px の余裕のある点を、カメラを回しながら探す。どの向きにもなければ、2px の余裕の点で妥協する
+    for (const strict of [true, false]) {
+      for (let turn = 0; turn < 4; turn++) {
+        await bringIntoView(() => T(([x, z]) => window.__tactics.tileScreen(x, z), [x, z]), what);
+        const p = await visiblePointOf(x, z, unitId, strict);
+        if (p) return p;
+        const before = await snapshot();
+        await pressCameraButton('camera-rotate-right');
+        stats.cameraOps++;
+        await waitCameraIdle();
+        check((await snapshot()) === before, '回転ボタンで、マスかユニットが誤って選ばれました');
+      }
     }
     throw new CheckError(`${what} の見えている部分が、どの向きからも見つかりませんでした`);
   };
@@ -749,12 +769,56 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
     await page.screenshot({ path: path.join(SCREENSHOT_DIR, `${name}-${tag}.png`) });
   };
 
+  // ---- 出撃前の配置の画面 ----
+  const getDeploy = () => T(() => window.__tactics.deploy());
+  const waitDeploy = () => waitFor('出撃前の配置', () => window.__tactics.mode() === 'deploy' && window.__tactics.camera().idle);
+  /** 配置の画面で、ユニットをタップする（戦闘の状態はまだないので、配置の画面の状態から位置を読む） */
+  const tapDeployUnit = async (id) => {
+    const u = (await getDeploy()).state.units.find((x) => x.id === id);
+    await tapAt(await aimAt(u.x, u.z, id, `配置のユニット ${id}`));
+  };
+  /** 配置の画面で、味方 a と b を2回続けてタップして入れ替える。入れ替わったことを確かめる */
+  const swapOnDeploy = async (a, b) => {
+    const pos = (d, id) => {
+      const u = d.state.units.find((x) => x.id === id);
+      return `${u.x},${u.z}`;
+    };
+    const before = await getDeploy();
+    await tapDeployUnit(a);
+    await waitFor('入れ替える味方を選ぶ', (id) => window.__tactics.deploy()?.selected === id, a);
+    await tapDeployUnit(b);
+    await waitFor('入れ替え', () => window.__tactics.deploy()?.selected === null);
+    const after = await getDeploy();
+    check(pos(after, a) === pos(before, b) && pos(after, b) === pos(before, a), `配置の入れ替えが違います（${a} ${pos(after, a)} / ${b} ${pos(after, b)}）`);
+    stats.swaps++;
+  };
+  /** 拠点から訓練戦に出撃し、配置の画面で「戦闘開始」を押す */
+  const sortieTraining = async (tierName, drill = false) => {
+    await pressButton(text.base.sortie);
+    await waitFor('出撃先を選ぶ', () => document.querySelector('[data-screen="sortie"]') !== null);
+    if (drill) await screenshot('00-sortie');
+    await pressButton(text.base.training);
+    await waitFor('敵の強さを選ぶ', () => document.querySelector('[data-screen="tiers"]') !== null);
+    if (drill) await screenshot('00-tiers');
+    await pressButton(tierName);
+    await waitDeploy();
+    const panel = await page.locator('.objective-panel').textContent();
+    check(panel.includes(text.objectives.defeatAll) && panel.includes(text.objectives.allDefeated), `配置の画面に勝敗条件が出ていません（${panel}）`);
+    await pressButton(text.objectives.close);
+    if (drill) {
+      await screenshot('00-deploy');
+      // 2人を入れ替えて、もう一度入れ替えて元に戻す（core だけの計算と同じ配置で戦うため）
+      await swapOnDeploy('hero-1', 'hero-3');
+      await screenshot('00-deploy-swapped');
+      await swapOnDeploy('hero-3', 'hero-1');
+    }
+    await pressButton(text.deploy.start);
+    await waitFor('戦闘の開始', () => window.__tactics.screen() === 'battle' && window.__tactics.state() !== null);
+  };
+
   // ---- 拠点から出撃する ----
   await screenshot('00-base');
-  await pressButton('出撃');
-  await waitFor('敵の強さを選ぶ', () => document.querySelector('[data-screen="sortie"]') !== null);
-  await screenshot('00-tiers');
-  await pressButton(text.tiers.easy.name);
+  await sortieTraining(text.tiers.easy.name, true);
 
   // ---- 1戦を進める ----
   await waitForInput();
@@ -1007,9 +1071,7 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   await sameRoster(plan.afterEdit, '編成の後');
 
   // ---- 再び出撃: 部隊の変更が戦闘に反映される ----
-  await pressButton('出撃');
-  await pressButton(text.tiers.normal.name);
-  await waitFor('2戦目', () => window.__tactics.screen() === 'battle' && window.__tactics.state() !== null);
+  await sortieTraining(text.tiers.normal.name);
   const second = await getState();
   const want = core.start(plan.afterEdit, 'normal', 1).state;
   for (const u of want.units.filter((u) => u.team === 'player')) {
@@ -1079,6 +1141,56 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   const pickPush = (st) => JSON.stringify(st.units.filter((u) => u.id === kd.targetId).map((u) => [u.x, u.z, u.hp]));
   check(pickPush(await getState()) === pickPush(kd.expected), `突き飛ばしの結果が core の計算と違います（画面 ${pickPush(await getState())} / core ${pickPush(kd.expected)}）`);
   stats.knockbacks++;
+  check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
+
+  // ---- 罠・増援・到達（はじまりの遺跡 第2戦の場面） ----
+  // 見えない罠（ぬかるみ）のマスへ移動すると、発動して見えるようになり、鈍足が付き、移動をやり直せない
+  await waitForInput();
+  const td = scenarioDrills(core);
+  await page.evaluate((r) => window.__tactics.load(r), td.trap.start);
+  await waitFor('罠の場面', (id) => window.__tactics.mode() === 'main' && window.__tactics.state().turn?.unitId === id, td.unitId);
+  await waitForInput();
+  const overlaysNow = () => T(() => window.__tactics.overlays());
+  check(!(await overlaysNow()).some((o) => o.kind.startsWith('trap')), '見えていない罠が、マップに表示されています');
+  check((await overlaysNow()).some((o) => o.kind === 'goal'), '到達するマスがマップに表示されていません');
+  await tapTile(td.trap.to.x, td.trap.to.z);
+  await waitFor('罠の発動', () => window.__tactics.state().scenario.traps.some((t) => t.revealed) && window.__tactics.mode() !== 'busy');
+  await waitForInput();
+  const trapState = await getState();
+  check(
+    JSON.stringify(trapState.units.find((u) => u.id === td.unitId).statuses) === JSON.stringify(td.trap.expected.units.find((u) => u.id === td.unitId).statuses),
+    'ぬかるみの鈍足が core の計算と違います',
+  );
+  check((await overlaysNow()).some((o) => o.kind === 'trap-mud' && o.x === td.trap.to.x && o.z === td.trap.to.z), '発動した罠が、マップに表示されていません');
+  check((await page.locator('.undo-move').count()) === 0, '罠が発動した移動の後に「移動をやり直す」が出ています');
+  stats.traps++;
+  await screenshot('trap');
+
+  // 増援: 予告の目印があり、手番を終えると現れる
+  await page.evaluate((r) => window.__tactics.load(r), td.reinforce.start);
+  await waitFor('増援の場面', (id) => window.__tactics.mode() === 'main' && window.__tactics.state().turn?.unitId === id, td.unitId);
+  await waitForInput();
+  check((await overlaysNow()).filter((o) => o.kind === 'warning').length === td.reinforce.count, '増援の予告の目印が出ていません');
+  const bar = await page.locator('.objective-bar').textContent();
+  check(bar.includes(text.objectives.reinforcementShort(0)), `勝敗条件の欄に増援の予告がありません（${bar}）`);
+  await screenshot('reinforcement-warning');
+  await pressButton(text.buttons.wait);
+  await waitFor('向きを選ぶ', () => window.__tactics.mode() === 'facing');
+  await pressButton(text.buttons.endTurn);
+  await waitFor('増援の出現', (n) => window.__tactics.state().units.length === n, td.reinforce.unitsAfter);
+  await waitFor('増援の頭上の表示', (n) => document.querySelectorAll('.unit-label').length === n, td.reinforce.unitsAfter);
+  stats.appeared += td.reinforce.count;
+  await waitForInput();
+  await screenshot('reinforcement-appeared');
+
+  // 到達: 到達するマスへ移動すると勝利
+  await page.evaluate((r) => window.__tactics.load(r), td.reach.start);
+  await waitFor('到達の場面', (id) => window.__tactics.mode() === 'main' && window.__tactics.state().turn?.unitId === id, td.unitId);
+  await waitForInput();
+  await tapTile(td.reach.to.x, td.reach.to.z);
+  await waitFor('到達で勝利', () => window.__tactics.state().winner === 'player' && window.__tactics.mode() === 'ended');
+  stats.reached++;
+  await screenshot('reach-victory');
   check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
 
   // ---- 反撃 ----
@@ -1187,15 +1299,27 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   await pressButton(text.roster.back);
   await pressButton(text.roster.back);
   await sameRoster(pd.expected, '受動的なアビリティを付けた後');
-  await pressButton('出撃');
-  await pressButton(text.tiers.easy.name);
-  await waitFor('受動的なアビリティを付けた戦闘', () => window.__tactics.screen() === 'battle' && window.__tactics.state() !== null);
+  await sortieTraining(text.tiers.easy.name);
   const pdUnit = (await getState()).units.find((u) => u.id === pd.unitId);
   check(JSON.stringify(pdUnit.passives.map((p) => p.id)) === JSON.stringify([pd.abilityId]), `戦闘のユニットに受動的なアビリティが反映されていません（${JSON.stringify(pdUnit.passives)}）`);
   await page.reload();
   await page.waitForFunction(() => window.__tactics?.screen() === 'base', null, { timeout: 30000 });
   await sameRoster(pd.expected, '受動的なアビリティを付けて読み込み直した後');
   check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
+
+  // ---- 第3戦「祭壇の間」の配置の画面: ボスの撃破が勝利条件で、ボスに撃破の対象の札が付く。「戻る」で拠点へ ----
+  await pressButton(text.base.sortie);
+  await pressButton(text.dungeons.ruins);
+  await waitFor('ダンジョンの戦闘を選ぶ', () => document.querySelector('[data-screen="dungeon"]') !== null);
+  await pressButton(text.base.battleLabel(3, text.mapNames['ruins-altar']));
+  await waitDeploy();
+  const altarPanel = await page.locator('.objective-panel').textContent();
+  check(altarPanel.includes(text.objectives.defeatUnit(text.unitNames['r3-boss'])), `第3戦の勝敗条件が出ていません（${altarPanel}）`);
+  check((await page.locator('.unit-label-target').count()) === 1, 'ボスに撃破の対象の札が付いていません');
+  await screenshot('altar-deploy');
+  await pressButton(text.objectives.close);
+  await pressButton(text.deploy.back);
+  await waitFor('拠点', () => window.__tactics.screen() === 'base');
 
   // ---- 「はじめから」: 確認の後、最初の部隊に戻る（読み込み直しても最初のまま） ----
   await pressButton(text.base.newGame);
@@ -1351,6 +1475,50 @@ function drillState(base, unitId, patch) {
     units,
     turn: { unitId, moved: false, acted: false, origin: { x: me.x, z: me.z, facing: me.facing }, chargingAtStart: false },
     turnNumber: 1,
+  };
+}
+
+/**
+ * 勝敗条件・イベント・罠の場面（はじまりの遺跡 第2戦「崩れた回廊」）。
+ * - trap: 味方の戦士が、見えないぬかるみ (3,9) の隣で手番を迎える。
+ * - reinforce: 増援の予告があり、今の手番が終わると現れる。
+ * - reach: 味方の戦士が、到達するマスの隣で手番を迎える。
+ */
+function scenarioDrills(core) {
+  const site = core.data.dungeon.battles[1];
+  const base = core.battle.startBattle(
+    core.sortie.buildSortie(site, 'main', core.data.roster, core.data.catalog),
+    core.data.jobs,
+    core.data.rules,
+    SEED,
+    core.data.spells,
+    core.data.strikes,
+    core.data.passives,
+  ).state;
+  const unitId = 'hero-1';
+  const start = (state) => ({ state, events: [{ type: 'turnStarted', unitId, turnNumber: state.turnNumber }] });
+  // 罠
+  const trapTo = site.traps.find((t) => t.kind === 'mud');
+  const trapState = drillState(base, unitId, { [unitId]: { x: trapTo.x, z: trapTo.z + 1 } });
+  const trapExpected = core.battle.applyAction(trapState, { type: 'move', x: trapTo.x, z: trapTo.z }).state;
+  if (!trapExpected.scenario.traps.some((t) => t.revealed)) throw new Error('罠の場面が想定と違います');
+  // 増援: 第2戦のイベントの増援を、この手番の後に現れる予告として置く
+  const wave = base.scenario.events.find((e) => e.effects.some((f) => f.kind === 'reinforce'));
+  const units = wave.effects.find((f) => f.kind === 'reinforce').units.map((u) => ({ ...u, id: `${u.id}-drill` }));
+  const plain = drillState(base, unitId, {});
+  const reinforceState = {
+    ...plain,
+    scenario: { ...plain.scenario, reinforcements: [{ eventId: wave.id, appearAfterTurn: plain.turnNumber, units }] },
+  };
+  // 到達
+  const goal = site.objectives.victory[0].tiles[0];
+  const reachState = drillState(base, unitId, { [unitId]: { x: goal.x, z: goal.z + 1 } });
+  if (!core.battle.applyAction(reachState, { type: 'move', x: goal.x, z: goal.z }).state.winner) throw new Error('到達の場面が想定と違います');
+  return {
+    unitId,
+    trap: { start: start(trapState), to: trapTo, expected: trapExpected },
+    reinforce: { start: start(reinforceState), count: units.length, unitsAfter: base.units.length + units.length },
+    reach: { start: start(reachState), to: goal },
   };
 }
 

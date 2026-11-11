@@ -11,6 +11,7 @@ import type {
   ChargeState,
   JobDefinition,
   PassiveDefinition,
+  ScenarioState,
   SpellDefinition,
   StatusState,
   StrikeDefinition,
@@ -21,6 +22,7 @@ import type {
 import type { AiConfig, AiConfigs } from './ai';
 import type { Direction } from './geometry';
 import { createMap } from './map';
+import { DEFAULT_OBJECTIVES } from './scenario';
 
 export const testRules: BattleRules = {
   ctThreshold: 100,
@@ -39,6 +41,7 @@ export const testRules: BattleRules = {
     silence: { harmful: true, turns: 2 },
   },
   knockback: { fallDamagePercentPerHeight: 10, blockedDamagePercent: 10 },
+  trap: { rockfallDamagePercent: 20 },
 };
 
 export const testWarrior: JobDefinition = {
@@ -256,6 +259,7 @@ export interface TestUnit {
   passives?: string[];
   statuses?: StatusState[];
   level?: number;
+  levelDrops?: number;
 }
 
 /** 平らなマップ（すべて高さ 0） */
@@ -273,6 +277,8 @@ export function makeState(options: {
   seed?: number;
   turnNumber?: number;
   lastAggressionTurn?: number;
+  /** 勝敗条件・イベント・罠（省くと全滅の条件だけ） */
+  scenario?: Partial<ScenarioState>;
 }): BattleState {
   const map = createMap({
     id: 'test',
@@ -297,6 +303,7 @@ export function makeState(options: {
       attack: job.attack,
       mp: u.mp ?? job.stats.maxMp,
       level: u.level ?? 1,
+      levelDrops: u.levelDrops ?? 0,
       weapon: job.weapon ?? null,
       commands,
       spells: testSpells.filter((sp) => ids.includes(sp.id)),
@@ -326,6 +333,13 @@ export function makeState(options: {
     rngState: options.seed ?? 1,
     turnNumber: options.turnNumber ?? 1,
     lastAggressionTurn: options.lastAggressionTurn ?? 0,
+    scenario: {
+      objectives: DEFAULT_OBJECTIVES,
+      events: [],
+      traps: [],
+      reinforcements: [],
+      ...options.scenario,
+    },
   };
 }
 
