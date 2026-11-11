@@ -239,7 +239,7 @@ export const TEXT = {
 
   /** 装備の名前と説明（id で引く。名称は仮） */
   equipment: {
-    'sword-1': { name: '銅の剣', help: '手になじむ、基本の剣' },
+    'sword-1': { name: '旅人の剣', help: '旅人が腰に下げる、扱いやすい剣' },
     'sword-2': { name: '鋼の剣', help: 'よく鍛えられた剣' },
     'sword-3': { name: '白銀の剣', help: '名工の打った、鋭い剣' },
     'bow-1': { name: '狩人の弓', help: '扱いやすい短い弓' },

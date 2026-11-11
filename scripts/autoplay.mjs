@@ -1994,7 +1994,7 @@ function rosterPlan(core, finalState) {
   const easy = core.data.site.tiers.find((t) => t.id === 'easy');
   const spoils = S.rollSpoils(easy.reward, finalState.winner === 'player', finalState.rngState);
   const afterBattle = S.grantSpoils(afterProgress, spoils).roster;
-  // 店: 最初の品ぞろえから、買える中で強い剣を買う（鋼の剣が買えなければ銅の剣）
+  // 店: 最初の品ぞろえから、買える中で強い剣を買う（鋼の剣が買えなければ旅人の剣）
   const stock = S.shopStock(core.data.equip.shop, { trainingWins: finalState.winner === 'player' ? { easy: 1 } : {}, dungeonClears: {} });
   const price = (id) => catalog.equipment.find((e) => e.id === id).price;
   const buyId = afterBattle.gold >= price('sword-2') ? 'sword-2' : 'sword-1';
@@ -2027,7 +2027,7 @@ function rosterPlan(core, finalState) {
   roster = E.autoEquip(roster, jobUnitId, catalog, core.data.equip.autoEquipWeights);
   roster = P.replaceUnit(roster, P.setSecondary(P.findUnit(roster, jobUnitId), subJobId, catalog));
   const afterEdit = roster;
-  // 売る: だれも付けていない銅の剣。装備中の物（hero-1 の買った剣）は売れない
+  // 売る: だれも付けていない旅人の剣。装備中の物（hero-1 の買った剣）は売れない
   const free = afterEdit.items.find((i) => !E.wearerOf(afterEdit, i.uid) && i.itemId === 'sword-1');
   if (!free) throw new Error('売る物がありません');
   const afterSell = S.sellItem(afterEdit, free.uid, catalog, core.data.equip.shop);
