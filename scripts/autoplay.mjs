@@ -1072,6 +1072,7 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   check(kdPreview.includes(text.preview.knockback) && kdPreview.includes(text.preview.knockbackTo(kd.fall)), `突き飛ばしの予測に押し出す先と落下ダメージがありません（${kdPreview}）`);
   const pushMark = await T(() => window.__tactics.marks().filter((m) => m.kind === 'push'));
   check(JSON.stringify(pushMark.map((m) => [m.x, m.z])) === JSON.stringify([[kd.to.x, kd.to.z]]), `押し出す先のマスの表示が違います（${JSON.stringify(pushMark)}）`);
+  check(!(await overlaps('.preview', '.actions')), '突き飛ばしの予測が行動のボタンに重なっています');
   await screenshot('knockback-preview');
   await pressButton('確定');
   await waitFor('突き飛ばしの後', () => !['busy', 'confirm'].includes(window.__tactics.mode()));
@@ -1093,6 +1094,7 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   await tapUnit(cd.targetId);
   const cdPreview = await page.locator('.preview').textContent();
   check(cdPreview.includes(text.preview.counter), `攻撃の予測に「反撃あり」がありません（${cdPreview}）`);
+  check(!(await overlaps('.preview', '.actions')), '反撃つきの攻撃の予測が行動のボタンに重なっています');
   await screenshot('counter-preview');
   const sawReaction = page
     .waitForFunction((name) => [...document.querySelectorAll('.popup.reaction')].some((p) => p.textContent === name), text.abilities.counter, {

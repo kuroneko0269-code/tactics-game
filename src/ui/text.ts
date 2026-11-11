@@ -300,7 +300,7 @@ export const TEXT = {
     inflicts: (status: string) => `当たると${status}を付ける`,
     interrupts: '当たると詠唱を中断させる',
     counter: '反撃あり',
-    counterDetail: (damage: number, hit: number, hp: number) => `受ける見込み ${damage}（命中 ${hit}%、HP → ${Math.max(0, hp - damage)}）`,
+    counterDetail: (damage: number, hit: number) => `受ける見込み ${damage}（命中 ${hit}%）`,
     counterNote: '当たって相手が倒れなければ',
   },
 

@@ -222,7 +222,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
     if (p.counter) {
       extraRows.push({
         label: TEXT.preview.counter,
-        value: TEXT.preview.counterDetail(p.counter.damage, p.counter.hitPercent, attacker.hp),
+        value: TEXT.preview.counterDetail(p.counter.damage, p.counter.hitPercent),
         className: 'counter',
       });
       notes.push(`${TEXT.preview.counter}: ${TEXT.preview.counterNote}`);

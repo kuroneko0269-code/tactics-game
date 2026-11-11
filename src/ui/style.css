@@ -1368,8 +1368,15 @@ body {
   opacity: 0.85;
 }
 
+/* スマホ横向き: 予測欄が下のボタンに重ならないよう、注記を省いて文字を小さくする */
 @media (max-height: 500px) and (orientation: landscape) {
-  .info-passives {
+  .info-passives,
+  .preview-notes {
     display: none;
+  }
+
+  .preview .preview-table {
+    font-size: 12px;
+    line-height: 1.3;
   }
 }
