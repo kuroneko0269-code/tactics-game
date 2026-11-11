@@ -239,20 +239,32 @@ async function main() {
           `魔法の指定 ${r.casts}回（ユニット狙い ${r.unitCasts}・マス狙い ${r.tileCasts}）、詠唱の中断 ${r.interrupts}回、` +
           `向きを変えた ${r.facingChanges}回、移動のやり直し ${r.undos}回、カメラ操作 ${r.cameraOps}回、タップ ${r.taps}回、${r.seconds}秒）`,
       );
-      console.log(
-        `  装備と店: 店で買う ${r.buys}回・売る ${r.sells}回、装備の付け替え ${r.equips}回、「おまかせ」 ${r.autoEquips}回、ゴールドと戦利品の表示 ✔、ボスからの装備 ✔`,
-      );
-      console.log(
-        `  育成: 戦闘中のレベルアップの表示 ✔、結果の画面 ✔、編成のタブ ${r.tabs}回・習得 ${r.learned}回・ジョブチェンジ ${r.jobChanges}回・副コマンド ${r.subChanges}回、再び出撃 ✔、` +
-          `強打 ✔、突き飛ばし ${r.knockbacks}回、反撃 ${r.counters}回、受動的なアビリティの習得と付け替え ${r.passives}回、読み込み直し ✔、はじめから ✔`,
-      );
-      console.log(
-        `  勝敗条件・イベント・罠: 配置の入れ替え ${r.swaps}回、罠の発動 ${r.traps}回、増援の出現 ${r.appeared}体、到達で勝利 ${r.reached}回`,
-      );
-      console.log(
-        `  ダンジョン: 第1戦からクリアまで ✔（戦闘 ${r.dungeonBattles}回、うちタップで戦った ${r.dungeonTapped}回）、` +
-          `負けた後のやり直し ${r.retries}回、編成の画面への行き来 ✔、読み込み直して再開 ✔、クリアの報酬と記録 ✔`,
-      );
+      if (r.partial) {
+        console.log(
+          `  装備と店: 店で買う ${r.buys}回・売る ${r.sells}回、装備の付け替え ${r.equips}回、「おまかせ」 ${r.autoEquips}回、ゴールドと戦利品の表示 ✔`,
+        );
+        console.log(
+          `  育成: 戦闘中のレベルアップの表示 ✔、結果の画面 ✔、編成のタブ ${r.tabs}回・習得 ${r.learned}回・ジョブチェンジ ${r.jobChanges}回・副コマンド ${r.subChanges}回、再び出撃 ✔`,
+        );
+        console.log(
+          `  （技・突き飛ばし・罠・反撃・詠唱の中断・受動的なアビリティ・はじめから・ダンジョンは、短くした版では ${VIEWPORT_OPTIONS[VIEWPORTS[0]]?.label ?? VIEWPORTS[0]} だけで確かめる）`,
+        );
+      } else {
+        console.log(
+          `  装備と店: 店で買う ${r.buys}回・売る ${r.sells}回、装備の付け替え ${r.equips}回、「おまかせ」 ${r.autoEquips}回、ゴールドと戦利品の表示 ✔、ボスからの装備 ✔`,
+        );
+        console.log(
+          `  育成: 戦闘中のレベルアップの表示 ✔、結果の画面 ✔、編成のタブ ${r.tabs}回・習得 ${r.learned}回・ジョブチェンジ ${r.jobChanges}回・副コマンド ${r.subChanges}回、再び出撃 ✔、` +
+            `強打 ✔、突き飛ばし ${r.knockbacks}回、反撃 ${r.counters}回、受動的なアビリティの習得と付け替え ${r.passives}回、読み込み直し ✔、はじめから ✔`,
+        );
+        console.log(
+          `  勝敗条件・イベント・罠: 配置の入れ替え ${r.swaps}回、罠の発動 ${r.traps}回、増援の出現 ${r.appeared}体、到達で勝利 ${r.reached}回`,
+        );
+        console.log(
+          `  ダンジョン: 第1戦からクリアまで ✔（戦闘 ${r.dungeonBattles}回、うちタップで戦った ${r.dungeonTapped}回）、` +
+            `負けた後のやり直し ${r.retries}回、編成の画面への行き来 ✔、読み込み直して再開 ✔、クリアの報酬と記録 ✔`,
+        );
+      }
       const f = r.finger;
       const sum = (o) => Object.values(o).reduce((a, b) => a + b, 0);
       console.log(
@@ -1343,6 +1355,22 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
     check(pick(got) === pick(u), `2戦目の ${u.id} に部隊の状態が反映されていません（画面 ${pick(got)} / core ${pick(u)}）`);
   }
   check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
+
+  // 短くした版（CI）では、ここから先（技・突き飛ばし・罠と増援・反撃・詠唱の中断・読み込み直し・受動的なアビリティ・はじめから・ダンジョン）は
+  // 最初の画面サイズ（縦向き）だけで確かめる。画面サイズによって変わるのはタップの位置と画面の収まりで、それはここまでと画面の収まりの確認で見ているため。
+  // 検査全体を5分以内に収めるため（フェーズ2-4 で店と装備の操作を足し、5分を少し超えた）
+  if (QUICK && name !== VIEWPORTS[0]) {
+    await context.close();
+    for (const d of finger.details) log(`押し直し: ${d}`);
+    return {
+      winner: final.winner,
+      turns: final.turnNumber,
+      finger,
+      ...stats,
+      partial: true,
+      seconds: Math.round((Date.now() - started) / 1000),
+    };
+  }
 
   // ---- 技（強打）と副コマンドのメニュー ----
   // 強打を覚えた戦士が、敵の隣で手番を迎えた場面を用意して、「武技」→「強打」→ 相手 → 予測 → 確定 を確かめる。
