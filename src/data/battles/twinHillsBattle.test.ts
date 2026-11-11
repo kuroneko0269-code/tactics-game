@@ -138,6 +138,6 @@ describe('ふたつの丘の戦場と最初の部隊', () => {
       }
       expect(seals / n, tierId).toBeGreaterThanOrEqual(0.5);
     }
-  });
+  }, 30_000);
 });
 

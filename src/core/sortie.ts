@@ -12,7 +12,7 @@
 import type { BattleObjectives, BattleSetup, MapEventDefinition, TrapPlacement, UnitPlacement } from './battleTypes';
 import type { Direction } from './geometry';
 import type { MapDefinition } from './map';
-import { equippedPassives, unitCommands, type GameCatalog, type Roster } from './progression';
+import { equippedPassives, jobProgress, unitCommands, type GameCatalog, type ProgressionRules, type Roster } from './progression';
 
 /** 配置の場所 */
 export interface Slot {
@@ -44,12 +44,16 @@ export interface BattleSite {
   readonly traps?: readonly TrapPlacement[];
 }
 
-/** 部隊と選んだ段階から、1戦ぶんの定義を作る */
+/**
+ * 部隊と選んだ段階から、1戦ぶんの定義を作る。
+ * progression を渡すと、味方は戦闘中に経験値と JP を得る（部隊の今の経験値と、今のジョブの JP を持って出る）。
+ */
 export function buildSortie(
   site: BattleSite,
   tierId: string,
   roster: Roster,
   catalog: Pick<GameCatalog, 'jobs'>,
+  progression?: ProgressionRules,
 ): BattleSetup {
   const tier = site.tiers.find((t) => t.id === tierId);
   if (!tier) throw new Error(`敵の段階 ${tierId} が見つかりません`);
@@ -63,6 +67,9 @@ export function buildSortie(
     growth: u.growth,
     commands: unitCommands(u, catalog),
     passives: equippedPassives(u),
+    ...(progression
+      ? { progress: { exp: u.exp, jp: jobProgress(u, u.jobId).jp, jpTotal: jobProgress(u, u.jobId).jpTotal } }
+      : {}),
   }));
   const enemies: UnitPlacement[] = tier.units.map((u) => ({ ...u, team: 'enemy' }));
   return {
@@ -72,6 +79,7 @@ export function buildSortie(
     objectives: site.objectives,
     events: site.events,
     traps: site.traps,
+    ...(progression ? { progression } : {}),
   };
 }
 

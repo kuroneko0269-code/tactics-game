@@ -27,85 +27,77 @@ export interface BaseScreen {
 }
 
 export function createBaseScreen(root: HTMLElement, handlers: BaseScreenHandlers): BaseScreen {
+  /**
+   * 画面全体はスクロールさせない（.two-col: 縦向きは上下、横向きと PC は左右2列）。
+   * info に題と説明・一覧、actions にボタンを入れる。
+   */
   const render = (view: 'menu' | 'sortie' | 'tiers' | 'dungeon' | 'restart' | 'confirm') => {
     root.innerHTML = '';
     root.hidden = false;
-    const box = el('div', 'screen-box base-screen');
+    const box = el('div', 'screen-box two-col base-screen');
     box.dataset.screen = view === 'menu' || view === 'confirm' ? 'base' : view;
+    box.dataset.view = view;
+    const info = el('div', 'screen-col base-info');
+    const actions = el('div', 'screen-col base-actions');
     const status = handlers.dungeonStatus();
     const dungeonName = TEXT.dungeons[handlers.dungeon.id] ?? handlers.dungeon.id;
+    const mapName = (id: string) => TEXT.mapNames[id] ?? id;
     if (view === 'sortie') {
-      box.append(el('h1', 'screen-title', TEXT.base.sortie));
-      box.append(el('p', 'screen-note', TEXT.base.chooseSortie));
-      const menu = el('div', 'screen-menu');
-      menu.append(
-        screenButton(TEXT.base.training, () => render('tiers'), {
-          className: 'big',
-          sub: TEXT.base.trainingHelp(TEXT.mapNames[handlers.mapId] ?? handlers.mapId),
-        }),
+      info.append(el('h1', 'screen-title', TEXT.base.sortie), el('p', 'screen-note', TEXT.base.chooseSortie));
+      actions.append(
+        screenButton(TEXT.base.training, () => render('tiers'), { className: 'big', sub: TEXT.base.trainingHelp(mapName(handlers.mapId)) }),
         screenButton(TEXT.base.dungeon(dungeonName), () => render('dungeon'), { className: 'big', sub: TEXT.base.dungeonHelp }),
+        screenButton(TEXT.base.back, () => render('menu'), { className: 'back-wide' }),
       );
-      box.append(menu, screenButton(TEXT.base.back, () => render('menu')));
     } else if (view === 'dungeon') {
-      box.append(el('h1', 'screen-title', dungeonName));
-      box.append(el('p', 'screen-note', TEXT.base.dungeonIntro));
-      box.append(el('p', 'dungeon-record', TEXT.base.clears(status.clears)));
+      info.append(el('h1', 'screen-title', dungeonName), el('p', 'screen-note', TEXT.base.dungeonIntro));
+      info.append(el('p', 'dungeon-record', TEXT.base.clears(status.clears)));
       const list = el('ol', 'dungeon-battles');
       handlers.dungeon.battles.forEach((b, i) => {
         const li = el('li', status.nextBattle === i ? 'current' : '');
-        li.append(el('strong', '', TEXT.base.battleLabel(i + 1, TEXT.mapNames[b.mapId] ?? b.mapId)), el('span', '', TEXT.base.battleHelp(b.objective)));
+        li.append(el('strong', '', TEXT.base.battleLabel(i + 1, mapName(b.mapId))), el('span', '', TEXT.base.battleHelp(b.objective)));
         list.append(li);
       });
-      box.append(list);
-      const menu = el('div', 'screen-menu');
+      info.append(list);
       if (status.nextBattle !== null) {
         const b = handlers.dungeon.battles[status.nextBattle]!;
-        menu.append(
-          screenButton(TEXT.base.resume(status.nextBattle + 1, TEXT.mapNames[b.mapId] ?? b.mapId), () => handlers.onDungeon(false), {
+        actions.append(
+          screenButton(TEXT.base.resume(status.nextBattle + 1, mapName(b.mapId)), () => handlers.onDungeon(false), {
             className: 'primary big',
             sub: TEXT.base.inProgress(status.nextBattle + 1),
           }),
           screenButton(TEXT.base.restart, () => render('restart')),
         );
       } else {
-        menu.append(screenButton(TEXT.base.challenge, () => handlers.onDungeon(true), { className: 'primary big' }));
+        actions.append(screenButton(TEXT.base.challenge, () => handlers.onDungeon(true), { className: 'primary big' }));
       }
-      box.append(menu, screenButton(TEXT.base.back, () => render('sortie')));
+      actions.append(screenButton(TEXT.base.back, () => render('sortie'), { className: 'back-wide' }));
     } else if (view === 'restart') {
-      box.append(el('h1', 'screen-title', dungeonName));
-      box.append(el('p', 'screen-warning', TEXT.base.confirmRestart));
-      const menu = el('div', 'screen-menu');
-      menu.append(
+      info.append(el('h1', 'screen-title', dungeonName), el('p', 'screen-warning', TEXT.base.confirmRestart));
+      actions.append(
         screenButton(TEXT.base.cancel, () => render('dungeon')),
         screenButton(TEXT.base.confirmRestartYes, () => handlers.onDungeon(true), { className: 'danger' }),
       );
-      box.append(menu);
     } else if (view === 'menu') {
-      box.append(el('h1', 'screen-title', TEXT.base.title));
-      const menu = el('div', 'screen-menu');
-      menu.append(
+      info.append(el('h1', 'screen-title', TEXT.base.title));
+      if (status.clears > 0) info.append(el('p', 'dungeon-cleared', TEXT.base.clearedBadge(dungeonName, status.clears)));
+      else if (status.nextBattle !== null) info.append(el('p', 'screen-note', `${dungeonName}: ${TEXT.base.inProgress(status.nextBattle + 1)}`));
+      info.append(el('p', 'screen-note', TEXT.base.saved));
+      actions.append(
         screenButton(TEXT.base.sortie, () => render('sortie'), { className: 'primary big' }),
         screenButton(TEXT.base.roster, () => handlers.onRoster(), { className: 'big' }),
+        screenButton(TEXT.base.newGame, () => render('confirm'), { className: 'quiet' }),
       );
-      box.append(menu);
-      if (status.clears > 0) box.append(el('p', 'dungeon-cleared', TEXT.base.clearedBadge(dungeonName, status.clears)));
-      else if (status.nextBattle !== null) box.append(el('p', 'screen-note', `${dungeonName}: ${TEXT.base.inProgress(status.nextBattle + 1)}`));
-      box.append(el('p', 'screen-note', TEXT.base.saved));
-      box.append(screenButton(TEXT.base.newGame, () => render('confirm'), { className: 'quiet' }));
     } else if (view === 'tiers') {
-      box.append(el('h1', 'screen-title', TEXT.base.sortie));
-      box.append(el('p', 'screen-note', TEXT.base.chooseTier(TEXT.mapNames[handlers.mapId] ?? handlers.mapId)));
-      const menu = el('div', 'screen-menu');
+      info.append(el('h1', 'screen-title', TEXT.base.sortie), el('p', 'screen-note', TEXT.base.chooseTier(mapName(handlers.mapId))));
       for (const { id, level } of handlers.tiers) {
         const tier = TEXT.tiers[id];
-        menu.append(screenButton(tier?.name ?? id, () => handlers.onSortie(id), { className: 'big tier', sub: tier?.help(level) }));
+        actions.append(screenButton(tier?.name ?? id, () => handlers.onSortie(id), { className: 'big tier', sub: tier?.help(level) }));
       }
-      box.append(menu, screenButton(TEXT.base.back, () => render('sortie')));
+      actions.append(screenButton(TEXT.base.back, () => render('sortie'), { className: 'back-wide' }));
     } else {
-      box.append(el('h1', 'screen-title', TEXT.base.newGame));
-      box.append(el('p', 'screen-warning', TEXT.base.confirmNewGame));
-      const menu = el('div', 'screen-menu');
-      menu.append(
+      info.append(el('h1', 'screen-title', TEXT.base.newGame), el('p', 'screen-warning', TEXT.base.confirmNewGame));
+      actions.append(
         screenButton(TEXT.base.cancel, () => render('menu')),
         screenButton(
           TEXT.base.confirmNewGameYes,
@@ -116,8 +108,8 @@ export function createBaseScreen(root: HTMLElement, handlers: BaseScreenHandlers
           { className: 'danger' },
         ),
       );
-      box.append(menu);
     }
+    box.append(info, actions);
     root.append(box);
   };
   return { show: () => render('menu') };

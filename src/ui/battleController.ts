@@ -629,6 +629,8 @@ export function createBattleController(start: ActionResult, deps: BattleControll
               labels.setHp(ev.unitId, ev.hp, u.stats.maxHp);
             }
             if (ev.level) {
+              labels.setHp(ev.unitId, ev.hp, u.stats.maxHp);
+              labels.setMp(ev.unitId, u.mp, u.stats.maxMp);
               labels.popText(ev.unitId, TEXT.levelChange(ev.level.from, ev.level.to));
               hud.showMessage(`${TEXT.traps.drain}（${unitName(u.id, u.jobId)} ${TEXT.levelChange(ev.level.from, ev.level.to)}）`);
             }
@@ -656,6 +658,22 @@ export function createBattleController(start: ActionResult, deps: BattleControll
           await view.wait(0.25);
           break;
         }
+        case 'progressGained':
+          // 行動で得た経験値と JP。操作は止めない（待たずに次へ進む）
+          labels.popGain(ev.unitId, ev.exp, ev.jp);
+          break;
+        case 'leveledUp': {
+          const u = getUnit(state, ev.unitId);
+          labels.setHp(ev.unitId, ev.hp, ev.stats.maxHp);
+          labels.setMp(ev.unitId, ev.mp, ev.stats.maxMp);
+          labels.popLevelUp(ev.unitId, ev.to);
+          hud.showLevelUp(TEXT.gain.levelUpBanner(unitName(u.id, u.jobId), ev.to));
+          await view.wait(0.45);
+          break;
+        }
+        case 'jobLeveledUp':
+          labels.popText(ev.unitId, TEXT.gain.jobLevelUp(TEXT.jobs[ev.jobId] ?? ev.jobId, ev.to), 'joblevel');
+          break;
         case 'eventFired':
         case 'battleEnded':
           break;

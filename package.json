@@ -14,6 +14,7 @@
     "test:watch": "vitest",
     "check": "npm run lint && npm run typecheck && npm run test && npm run build",
     "autoplay": "node scripts/autoplay.mjs",
+    "autoplay:ci": "node scripts/autoplay.mjs --quick",
     "balance": "node scripts/balance.mjs"
   },
   "engines": {

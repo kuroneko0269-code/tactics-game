@@ -33,6 +33,23 @@ const unit = (id: string, jobId: string, patch = {}) => ({
 });
 
 describe('出撃', () => {
+  it('育成の数値を渡すと、味方は部隊の経験値と今のジョブの JP を持って出る（敵は持たない）', () => {
+    const rules = {
+      maxLevel: 50, expBase: 100, expPerLevel: 10, expPerAction: 10, expPerSupportAction: 15, expVictory: 20,
+      expLevelOffset: 10, expLevelPercentMax: 200, jpPerAction: 20, jpVictoryBonus: 50, jobLevelJp: [100],
+      growthCap: ZERO_GROWTH, growthWeights: ZERO_GROWTH, growthTotalCap: 0,
+    };
+    const roster: Roster = { units: [unit('a', 'warrior', { exp: 42, jobs: { warrior: { jp: 30, jpTotal: 130, learned: [] } } })] };
+    const setup = buildSortie(site, 'easy', roster, { jobs: testJobs }, rules);
+    expect(setup.progression).toBe(rules);
+    const { state } = startBattle(setup, testJobs, testRules, 1, testSpells, testStrikes);
+    expect(state.progression).toEqual(rules);
+    expect(state.units.find((u) => u.id === 'a')!.progress).toEqual({ exp: 42, jp: 30, jpTotal: 130, gainedExp: 0, gainedJp: 0 });
+    expect(state.units.find((u) => u.id === 'e1')!.progress).toBeNull();
+    // 渡さなければ、戦闘中に経験値と JP は入らない
+    expect(startBattle(buildSortie(site, 'easy', roster, { jobs: testJobs }), testJobs, testRules, 1, testSpells, testStrikes).state.progression).toBeNull();
+  });
+
   it('味方と敵を1体ずつ組にして、組ごとに先になる側を入れ替えて並べる', () => {
     expect(interleaveTeams(['p1', 'p2', 'p3'], ['e1', 'e2', 'e3'])).toEqual(['p1', 'e1', 'e2', 'p2', 'p3', 'e3']);
     expect(interleaveTeams(['p1'], ['e1', 'e2'])).toEqual(['p1', 'e1', 'e2']);

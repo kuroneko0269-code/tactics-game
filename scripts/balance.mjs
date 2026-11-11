@@ -66,7 +66,7 @@ async function main() {
   const catalog = { jobs, spells, strikes, passives };
 
   const play = (seed, tierId, roster) => {
-    const setup = buildSortie(twinHillsBattle, tierId, roster, catalog);
+    const setup = buildSortie(twinHillsBattle, tierId, roster, catalog, rules);
     const start = startBattle(setup, jobs, battleRules, seed, spells, strikes, passives).state;
     return runAutoBattle(start, 2000, { player: aiConfig, enemy: aiConfig });
   };
@@ -129,7 +129,7 @@ async function main() {
       }),
     };
     const playDungeon = (site, seed, roster, playerAi = aiConfig) => {
-      const setup = buildSortie(site, 'main', roster, catalog);
+      const setup = buildSortie(site, 'main', roster, catalog, rules);
       const start = startBattle(setup, jobs, battleRules, seed, spells, strikes, passives).state;
       return runAutoBattle(start, 2000, { player: playerAi, enemy: aiConfig });
     };

@@ -14,8 +14,12 @@ export interface UnitLabels {
   popDamage(id: string, damage: number): void;
   popHeal(id: string, amount: number): void;
   popMiss(id: string): void;
-  /** 「不発」「中断」などの短い文言。kind が reaction ならリアクションの名前として目立たせる */
-  popText(id: string, text: string, kind?: 'note' | 'reaction'): void;
+  /** 「不発」「中断」などの短い文言。kind が reaction ならリアクションの名前として目立たせる。joblevel はジョブのレベルアップ（控えめ） */
+  popText(id: string, text: string, kind?: 'note' | 'reaction' | 'joblevel'): void;
+  /** 行動で得た経験値と JP（「+9 EXP」「+20 JP」）を、ユニットの頭上に短く出す */
+  popGain(id: string, exp: number, jp: number): void;
+  /** レベルアップ（「Lv 3↑」）を、頭上の表示を光らせて出す（「レベルアップ！」の帯は hud が出す） */
+  popLevelUp(id: string, level: number): void;
   /** 付いている状態変化の小さな目印（頭上の HP の上に、1文字ずつ） */
   setStatuses(id: string, statuses: readonly StatusId[]): void;
   /** ユニットを足す（増援が現れた時） */
@@ -77,12 +81,16 @@ export function createUnitLabels(root: HTMLElement, units: readonly LabelUnit[])
   };
   for (const u of units) addUnit(u);
 
-  const pop = (id: string, text: string, className: string) => {
+  const pop = (id: string, text: string | readonly string[], className: string) => {
     const l = labels.get(id);
     if (!l) return;
     const p = document.createElement('div');
     p.className = `popup ${className}`;
-    p.textContent = text;
+    for (const line of typeof text === 'string' ? [text] : text) {
+      const span = document.createElement('span');
+      span.textContent = line;
+      p.append(span);
+    }
     l.box.append(p);
     p.addEventListener('animationend', () => p.remove());
   };
@@ -117,6 +125,16 @@ export function createUnitLabels(root: HTMLElement, units: readonly LabelUnit[])
     popHeal: (id, amount) => pop(id, `+${amount}`, 'heal'),
     popMiss: (id) => pop(id, TEXT.miss, 'miss'),
     popText: (id, text, kind = 'note') => pop(id, text, kind),
+    popGain: (id, exp, jp) => pop(id, [TEXT.gain.exp(exp), TEXT.gain.jp(jp)], 'gain'),
+    popLevelUp(id, level) {
+      pop(id, TEXT.gain.levelUpShort(level), 'levelup');
+      // 頭上の表示も一瞬光らせる
+      const l = labels.get(id);
+      if (!l) return;
+      l.box.classList.remove('leveled');
+      void l.box.offsetWidth;
+      l.box.classList.add('leveled');
+    },
     setStatuses(id, statuses) {
       const l = labels.get(id);
       if (!l) return;

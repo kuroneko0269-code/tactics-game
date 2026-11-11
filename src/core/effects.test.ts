@@ -151,7 +151,7 @@ describe('状態変化: 付与・持続・付け直し', () => {
     expect(events.some((e) => e.type === 'castInterrupted' && e.casterId === 'ea')).toBe(false);
   });
 
-  it('守りの祈り: 範囲（5マス）にいる全員に守りを付ける（敵も）。経験値の記録は味方に使った行動', () => {
+  it('守りの祈り: 範囲（5マス）にいる全員に守りを付ける（敵も）', () => {
     const state = makeState({
       heights: flat(5, 5),
       units: [
@@ -163,9 +163,11 @@ describe('状態変化: 付与・持続・付け直し', () => {
       ],
     });
     const cast = applyAction(state, { type: 'cast', spellId: 'protectPrayer', target: { kind: 'unit', unitId: 'p1' } });
-    expect(getUnit(cast.state, 'h').actions).toEqual([{ targetLevel: 3, ally: true }]);
+    // 行動の回数は、発動した時に数える
+    expect(getUnit(cast.state, 'h').actionCount).toBe(0);
     const { state: after } = untilResolved(cast.state, 'h');
     for (const id of ['p1', 'p2', 'e']) expect(getUnit(after, id).statuses.map((x) => x.id), id).toContain('protect');
+    expect(getUnit(after, 'h').actionCount).toBe(1);
     expect(getUnit(after, 'far').statuses).toEqual([]);
   });
 });

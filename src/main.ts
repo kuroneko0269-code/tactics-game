@@ -4,6 +4,7 @@ import { startBattle } from './core/battle';
 import type { ActionResult, BattleState } from './core/battleTypes';
 import {
   applyBattleResult,
+  expToNext,
   findUnit,
   learnRefusal,
   validateRoster,
@@ -13,6 +14,7 @@ import {
 import { createMap, type MapDefinition } from './core/map';
 import {
   clearCount,
+  clearRewardJp,
   EMPTY_DUNGEON_STATE,
   finishRunBattle,
   grantClearReward,
@@ -253,7 +255,10 @@ function main(): void {
     const played = dungeonState.run!.battle;
     const result = applyBattleResult(roster, state, catalog, progressionRules);
     const progress = finishRunBattle(dungeonState, ruinsDungeon, result.report.victory);
-    roster = progress.outcome.kind === 'cleared' ? grantClearReward(result.roster, ruinsDungeon) : result.roster;
+    roster =
+      progress.outcome.kind === 'cleared'
+        ? grantClearReward(result.roster, ruinsDungeon, progress.outcome.firstClear)
+        : result.roster;
     dungeonState = progress.state;
     persist();
     const outcome = progress.outcome;
@@ -266,7 +271,7 @@ function main(): void {
         showReportScreen(screenEl, result.report, jobOf, canLearn, [{ label: TEXT.report.toBase, onClick: showBase, primary: true }], {
           heading,
           title: TEXT.report.clearTitle(dungeonName),
-          highlights: [...(outcome.firstClear ? [TEXT.report.firstClear] : []), TEXT.report.reward(ruinsDungeon.clearRewardJp)],
+          highlights: [...(outcome.firstClear ? [TEXT.report.firstClear] : []), TEXT.report.reward(clearRewardJp(ruinsDungeon, outcome.firstClear))],
           notes: [],
         });
       } else if (outcome.kind === 'next') {
@@ -313,7 +318,7 @@ function main(): void {
     endBattle();
     const seed = nextSeed;
     nextSeed = randomSeed();
-    const setup = buildSortie(target, tierId, roster, catalog);
+    const setup = buildSortie(target, tierId, roster, catalog, progressionRules);
     const begin = (s: typeof setup): ActionResult =>
       startBattle(s, catalog.jobs, battleRules, seed, catalog.spells, catalog.strikes, catalog.passives);
     useMap(target.map);
@@ -359,6 +364,7 @@ function main(): void {
         onResetView: () => rig.reset(),
         initialHeight: rig.heightLevel,
         facingScreen: (unitId) => view.facingScreen(unitId),
+        expToNext: (level) => (level >= progressionRules.maxLevel ? undefined : expToNext(level, progressionRules)),
       },
       start.state.scenario.objectives.victory.flatMap((c) => (c.kind === 'defeatUnit' ? [c.unitId] : [])),
     );

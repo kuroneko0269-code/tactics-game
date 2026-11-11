@@ -54,7 +54,7 @@ const args = Object.fromEntries(
 );
 const SEED = Number(args.seed ?? 20261110);
 const SPEED = Number(args.speed ?? 6);
-const VIEWPORTS = (args.viewports ?? 'portrait,landscape').split(',');
+const VIEWPORTS = (args.viewports ?? 'portrait,landscape').split(',').filter(Boolean);
 const SCREENSHOT_DIR = args.screenshots;
 const HEADED = args.headed === 'true';
 /** 失敗した時の画面写真の置き場所 */
@@ -70,11 +70,20 @@ const AFTER_BATTLE_TIMEOUT_MS = 6 * 60 * 1000;
  * 省くと、ダンジョンの戦闘は開発用の決着（window.__tactics.finishBattle）で早めて、戦闘の間の流れだけを確かめる（CI はこちら）
  */
 const FULL_DUNGEON = args['full-dungeon'] === 'true';
+/**
+ * 短くした自動プレイ（CI 用。npm run autoplay:ci）。訓練戦の1戦は、確かめたい操作（移動のやり直し・ユニット狙いとマス狙いの魔法・
+ * 向きのボタン・カメラ操作の一通り）がすべて済んだ次の味方の手番まで画面のタップで進め、その時点の状態が core だけの計算と
+ * 一致することを確かめてから、開発用の決着で勝ちにする。最後まで戦って照合するのは、手元で実行する全体の自動プレイ（npm run autoplay）
+ */
+const QUICK = args.quick === 'true';
+/** 画面全体がスクロールしないかを確かめる画面サイズ（各画面を開いて調べるだけなので短い） */
+const LAYOUT_VIEWPORTS = (args.layouts ?? 'portrait,small,landscape,pc').split(',').filter(Boolean);
 
 const VIEWPORT_OPTIONS = {
   portrait: { label: 'スマホ縦向き', ...devices['iPhone 13'] },
   landscape: { label: 'スマホ横向き', ...devices['iPhone 13 landscape'] },
   pc: { label: 'PC', viewport: { width: 1280, height: 800 } },
+  small: { label: '小さめのスマホ', viewport: { width: 360, height: 640 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
 };
 
 class CheckError extends Error {}
@@ -115,7 +124,7 @@ async function main() {
   /** 部隊と段階から、画面と同じ方法で戦闘を始める（core だけで） */
   core.start = (roster, tierId, seed) =>
     core.battle.startBattle(
-      core.sortie.buildSortie(data.site, tierId, roster, data.catalog),
+      core.sortie.buildSortie(data.site, tierId, roster, data.catalog, data.progression),
       data.jobs,
       data.rules,
       seed,
@@ -128,15 +137,38 @@ async function main() {
   const policy = playerPolicy(core);
   let expected = startState;
   let expectedCasts = 0;
+  /** 短くした自動プレイで止める手番（確かめたい操作がすべて済んだ次の味方の手番）と、その手番の始まりの状態 */
+  let quickStop;
+  const done = { tile: false, unit: false, facing: false, turns: new Set() };
+  const CAMERA_OP_COUNT = 6;
   while (expected.turn && expected.turnNumber <= 1000) {
     const unit = expected.units.find((u) => u.id === expected.turn.unitId);
+    if (unit.team === 'player' && !expected.turn.moved && !expected.turn.acted && !done.turns.has(expected.turnNumber)) {
+      if (!quickStop && done.tile && done.unit && done.facing && done.turns.size >= CAMERA_OP_COUNT) {
+        quickStop = { turn: expected.turnNumber, state: expected };
+      }
+      done.turns.add(expected.turnNumber);
+    }
     const action = unit.team === 'player' ? policy(expected) : core.ai.decideNextAction(expected, data.ai);
-    if (action.type === 'cast' && unit.team === 'player') expectedCasts++;
+    if (unit.team === 'player') {
+      if (action.type === 'cast') {
+        expectedCasts++;
+        done[action.target.kind] = true;
+      }
+      if (action.type === 'endTurn' && expected.turnNumber % 3 === 0) done.facing = true;
+    }
     expected = core.battle.applyAction(expected, action).state;
   }
   console.log(
     `シード値 ${SEED}: core だけの計算では ${expected.winner === 'player' ? '勝利' : '敗北'}（${expected.turnNumber}手番、味方の魔法 ${expectedCasts}回）`,
   );
+  if (QUICK && quickStop) {
+    // 止める手番で、開発用の決着（勝ち）にした状態を、この戦闘の結果とする
+    expected = { ...quickStop.state, winner: 'player', turn: null };
+    console.log(`短くした自動プレイ: ${quickStop.turn}手番目の始まりまでタップで進め、照合してから勝ちで終える`);
+  } else {
+    quickStop = undefined;
+  }
   check(expectedCasts > 0, `シード値 ${SEED} では味方が魔法を使いません。別のシード値を選んでください`);
   // 戦闘の後の部隊と、編成の画面で行う変更（core だけで計算）
   const plan = rosterPlan(core, expected);
@@ -149,14 +181,32 @@ async function main() {
   // 画面サイズごとに、別々のブラウザ（別々のプロセス）で動かす。
   // 1つのブラウザで複数の画面を開くと、描画（ソフトウェアで行う）が1つの描画用プロセスに集まって順番待ちになり、
   // 3つ同時・高解像度の画面写真つきの時に、時間切れで止まったように見えていたため。
-  const results = await Promise.all(
-    VIEWPORTS.map(async (name) => {
+  const layoutRun = async (name) => {
+    const browser = await chromium.launch({
+      headless: !HEADED,
+      args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist'],
+    });
+    try {
+      const r = await checkLayouts(browser, baseUrl, name, core);
+      return { name, ok: true, layout: true, ...r };
+    } catch (e) {
+      return { name, ok: false, layout: true, error: e };
+    } finally {
+      await browser.close();
+    }
+  };
+  // 短くした版（CI）は、画面の収まりの確認も同時に動かして時間を抑える。全体では、ブラウザが多すぎて遅くならないよう、
+  // 1戦を戦う画面サイズを先に、画面の収まりの確認をその後に動かす
+  const layoutsAlongside = QUICK ? LAYOUT_VIEWPORTS.map(layoutRun) : [];
+  const battleResults = await Promise.all([
+    ...layoutsAlongside,
+    ...VIEWPORTS.map(async (name) => {
       const browser = await chromium.launch({
         headless: !HEADED,
         args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist'],
       });
       try {
-        const r = await playOneBattle(browser, baseUrl, name, core, expected, plan);
+        const r = await playOneBattle(browser, baseUrl, name, core, expected, plan, quickStop);
         return { name, ok: true, ...r };
       } catch (e) {
         return { name, ok: false, error: e };
@@ -164,21 +214,24 @@ async function main() {
         await browser.close();
       }
     }),
-  );
+  ]);
+  const results = QUICK ? battleResults : [...battleResults, ...(await Promise.all(LAYOUT_VIEWPORTS.map(layoutRun)))];
   await server.close();
 
   console.log('');
   let failed = false;
   for (const r of results) {
-    const label = VIEWPORT_OPTIONS[r.name]?.label ?? r.name;
-    if (r.ok) {
+    const label = `${r.layout ? '画面の収まり・' : ''}${VIEWPORT_OPTIONS[r.name]?.label ?? r.name}`;
+    if (r.ok && r.layout) {
+      console.log(`✔ ${label}: ${r.screens}画面で、画面全体のスクロールなし・ボタンが画面の内側（${r.seconds}秒）`);
+    } else if (r.ok) {
       console.log(
         `✔ ${label}: ${r.winner === 'player' ? '勝利' : '敗北'}（${r.turns}手番、味方の手番 ${r.playerTurns}、` +
           `魔法の指定 ${r.casts}回（ユニット狙い ${r.unitCasts}・マス狙い ${r.tileCasts}）、詠唱の中断 ${r.interrupts}回、` +
           `向きを変えた ${r.facingChanges}回、移動のやり直し ${r.undos}回、カメラ操作 ${r.cameraOps}回、タップ ${r.taps}回、${r.seconds}秒）`,
       );
       console.log(
-        `  育成: 結果の画面 ✔、習得 ${r.learned}回・ジョブチェンジ ${r.jobChanges}回・副コマンド ${r.subChanges}回、再び出撃 ✔、` +
+        `  育成: 戦闘中のレベルアップの表示 ✔、結果の画面 ✔、編成のタブ ${r.tabs}回・習得 ${r.learned}回・ジョブチェンジ ${r.jobChanges}回・副コマンド ${r.subChanges}回、再び出撃 ✔、` +
           `強打 ✔、突き飛ばし ${r.knockbacks}回、反撃 ${r.counters}回、受動的なアビリティの習得と付け替え ${r.passives}回、読み込み直し ✔、はじめから ✔`,
       );
       console.log(
@@ -204,10 +257,10 @@ async function main() {
   if (failed) process.exit(1);
 }
 
-async function playOneBattle(browser, baseUrl, name, core, expected, plan) {
+async function playOneBattle(browser, baseUrl, name, core, expected, plan, quickStop) {
   const holder = {};
   try {
-    return await playOneBattleInner(browser, baseUrl, name, core, expected, plan, holder);
+    return await playOneBattleInner(browser, baseUrl, name, core, expected, plan, holder, quickStop);
   } catch (e) {
     // 失敗した時の画面を残す（GitHub Actions では成果物としてダウンロードできる）
     if (holder.page) {
@@ -218,7 +271,7 @@ async function playOneBattle(browser, baseUrl, name, core, expected, plan) {
   }
 }
 
-async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, holder) {
+async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, holder, quickStop) {
   const options = VIEWPORT_OPTIONS[name];
   check(options, `画面サイズ ${name} は未定義です（portrait / landscape / pc）`);
   const { label, ...contextOptions } = options;
@@ -265,6 +318,7 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
     traps: 0,
     appeared: 0,
     reached: 0,
+    tabs: 0,
   };
   /** 指に近いタップ（狙いの中央から少しずれる）の回数と、そのうち押し直しが必要だった回数（種類ごと） */
   const finger = {
@@ -846,7 +900,7 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   const initialCamera = await getCamera();
   await screenshot('00-start');
   /** 今の戦闘を、味方の手番は画面のタップで（AI と同じ動かし方で）、決着まで進める */
-  const playByTaps = async () => {
+  const playByTaps = async (stop) => {
   let lastTurn = -1;
   for (;;) {
     check(Date.now() < deadline, `時間切れ（${BATTLE_TIMEOUT_MS / 1000}秒）`);
@@ -855,6 +909,12 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
     const mode = await getMode();
     if (mode.kind === 'ended') break;
     let state = await getState();
+    // 短くした自動プレイ: 止める手番の始まりで、core だけの計算と照合してから、開発用の決着で勝ちにする
+    if (stop && state.turnNumber === stop.turn) {
+      check(JSON.stringify(state) === JSON.stringify(stop.state), `${stop.turn}手番目の始まりの状態（HP・位置・経験値・乱数の状態など）が core の計算と違います`);
+      await T(() => window.__tactics.finishBattle('player'));
+      return true;
+    }
     check(state.turn, '手番がありません');
     const unit = state.units.find((u) => u.id === state.turn.unitId);
     check(unit.team === 'player', `入力待ちなのに手番が敵です（${unit.id}）`);
@@ -1010,14 +1070,16 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
     }
   }
   };
-  await playByTaps();
+  const stopped = await playByTaps(quickStop);
 
   // ---- 結果の照合 ----
-  const final = await getState();
+  const final = stopped ? expected : await getState();
   await screenshot('99-result');
   check(final.winner === expected.winner, `勝敗が core の計算と違います（画面 ${final.winner} / core ${expected.winner}）`);
   check(final.turnNumber === expected.turnNumber, `手番数が core の計算と違います（画面 ${final.turnNumber} / core ${expected.turnNumber}）`);
   check(JSON.stringify(final) === JSON.stringify(expected), '最終状態（HP・位置・乱数の状態など）が core の計算と違います');
+  // 戦闘中に経験値と JP が入っている（その場で反映される）
+  check(final.units.some((u) => u.team === 'player' && u.progress && u.progress.gainedExp > 0), '戦闘中に経験値が入っていません');
   check(stats.casts > 0, '味方の魔法を一度も指定していません');
   check(stats.undos > 0, '「移動をやり直す」を一度も確かめていません');
   check(stats.facingChanges > 0, '向きのボタンを一度も押していません');
@@ -1028,17 +1090,19 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   await waitFor('結果の画面', () => window.__tactics.screen() === 'result');
   const resultText = await page.locator('.report-screen .result-title').textContent();
   check(resultText === (final.winner === 'player' ? '勝利' : '敗北'), `結果の画面の勝敗の表示が違います（${resultText}）`);
+  // 勝利のボーナスの数え上げが終わるまで待つ
+  await waitFor('結果の画面の数え上げ', () => document.querySelector('.report-screen[data-done="true"]') !== null);
   for (const u of plan.report.units) {
-    const line = await page.locator(`.report-unit[data-unit-id="${u.unitId}"] .report-gain`).textContent();
-    const want = `${text.report.exp(u.exp)} ・ ${text.report.jp(text.jobs[u.jobId], u.jp)}`;
-    check(line === want, `${u.unitId} の得た経験値と JP の表示が core の計算と違います（画面 ${line} / core ${want}）`);
+    const row = page.locator(`.report-row[data-unit-id="${u.unitId}"]`);
+    const got = [await row.getAttribute('data-exp'), await row.getAttribute('data-jp')].map(Number);
+    check(got[0] === u.exp && got[1] === u.jp, `${u.unitId} の得た経験値と JP の合計が core の計算と違います（画面 ${got} / core ${[u.exp, u.jp]}）`);
   }
-  const levelUps = await page.locator('.report-up').count();
-  const expectedUps = plan.report.units.reduce(
-    (n, u) => n + (u.levelAfter > u.levelBefore ? 1 : 0) + (u.jobLevelAfter > u.jobLevelBefore ? 1 : 0),
-    0,
-  );
-  check(levelUps === expectedUps, `レベルアップの表示の数が違います（画面 ${levelUps} / core ${expectedUps}）`);
+  const levelUps = await page.locator('.report-ups .report-chip:not(.down)').count();
+  const expectedUps = plan.report.units.filter((u) => u.levelAfter > u.levelBefore).length;
+  check(levelUps === expectedUps, `レベルが上がったユニットの数が違います（画面 ${levelUps} / core ${expectedUps}）`);
+  const jobUps = await page.locator('.report-job-up:not([hidden])').count();
+  const expectedJobUps = plan.report.units.filter((u) => u.jobLevelAfter > u.jobLevelBefore).length;
+  check(jobUps === expectedJobUps, `ジョブのレベルが上がった表示の数が違います（画面 ${jobUps} / core ${expectedJobUps}）`);
   await screenshot('result-screen');
   await pressButton(text.report.toBase);
   await waitFor('拠点', () => window.__tactics.screen() === 'base');
@@ -1048,49 +1112,95 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   };
   await sameRoster(plan.afterBattle, '戦闘の後');
 
-  // ---- 編成: 習得・ジョブチェンジ・副コマンドの付け替え ----
-  const unitButton = (id) => page.locator(`.roster-card[data-unit-id="${id}"]`);
+  // ---- 編成: 4つのタブ、説明の欄からの習得・ジョブチェンジ・副コマンドの付け替え ----
   const tapLocator = async (loc) => {
     stats.taps++;
     if (touch) await loc.tap();
     else await loc.click();
   };
+  const pickUnit = async (id) => {
+    await tapLocator(page.locator(`.unit-pick[data-unit-id="${id}"]`));
+    await waitFor(`${id} を選ぶ`, (id) => document.querySelector('.roster-screen')?.dataset.unitId === id, id);
+  };
+  const openTab = async (tab) => {
+    await tapLocator(page.locator(`.roster-tabs .tab-button[data-tab="${tab}"]`));
+    await waitFor(`タブ ${tab}`, (tab) => document.querySelector('.roster-panel')?.dataset.tab === tab, tab);
+    stats.tabs++;
+  };
+  const openLearnGroup = async (group) => {
+    await tapLocator(page.locator(`.learn-filter .tab-button[data-tab="${group}"]`));
+    await waitFor(`習得の種類 ${group}`, (g) => document.querySelector('.learn-list')?.dataset.group === g, group);
+  };
+  /** 習得の一覧の項目を押して、説明の欄を開く */
+  const openLearnItem = async (jobId, abilityId) => {
+    await tapLocator(page.locator(`.learn-item[data-job-id="${jobId}"][data-ability-id="${abilityId}"]`));
+    await waitFor('説明の欄', (a) => document.querySelector(`.sheet[data-sheet="ability"][data-ability-id="${a}"]`) !== null, abilityId);
+    await waitSheetStill();
+  };
+  /** 欄がせり上がる動きの途中で押すと、動いている先を押してしまうことがあるため、動きが終わるまで待つ */
+  const waitSheetStill = () =>
+    waitFor('説明の欄の動きが終わる', () =>
+      [...document.querySelectorAll('.sheet')].every((s) => s.getAnimations().every((a) => a.playState !== 'running')),
+    );
+  const closeSheet = async () => {
+    await waitSheetStill();
+    await pressButton(text.roster.close);
+    await waitFor('説明の欄を閉じる', () => document.querySelector('.sheet') === null);
+  };
+  /** ユニットを選んだ後、ジョブチェンジと付け替えに2回以内のタップで届く（タブ → 項目） */
+  const viaTwoTaps = async (tab, itemSelector, sheetKind) => {
+    await openTab(tab);
+    await tapLocator(page.locator(itemSelector));
+    await waitFor(`欄 ${sheetKind}`, (k) => document.querySelector(`.sheet[data-sheet="${k}"]`) !== null, sheetKind);
+    await waitSheetStill();
+  };
   await pressButton('編成');
   await waitFor('編成の画面', () => window.__tactics.screen() === 'roster');
-  await screenshot('roster-list');
+  // 4つのタブを順に開く（能力の棒、ジョブ、アビリティの枠、習得の一覧）
+  for (const tab of ['stats', 'job', 'abilities', 'learn']) {
+    await openTab(tab);
+    await screenshot(`roster-tab-${tab}`);
+  }
+  check((await page.locator('.stat-bar-row').count()) === 0, '習得のタブに能力の棒が出ています');
+  await openTab('stats');
+  check((await page.locator('.stat-bar-row').count()) === 5, '能力のタブに5つの能力の棒がありません');
+  check((await page.locator('.growth-total .bar').count()) === 1, '成長の合計の棒がありません');
   if (plan.learn) {
-    await tapLocator(unitButton(plan.learn.unitId));
-    await screenshot('roster-detail');
-    await pressButton(text.roster.learn);
-    const row = page.locator(`.learn-row[data-job-id="${plan.learn.jobId}"][data-ability-id="${plan.learn.abilityId}"] button`);
-    check(!(await row.isDisabled()), `${plan.learn.abilityId} の「覚える」が押せません`);
-    await screenshot('roster-learn');
-    await tapLocator(row);
+    await pickUnit(plan.learn.unitId);
+    await openTab('learn');
+    await openLearnGroup('action');
+    await openLearnItem(plan.learn.jobId, plan.learn.abilityId);
+    const button = page.locator('.sheet .learn-confirm');
+    check(!(await button.isDisabled()), `${plan.learn.abilityId} の「習得する」が押せません`);
+    await screenshot('roster-learn-sheet');
+    await tapLocator(button);
     await waitFor(
       '習得',
       ([u, j, a]) => window.__tactics.roster().units.find((x) => x.id === u).jobs[j].learned.includes(a),
       [plan.learn.unitId, plan.learn.jobId, plan.learn.abilityId],
     );
     stats.learned++;
-    await pressButton(text.roster.back);
-    await pressButton(text.roster.back);
+    await closeSheet();
+    const itemText = await page.locator(`.learn-item[data-ability-id="${plan.learn.abilityId}"]`).textContent();
+    check(itemText.includes(text.roster.learned), `習得した後の一覧に「習得済み」が出ていません（${itemText}）`);
   }
-  await tapLocator(unitButton(plan.jobUnitId));
+  await pickUnit(plan.jobUnitId);
   for (const jobId of [plan.subJobId, plan.homeJobId]) {
-    await pressButton(text.roster.changeJob);
-    await pressButton(text.jobs[jobId]);
-    await waitFor('能力値と成長率の比べる表', () => document.querySelector('.compare-table') !== null);
-    if (stats.jobChanges === 0) await screenshot('roster-job-compare');
+    await viaTwoTaps('job', `.job-choice[data-job-id="${jobId}"]`, 'job');
+    check((await page.locator('.sheet .compare-grid').count()) === 1, '能力値と成長率の比較が出ていません');
+    if (stats.jobChanges === 0) await screenshot('roster-job-sheet');
     await pressButton(text.roster.becomeJob(text.jobs[jobId]));
     await waitFor('ジョブチェンジ', ([u, j]) => window.__tactics.roster().units.find((x) => x.id === u).jobId === j, [plan.jobUnitId, jobId]);
     stats.jobChanges++;
   }
-  await pressButton(text.roster.changeSub);
-  await pressButton(text.commands[plan.subJobId]);
+  await viaTwoTaps('abilities', '.slot-row[data-slot="secondary"]', 'slot-secondary');
+  await screenshot('roster-slot-sheet');
+  await tapLocator(page.locator(`.sheet .screen-button[data-job-id="${plan.subJobId}"]`));
   await waitFor('副コマンド', ([u, j]) => window.__tactics.roster().units.find((x) => x.id === u).slots.secondary === j, [plan.jobUnitId, plan.subJobId]);
   stats.subChanges++;
+  const subText = await page.locator('.slot-row[data-slot="secondary"]').textContent();
+  check(subText.includes(text.commands[plan.subJobId]), `付けた副コマンドが枠に出ていません（${subText}）`);
   await screenshot('roster-after');
-  await pressButton(text.roster.back);
   await pressButton(text.roster.back);
   await waitFor('拠点', () => window.__tactics.screen() === 'base');
   await sameRoster(plan.afterEdit, '編成の後');
@@ -1131,9 +1241,24 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   check(sdTitle.includes(text.abilities.powerStrike), `強打の予測の題が違います（${sdTitle}）`);
   await screenshot('strike-preview');
   await pressButton('確定');
+  // 戦闘中のレベルアップ: 頭上の「+N EXP」「+N JP」、「レベルアップ！」の帯とユニットの名前、情報の欄のレベル
+  await waitFor('経験値と JP の表示', () => document.querySelector('.popup.gain') !== null);
+  await waitFor('レベルアップの表示', () => {
+    const b = document.querySelector('.levelup-banner');
+    return b && !b.hidden && document.querySelector('.popup.levelup') !== null;
+  });
+  const bannerText = await page.locator('.levelup-banner').textContent();
+  const sdName = text.unitNames[sd.unitId];
+  check(bannerText.includes(text.gain.levelUp) && bannerText.includes(sdName), `レベルアップの帯にユニットの名前がありません（${bannerText}）`);
+  await screenshot('level-up');
   await waitFor('強打の後', () => !['busy', 'confirm'].includes(window.__tactics.mode()));
   const sdAfter = await getState();
-  const pickHit = (st) => JSON.stringify(st.units.map((u) => [u.id, u.hp, u.actions.length]).filter(([id]) => id === sd.unitId || id === sd.targetId));
+  const leveled = sdAfter.units.find((u) => u.id === sd.unitId);
+  check(leveled.level === sdUnit.level + 1, `戦闘中にレベルが上がっていません（${sdUnit.level} → ${leveled.level}）`);
+  const infoText = await page.locator('.unit-info').textContent();
+  check(infoText.includes(text.roster.level(leveled.level)) && infoText.includes(text.gain.jpHave(leveled.progress.jp)), `情報の欄にレベルと JP が出ていません（${infoText}）`);
+  const pickHit = (st) =>
+    JSON.stringify(st.units.map((u) => [u.id, u.hp, u.actionCount, u.level, u.stats, u.progress]).filter(([id]) => id === sd.unitId || id === sd.targetId));
   check(pickHit(sdAfter) === pickHit(sd.expected), `強打の結果が core の計算と違います（画面 ${pickHit(sdAfter)} / core ${pickHit(sd.expected)}）`);
   check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
 
@@ -1303,26 +1428,40 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   await page.evaluate((r) => window.__tactics.setRoster(r), pd.start);
   await waitFor('拠点', () => window.__tactics.screen() === 'base');
   await pressButton('編成');
-  await tapLocator(unitButton(pd.unitId));
-  await pressButton(text.roster.learn);
-  await waitFor('習得の一覧', () => document.querySelector('.learn-group[data-group="reaction"]') !== null);
-  const lockedRow = page.locator(`.learn-group[data-group="support"] .learn-row[data-ability-id="${pd.lockedId}"] button`);
-  check(await lockedRow.isDisabled(), `ジョブのレベルが足りない ${pd.lockedId} の「覚える」が押せます`);
-  const lockedText = await lockedRow.textContent();
-  check(lockedText.includes(text.roster.needJobLevelShort(pd.lockedLevel)), `ジョブのレベルが足りない理由が出ていません（${lockedText}）`);
-  await screenshot('roster-learn-passive');
-  await tapLocator(page.locator(`.learn-group[data-group="reaction"] .learn-row[data-ability-id="${pd.abilityId}"] button`));
+  await waitFor('編成の画面', () => window.__tactics.screen() === 'roster');
+  await pickUnit(pd.unitId);
+  await openTab('learn');
+  // ジョブのレベルが足りない「重装」は、説明の欄の「習得する」が押せず、理由が出る
+  await openLearnGroup('support');
+  await openLearnItem(pd.jobId, pd.lockedId);
+  const lockedButton = page.locator('.sheet .learn-confirm');
+  check(await lockedButton.isDisabled(), `ジョブのレベルが足りない ${pd.lockedId} の「習得する」が押せます`);
+  const lockedText = await page.locator('.sheet').textContent();
+  check(lockedText.includes(text.roster.refusal.jobLevelTooLow), `ジョブのレベルが足りない理由が出ていません（${lockedText}）`);
+  await screenshot('roster-learn-locked');
+  await closeSheet();
+  // 「反撃」を説明の欄から習得し、そのまま「付ける」
+  await openLearnGroup('reaction');
+  await openLearnItem(pd.jobId, pd.abilityId);
+  await tapLocator(page.locator('.sheet .learn-confirm'));
   await waitFor('受動的なアビリティの習得', ([u, j, a]) => window.__tactics.roster().units.find((x) => x.id === u).jobs[j].learned.includes(a), [pd.unitId, pd.jobId, pd.abilityId]);
-  await pressButton(text.roster.back);
-  await pressButton(text.roster.changePassive(text.passiveSlots.reaction));
-  await pressButton(text.abilities[pd.abilityId]);
+  await screenshot('roster-learned-sheet');
+  await tapLocator(page.locator('.sheet .equip-toggle'));
   await waitFor('リアクションの付け替え', ([u, a]) => window.__tactics.roster().units.find((x) => x.id === u).slots.reaction === a, [pd.unitId, pd.abilityId]);
-  const slotText = await page.locator('.passive-slot.slot-reaction').textContent();
+  await openTab('abilities');
+  const slotText = await page.locator('.slot-row[data-slot="reaction"]').textContent();
   check(slotText.includes(text.abilities[pd.abilityId]), `付けたリアクションが編成の画面に出ていません（${slotText}）`);
+  // 枠からも付け替えられる（外して、もう一度付ける）
+  await viaTwoTaps('abilities', '.slot-row[data-slot="reaction"]', 'slot-reaction');
+  await pressButton(text.roster.remove);
+  await waitFor('リアクションを外す', (u) => window.__tactics.roster().units.find((x) => x.id === u).slots.reaction === null, pd.unitId);
+  await viaTwoTaps('abilities', '.slot-row[data-slot="reaction"]', 'slot-reaction');
+  await tapLocator(page.locator(`.sheet .screen-button[data-ability-id="${pd.abilityId}"]`));
+  await waitFor('リアクションを付ける', ([u, a]) => window.__tactics.roster().units.find((x) => x.id === u).slots.reaction === a, [pd.unitId, pd.abilityId]);
   await screenshot('roster-passive-equipped');
   stats.passives++;
   await pressButton(text.roster.back);
-  await pressButton(text.roster.back);
+  await waitFor('拠点', () => window.__tactics.screen() === 'base');
   await sameRoster(pd.expected, '受動的なアビリティを付けた後');
   await sortieTraining(text.tiers.easy.name);
   const pdUnit = (await getState()).units.find((u) => u.id === pd.unitId);
@@ -1480,6 +1619,156 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
 }
 
 /**
+ * 画面の収まりの確認: 各画面（拠点・出撃先・敵の強さ・ダンジョン・挑み直しの確認・はじめからの確認・編成の4つのタブと説明の欄・
+ * 配置・戦闘・結果・戦闘の間・負けた時・クリア）を開き、画面全体がスクロールしないこと（収まらない内容は枠の中だけでスクロールする）、
+ * ボタンが画面の内側にあること、画面のボタンが指で押せる大きさ（高さ 48px 以上）であることを確かめる。
+ */
+async function checkLayouts(browser, baseUrl, name, core) {
+  const options = VIEWPORT_OPTIONS[name];
+  check(options, `画面サイズ ${name} は未定義です`);
+  const { label, ...contextOptions } = options;
+  delete contextOptions.defaultBrowserType;
+  contextOptions.deviceScaleFactor = SCREENSHOT_DIR ? Math.min(2, contextOptions.deviceScaleFactor ?? 1) : 1;
+  const context = await browser.newContext(contextOptions);
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e));
+  const started = Date.now();
+  const { text } = core.data;
+  await page.goto(`${baseUrl}?seed=${SEED}&speed=${SPEED}`);
+  await page.waitForFunction(() => window.__tactics?.screen() === 'base', null, { timeout: 30000 });
+  const press = async (n) => page.getByRole('button', { name: n, exact: true }).click();
+  const until = (fn, arg) => page.waitForFunction(fn, arg, { timeout: 60000, polling: 50 });
+  let screens = 0;
+  const inspect = async (tag) => {
+    // 説明の欄のせり上がりなどの動き（終わりのあるもの）が終わるのを待つ
+    await page.waitForFunction(
+      () => document.getAnimations().every((a) => a.playState !== 'running' || a.effect?.getComputedTiming().iterations === Infinity),
+      null,
+      { timeout: 30000, polling: 50 },
+    );
+    const problems = await page.evaluate(() => {
+      const out = [];
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const de = document.documentElement;
+      if (de.scrollHeight > vh + 1 || de.scrollWidth > vw + 1) out.push(`ページ全体 ${de.scrollWidth}×${de.scrollHeight}`);
+      const s = document.getElementById('screen');
+      if (!s.hidden && (s.scrollHeight > s.clientHeight + 1 || s.scrollWidth > s.clientWidth + 1)) {
+        out.push(`画面の中身があふれている ${s.scrollWidth}×${s.scrollHeight}`);
+      }
+      for (const b of document.querySelectorAll('#screen button, #hud button')) {
+        if (b.offsetParent === null) continue;
+        const r = b.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) continue;
+        const name = b.getAttribute('aria-label') ?? b.textContent;
+        // 数が増え続ける一覧の中は、枠の中でスクロールしてよい（枠そのものが画面の内側にあるかを見る）
+        const area = b.closest('.scroll-area');
+        const box = area ? area.getBoundingClientRect() : r;
+        if (box.top < -1 || box.left < -1 || box.bottom > vh + 1 || box.right > vw + 1) out.push(`画面の外: ${name}`);
+        if (b.closest('#screen') && r.height < 47.5) out.push(`小さいボタン（高さ ${Math.round(r.height)}px）: ${name}`);
+      }
+      return out;
+    });
+    check(problems.length === 0, `${label}「${tag}」: ${problems.join(' / ')}`);
+    check(errors.length === 0, `ページでエラー: ${errors.map((e) => e.message).join(' / ')}`);
+    screens++;
+    if (SCREENSHOT_DIR) {
+      fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
+      await page.screenshot({ path: path.join(SCREENSHOT_DIR, `layout-${name}-${tag}.png`) });
+    }
+  };
+  const screenIs = (n) => until((n) => window.__tactics.screen() === n, n);
+  const resultDone = () => until(() => document.querySelector('.report-screen[data-done="true"]') !== null);
+  const finish = async (winner) => {
+    await until(() => ['main', 'ended'].includes(window.__tactics.mode()));
+    await page.evaluate((w) => window.__tactics.finishBattle(w), winner);
+    await screenIs('result');
+    await resultDone();
+  };
+  const startFromDeploy = async () => {
+    await until(() => window.__tactics.mode() === 'deploy');
+    await inspect('deploy');
+    await press(text.objectives.close);
+    await press(text.deploy.start);
+    await until(() => window.__tactics.screen() === 'battle' && window.__tactics.mode() === 'main' && window.__tactics.camera().idle);
+  };
+
+  await inspect('base');
+  await press(text.base.newGame);
+  await inspect('new-game-confirm');
+  await press(text.base.cancel);
+  // 編成: 4つのタブと説明の欄
+  await press(text.base.roster);
+  await screenIs('roster');
+  const tab = async (t) => {
+    await page.locator(`.roster-tabs .tab-button[data-tab="${t}"]`).click();
+    await until((t) => document.querySelector('.roster-panel')?.dataset.tab === t, t);
+  };
+  for (const t of ['stats', 'job', 'abilities', 'learn']) {
+    await tab(t);
+    await inspect(`roster-${t}`);
+  }
+  await page.locator('.learn-item').first().click();
+  await inspect('roster-sheet-ability');
+  await press(text.roster.close);
+  await tab('job');
+  await page.locator('.job-choice:not([disabled])').first().click();
+  await inspect('roster-sheet-job');
+  await press(text.roster.close);
+  await tab('abilities');
+  await page.locator('.slot-row[data-slot="main"]').click();
+  await inspect('roster-sheet-main');
+  await press(text.roster.close);
+  await press(text.roster.back);
+  await screenIs('base');
+  // 出撃先・敵の強さ・配置・戦闘・結果
+  await press(text.base.sortie);
+  await inspect('sortie');
+  await press(text.base.training);
+  await inspect('tiers');
+  await press(text.tiers.easy.name);
+  await startFromDeploy();
+  await inspect('battle');
+  await finish('player');
+  await inspect('result');
+  await press(text.report.toBase);
+  // ダンジョン: 挑む → 戦闘の間（3つのボタン）→ 負けた時 → クリア
+  await screenIs('base');
+  await press(text.base.sortie);
+  await press(text.dungeons.ruins);
+  await inspect('dungeon');
+  await press(text.base.challenge);
+  await startFromDeploy();
+  await finish('player');
+  await inspect('dungeon-between');
+  await press(text.report.next(2, text.mapNames[core.data.dungeon.battles[1].map.id]));
+  await startFromDeploy();
+  await finish('enemy');
+  await inspect('dungeon-lost');
+  await press(text.report.retry);
+  await startFromDeploy();
+  await finish('player');
+  await press(text.report.suspend);
+  await screenIs('base');
+  await press(text.base.sortie);
+  await press(text.dungeons.ruins);
+  await inspect('dungeon-in-progress');
+  await press(text.base.restart);
+  await inspect('dungeon-restart-confirm');
+  await press(text.base.cancel);
+  await press(text.base.resume(3, text.mapNames[core.data.dungeon.battles[2].map.id]));
+  await startFromDeploy();
+  await finish('player');
+  await inspect('dungeon-clear');
+  await press(text.report.toBase);
+  await screenIs('base');
+  await inspect('base-cleared');
+  await context.close();
+  return { screens, seconds: Math.round((Date.now() - started) / 1000) };
+}
+
+/**
  * 味方の動かし方。敵と同じ AI で決めるが、味方が最初にユニットを狙う魔法を使う時だけ、
  * そのユニットの今いるマスを狙う（マス狙い）に変える。画面の操作と core だけの計算で同じものを使う。
  */
@@ -1582,9 +1871,11 @@ function strikeDrill(core, plan) {
   const me = base.units.find((x) => x.id === unitId);
   const targetId = 'e-warrior-2';
   // 敵の戦士を、戦士のすぐ前（奥側）に置く。こちらに背を向けさせ、強打の方が通常攻撃より得になるようにする
+  // 経験値をレベルアップの直前まで貯めておく（強打の経験値で、戦闘の途中にレベルが上がる表示を確かめるため）
+  const need = P.expToNext(me.level, rules) - 1;
   const units = base.units.map((x) =>
     x.id === unitId
-      ? { ...x, ct: 100 }
+      ? { ...x, ct: 100, progress: { ...x.progress, exp: need } }
       : x.id === targetId
         ? { ...x, x: me.x, z: me.z - 1, facing: 'north', ct: 0 }
         : { ...x, ct: 0 },

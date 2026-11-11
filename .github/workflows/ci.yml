@@ -1,4 +1,4 @@
-# PR（変更の提案）が出るたびに、lint・型チェック・テスト・ビルドと、自動プレイ（実際のブラウザで1戦を進める確認）を自動実行する。
+# PR（変更の提案）が出るたびに、lint・型チェック・テスト・ビルドと、自動プレイ（実際のブラウザで画面を操作する確認。短くした版）を自動実行する。
 # ジョブ名 check は main のルールで「必須の検査」に指定されているので、変えないこと。
 name: CI
 
@@ -34,8 +34,9 @@ jobs:
         run: npm run build
       - name: 自動プレイ用のブラウザ（Chromium）を用意
         run: npx playwright install --with-deps --only-shell chromium
-      - name: 自動プレイ（スマホ縦向き・横向きで1戦を最後まで）
-        run: npm run autoplay
+      # CI では短くした自動プレイ（npm run autoplay:ci）。1戦を最後まで戦う全体の自動プレイは、手元で npm run autoplay
+      - name: 自動プレイ（短くした版。スマホ縦向き・横向きの操作と、4つの画面サイズでの画面の収まり）
+        run: npm run autoplay:ci
       - name: 自動プレイが失敗した時の画面写真を保存
         if: failure()
         uses: actions/upload-artifact@v4

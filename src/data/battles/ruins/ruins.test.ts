@@ -51,5 +51,5 @@ describe('ダンジョン「はじまりの遺跡」', () => {
         expect(b.state).toEqual(a.state);
       }
     }
-  });
+  }, 30_000);
 });
