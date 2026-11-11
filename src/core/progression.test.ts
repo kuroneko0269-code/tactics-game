@@ -61,6 +61,7 @@ const catalog: GameCatalog = {
   spells: testSpells,
   strikes: testStrikes,
   passives: testPassives,
+  equipment: [],
 };
 
 const rules: ProgressionRules = {
@@ -88,6 +89,7 @@ const recruit = (jobId = 'warrior', patch: Partial<RosterUnit> = {}): RosterUnit
   growth: ZERO_GROWTH,
   jobs: { [jobId]: { jp: 0, jpTotal: 0, learned: [] } },
   slots: { secondary: null, reaction: null, support: null, movement: null },
+  equipment: { weapon: null, armor: null, accessory: null },
   ...patch,
 });
 
@@ -213,7 +215,7 @@ describe('JP とジョブのレベル', () => {
   const progressOf = (exp: number, jp: number, jpTotal: number, gainedExp: number, gainedJp: number) => ({ exp, jp, jpTotal, gainedExp, gainedJp });
 
   it('戦闘の結果: 戦闘中に得た経験値・JP・レベルを部隊へ書き戻し、勝てば倒れたユニットを含む全員に勝利のボーナス。負けても戦闘中の分は持ち帰れる', () => {
-    const roster: Roster = { units: [recruit(), { ...recruit('archer'), id: 'u2', jobs: { archer: { jp: 0, jpTotal: 0, learned: [] } } }] };
+    const roster: Roster = { gold: 0, items: [], nextItemSeq: 1, units: [recruit(), { ...recruit('archer'), id: 'u2', jobs: { archer: { jp: 0, jpTotal: 0, learned: [] } } }] };
     const grown = levelTimes(recruit(), 1).growth;
     const battle = (winner: 'player' | 'enemy'): BattleState => {
       const s = makeState({
@@ -266,7 +268,7 @@ describe('JP とジョブのレベル', () => {
   });
 
   it('勝利のボーナスでレベルが上がることもある（結果の画面で、戦闘の後とボーナスの後を分けて見せる）', () => {
-    const roster: Roster = { units: [recruit()] };
+    const roster: Roster = { gold: 0, items: [], nextItemSeq: 1, units: [recruit()] };
     const s = makeState({
       heights: [[0, 0, 0, 0]],
       units: [
@@ -292,7 +294,7 @@ describe('JP とジョブのレベル', () => {
     expect(actionExp(true, 5, 15, rules)).toBe(Math.floor((15 * 166) / 100));
 
     // 勝利の経験値は、敵の最も高いレベルで増減する
-    const roster: Roster = { units: [recruit()] };
+    const roster: Roster = { gold: 0, items: [], nextItemSeq: 1, units: [recruit()] };
     const s = makeState({
       heights: [[0, 0, 0, 0]],
       units: [
@@ -306,7 +308,7 @@ describe('JP とジョブのレベル', () => {
   });
 
   it('脱力の罠で下がったレベル（戦闘中にその場で下がる）は、勝ち負けに関わらず戦闘の後も残る', () => {
-    const roster: Roster = { units: [{ ...levelTimes(recruit(), 4), exp: 30 }] };
+    const roster: Roster = { gold: 0, items: [], nextItemSeq: 1, units: [{ ...levelTimes(recruit(), 4), exp: 30 }] };
     const lowered = levelTimes(recruit(), 2);
     const s = makeState({
       heights: [[0, 0, 0, 0]],
@@ -392,13 +394,13 @@ describe('受動的なアビリティ（リアクション・サポート・ム�
     expect(u.slots.reaction).toBe('magicShell');
     expect(() => setPassive(u, 'support', 'counter', catalog)).toThrow();
     expect(() => setPassive(recruit(), 'reaction', 'counter', catalog)).toThrow();
-    expect(validateRoster({ units: [u] }, catalog, rules)).toEqual([]);
+    expect(validateRoster({ gold: 0, items: [], nextItemSeq: 1, units: [u] }, catalog, rules)).toEqual([]);
     expect(setPassive(u, 'movement', null, catalog).slots.movement).toBeNull();
   });
 
   it('習得していないもの・枠の種類が違うものを付けた部隊は、誤りとして見つける', () => {
     const bad = recruit('warrior', { slots: { secondary: null, reaction: 'quickStep', support: 'counter', movement: null } });
-    expect(validateRoster({ units: [bad] }, catalog, rules)).toEqual([
+    expect(validateRoster({ gold: 0, items: [], nextItemSeq: 1, units: [bad] }, catalog, rules)).toEqual([
       { kind: 'badPassive', unitId: 'u1', slot: 'reaction', abilityId: 'quickStep' },
       { kind: 'badPassive', unitId: 'u1', slot: 'support', abilityId: 'counter' },
     ]);
@@ -409,11 +411,14 @@ describe('編成の検証', () => {
   it('正しい部隊なら誤りはない', () => {
     let u = changeJob(recruit(), 'mage', catalog, rules);
     u = setSecondary(changeJob(u, 'warrior', catalog, rules), 'mage', catalog);
-    expect(validateRoster({ units: [u, { ...recruit('archer'), id: 'u2' }] }, catalog, rules)).toEqual([]);
+    expect(validateRoster({ gold: 0, items: [], nextItemSeq: 1, units: [u, { ...recruit('archer'), id: 'u2' }] }, catalog, rules)).toEqual([]);
   });
 
   it('ルールに合わない部隊の誤りを見つける', () => {
     const bad: Roster = {
+      gold: 0,
+      items: [],
+      nextItemSeq: 1,
       units: [
         recruit('warrior', { level: 0, exp: -1 }),
         recruit('nope', { id: 'u2' }),

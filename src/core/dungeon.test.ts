@@ -60,8 +60,9 @@ describe('連戦のダンジョン', () => {
       growth: ZERO_GROWTH,
       jobs: { [jobId]: { jp: 10, jpTotal: 50, learned: [] } },
       slots: { secondary: null, reaction: null, support: null, movement: null },
+      equipment: { weapon: null, armor: null, accessory: null },
     });
-    const roster: Roster = { units: [unit('a', 'warrior'), unit('b', 'mage')] };
+    const roster: Roster = { gold: 0, items: [], nextItemSeq: 1, units: [unit('a', 'warrior'), unit('b', 'mage')] };
     const after = grantClearReward(roster, dungeon, true);
     expect(after.units.map((u) => u.jobs[u.jobId])).toEqual([
       { jp: 310, jpTotal: 350, learned: [] },

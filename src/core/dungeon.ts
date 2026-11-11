@@ -22,6 +22,8 @@ export interface DungeonDefinition {
   readonly clearRewardJp: number;
   /** 2回目以降のクリアで配る JP */
   readonly repeatClearRewardJp: number;
+  /** 初めてクリアした時に必ず手に入る装備の id（最後の戦闘のボスから。店では買えない物。フェーズ2-4） */
+  readonly firstClearItemId?: string;
 }
 
 /** 挑戦中のダンジョン。battle は次に戦う戦闘の番号（0 が第1戦） */
@@ -96,6 +98,11 @@ export function grantClearReward(roster: Roster, dungeon: DungeonDefinition, fir
   let next = roster;
   for (const u of roster.units) next = replaceUnit(next, gainJp(u, u.jobId, jp));
   return next;
+}
+
+/** 初めてのクリアで手に入る装備（初めてでなければ、なし） */
+export function clearRewardItems(dungeon: DungeonDefinition, firstClear: boolean): string[] {
+  return firstClear && dungeon.firstClearItemId ? [dungeon.firstClearItemId] : [];
 }
 
 /**

@@ -13,4 +13,6 @@ export const ruinsDungeon: DungeonDefinition = {
   battles: [ruinsEntrance, ruinsCorridor, ruinsAltar],
   clearRewardJp: 300,
   repeatClearRewardJp: 100,
+  /** 初めてのクリアで、ボス「祭壇の主」から必ず手に入る（店では買えない。フェーズ2-4） */
+  firstClearItemId: 'altar-crown',
 };

@@ -11,7 +11,8 @@
  * その場でレベルが上がり、成長値と能力値が変わる（最大 HP・MP が増えた分だけ、今の HP・MP も増える。全回復はしない）。
  * - 攻撃・技は、当たっても外れても同じ量。相手のレベルで増減する。反撃では入らない。
  * - 詠唱のある魔法・技は、発動した時に入る（中断・不発では入らない）。範囲に何体いても1回分で、
- *   レベルによる増減は、効果が届いたユニット（味方・自分を含む）の中で最もレベルの高いユニットで計算する。誰もいなければ入らない。
+ *   レベルによる増減は、意図した側（攻撃なら敵、回復・補助なら味方）のうち効果が届いた中で最もレベルの高いユニットで計算する。
+ *   意図した側が1体もいなければ経験値は最低の 1、誰にも届かなければ入らない（フェーズ2-4）。
  * - 敵のユニットは得ない。
  * 勝敗は、戦闘ごとの勝敗条件で決まる（省くと全滅。判定は scenario.ts）。
  *
@@ -50,7 +51,17 @@ import type {
   UnitStats,
 } from './battleTypes';
 import { attackableTargets, canReach, knockbackOutcome, previewAttack, strikeOf, weaponFits } from './combat';
-import { addStatus, applyPassiveStats, damageTaken, isSilencedFor, mpCostOf, passiveEffect, passiveIdOf, tickStatuses } from './effects';
+import {
+  addStatus,
+  applyPassiveStats,
+  damageTaken,
+  isSilencedFor,
+  mpCostOf,
+  passiveEffect,
+  passiveIdOf,
+  statusBlocker,
+  tickStatuses,
+} from './effects';
 import { DIRECTIONS, directionToward, manhattan, type Coord } from './geometry';
 import { hasMpFor, isValidSpellTarget, previewSpellAt, spellOf, targetCenter } from './magic';
 import {
@@ -94,7 +105,7 @@ export function startBattle(
 ): ActionResult {
   const map = createMap(setup.map);
   const ids = new Set<string>();
-  const build = (p: UnitPlacement) => buildUnit(p, jobs, spells, strikes, passives);
+  const build = (p: UnitPlacement) => buildUnit(p, rules, jobs, spells, strikes, passives);
   const units: UnitState[] = setup.units.map((p) => {
     if (ids.has(p.id)) throw new Error(`ユニット id ${p.id} が重複しています`);
     ids.add(p.id);
@@ -157,6 +168,7 @@ export function startBattle(
  */
 function buildUnit(
   p: UnitPlacement,
+  rules: BattleRules,
   jobs: readonly JobDefinition[],
   spells: readonly SpellDefinition[],
   strikes: readonly StrikeDefinition[],
@@ -182,7 +194,13 @@ function buildUnit(
     return def;
   });
   const growth = p.growth ?? ZERO_GROWTH;
-  const statBonus = p.statBonus ?? {};
+  // 装備を指定した配置: 能力値に装備の値を足し、武器の種類と届き方は武器で決まる（武器がなければ素手）。
+  // 指定しない配置（テスト用）: ジョブの届き方と、装備できる武器の先頭の種類を使う
+  const equipment = p.equipment ?? [];
+  const weaponItem = equipment.find((e) => e.slot === 'weapon');
+  const weapon = p.equipment ? (weaponItem?.weaponType ?? null) : (job.weaponTypes?.[0] ?? null);
+  const attack = p.equipment ? (weaponItem?.attack ?? rules.unarmedAttack) : job.attack;
+  const statBonus = sumStats([p.statBonus ?? {}, ...equipment.map((e) => e.stats)]);
   const stats = computeStats(job.stats, growth, statBonus, unitPassives);
   return {
     id: p.id,
@@ -194,7 +212,7 @@ function buildUnit(
     hp: stats.maxHp,
     ct: 0,
     stats,
-    attack: job.attack,
+    attack,
     mp: stats.maxMp,
     level: p.level ?? 1,
     levelDrops: 0,
@@ -202,10 +220,11 @@ function buildUnit(
     growth,
     growthRates: job.growth ?? ZERO_GROWTH,
     statBonus,
+    equipment,
     progress: p.progress
       ? { exp: p.progress.exp, jp: p.progress.jp, jpTotal: p.progress.jpTotal, gainedExp: 0, gainedJp: 0 }
       : null,
-    weapon: job.weapon ?? null,
+    weapon,
     commands,
     spells: unitSpells,
     strikes: unitStrikes,
@@ -225,6 +244,15 @@ function computeStats(
   passives: readonly PassiveDefinition[],
 ): UnitStats {
   return applyPassiveStats(withBonus(statsWithGrowth(base, growth), bonus), passives);
+}
+
+/** 能力値の補正を足し合わせる（装備の値と、敵の段階の調整） */
+function sumStats(parts: readonly Partial<UnitStats>[]): Partial<UnitStats> {
+  const result: Partial<Record<keyof UnitStats, number>> = {};
+  for (const part of parts) {
+    for (const key of Object.keys(part) as (keyof UnitStats)[]) result[key] = (result[key] ?? 0) + (part[key] ?? 0);
+  }
+  return result;
 }
 
 /** 能力値に補正を足す（0 より下にはしない） */
@@ -403,9 +431,17 @@ function interruptCharge(
   return updateUnit(state, unitId, { charging: null });
 }
 
-/** 状態変化を付ける（すでに付いていれば持続を付け直す）。沈黙が付いた時に魔法を詠唱中なら、詠唱を中断させる */
+/**
+ * 状態変化を付ける（すでに付いていれば持続を付け直す）。沈黙が付いた時に魔法を詠唱中なら、詠唱を中断させる。
+ * 装備でその状態変化を防いでいれば、付かない（防いだことを出来事に残す）
+ */
 function inflict(state: BattleState, unitId: string, status: StatusId, events: BattleEvent[]): BattleState {
   const unit = getUnit(state, unitId);
+  const blocker = statusBlocker(unit, status);
+  if (blocker) {
+    events.push({ type: 'statusBlocked', unitId, status, itemId: blocker.id });
+    return state;
+  }
   const statuses = addStatus(unit.statuses, status, state.rules);
   events.push({ type: 'statusAdded', unitId, status, turns: state.rules.status[status].turns });
   const next = updateUnit(state, unitId, { statuses });
@@ -518,12 +554,13 @@ function isSupportive(state: BattleState, spell: SpellDefinition): boolean {
 
 /**
  * 行動の経験値と JP を、その場で与える（部隊のユニットだけ。敵や、進み具合を持たないユニットには、行動の回数を数えるだけ）。
- * targetLevel は相手（範囲なら、効果が届いた中で最もレベルの高いユニット）のレベル。
+ * targetLevel は相手（範囲なら、意図した側のうち効果が届いた中で最もレベルの高いユニット）のレベル。
+ * null なら、意図した側に効果が届かなかった（経験値は最低の 1。JP はいつもどおり）。
  */
 function grantProgress(
   state: BattleState,
   unitId: string,
-  targetLevel: number,
+  targetLevel: number | null,
   supportive: boolean,
   events: BattleEvent[],
 ): BattleState {
@@ -532,7 +569,7 @@ function grantProgress(
   // 行動の回数は、敵も含めて数える（バランス確認の集計用）
   const counted = updateUnit(state, unitId, { actionCount: unit.actionCount + 1 });
   if (!rules || !unit.progress) return counted;
-  const exp = actionExp(supportive, unit.level, targetLevel, rules);
+  const exp = targetLevel === null ? 1 : actionExp(supportive, unit.level, targetLevel, rules);
   const jp = rules.jpPerAction;
   events.push({ type: 'progressGained', unitId, exp, jp });
   const p = unit.progress;
@@ -767,10 +804,16 @@ function resolveCharge(state: BattleState, casterId: string, events: BattleEvent
     tiles: preview.tiles,
     results: preview.results,
   });
-  // 経験値と JP: 効果が届いたユニットの中で最もレベルの高いユニットで計算する（誰もいなければ入らない）
-  const targetLevel = Math.max(0, ...preview.results.map((r) => getUnit(next, r.unitId).level));
+  // 経験値と JP（フェーズ2-4 で変更。PR #11 の回答）: 意図した側（攻撃なら敵、回復・補助なら味方）のうち、
+  // 効果が届いた中で最もレベルの高いユニットで計算する。届いたユニットの中に意図した側が1体もいなければ、経験値は最低の 1。
+  // 誰にも届かなければ入らない
+  const supportive = isSupportive(next, spell);
+  const intended = preview.results
+    .map((r) => getUnit(next, r.unitId))
+    .filter((u) => (supportive ? u.team === caster.team : u.team !== caster.team));
+  const targetLevel = intended.length > 0 ? Math.max(...intended.map((u) => u.level)) : null;
   const grant = (s: BattleState) =>
-    preview.results.length > 0 ? grantProgress(s, casterId, targetLevel, isSupportive(s, spell), events) : s;
+    preview.results.length > 0 ? grantProgress(s, casterId, targetLevel, supportive, events) : s;
   if (spell.effect === 'status') {
     for (const r of preview.results) next = inflict(next, r.unitId, spell.inflicts!, events);
     return grant(next);

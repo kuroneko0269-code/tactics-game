@@ -9,6 +9,7 @@ import type {
   BattleRules,
   BattleState,
   ChargeState,
+  EquipmentDefinition,
   GrowthValues,
   JobDefinition,
   PassiveDefinition,
@@ -46,20 +47,23 @@ export const testRules: BattleRules = {
   },
   knockback: { fallDamagePercentPerHeight: 10, blockedDamagePercent: 10 },
   trap: { rockfallDamagePercent: 20 },
+  unarmedAttack: { kind: 'melee', maxHeightDiff: 1 },
 };
 
 export const testWarrior: JobDefinition = {
   id: 'warrior',
   stats: { maxHp: 50, attack: 20, speed: 6, move: 3, jump: 2, maxMp: 0, magic: 0 },
   attack: { kind: 'melee', maxHeightDiff: 2 },
-  weapon: 'sword',
+  weaponTypes: ['sword'],
+  armorTypes: ['heavy'],
 };
 
 export const testArcher: JobDefinition = {
   id: 'archer',
   stats: { maxHp: 30, attack: 10, speed: 8, move: 3, jump: 2, maxMp: 0, magic: 0 },
   attack: { kind: 'ranged', minRange: 3, maxRange: 5, heightPerExtraRange: 2 },
-  weapon: 'bow',
+  weaponTypes: ['bow'],
+  armorTypes: ['light'],
 };
 
 /** 強打: ダメージ 1.5 倍、命中率 -15。剣か杖が必要 */
@@ -224,7 +228,8 @@ export const testMage: JobDefinition = {
   id: 'mage',
   stats: { maxHp: 30, attack: 4, speed: 6, move: 3, jump: 2, maxMp: 30, magic: 10 },
   attack: { kind: 'melee', maxHeightDiff: 2 },
-  weapon: 'staff',
+  weaponTypes: ['staff'],
+  armorTypes: ['robe'],
   abilities: [
     { id: 'fire', jpCost: 100 },
     { id: 'wind', jpCost: 0, starter: true },
@@ -236,7 +241,8 @@ export const testHealer: JobDefinition = {
   id: 'healer',
   stats: { maxHp: 30, attack: 4, speed: 6, move: 3, jump: 2, maxMp: 30, magic: 10 },
   attack: { kind: 'melee', maxHeightDiff: 2 },
-  weapon: 'staff',
+  weaponTypes: ['staff'],
+  armorTypes: ['robe'],
   abilities: [{ id: 'heal', jpCost: 0, starter: true }],
 };
 
@@ -267,6 +273,8 @@ export interface TestUnit {
   /** 経験値と JP の進み具合（渡すと、戦闘中に経験値と JP を得る。state の progression も要る） */
   progress?: UnitProgressState;
   growth?: GrowthValues;
+  /** 装備（能力値への反映はしない。装飾品の効果を確かめる時に使う） */
+  equipment?: EquipmentDefinition[];
 }
 
 /** 平らなマップ（すべて高さ 0） */
@@ -317,8 +325,9 @@ export function makeState(options: {
       growth: u.growth ?? ZERO_GROWTH,
       growthRates: job.growth ?? ZERO_GROWTH,
       statBonus: {},
+      equipment: u.equipment ?? [],
       progress: u.progress ?? null,
-      weapon: job.weapon ?? null,
+      weapon: job.weaponTypes?.[0] ?? null,
       commands,
       spells: testSpells.filter((sp) => ids.includes(sp.id)),
       strikes: testStrikes.filter((sp) => ids.includes(sp.id)),

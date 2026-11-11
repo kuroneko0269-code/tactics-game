@@ -7,11 +7,12 @@ import { spells, strikes } from '../../abilities';
 import { aiConfig } from '../../aiConfig';
 import { battleRules } from '../../battleRules';
 import { jobs } from '../../jobs';
+import { equipment } from '../../equipment';
 import { passives } from '../../passives';
 import { initialRoster } from '../../roster';
 import { ruinsDungeon } from './index';
 
-const catalog = { jobs, spells, strikes, passives };
+const catalog = { jobs, spells, strikes, passives, equipment };
 const start = (index: number, seed: number) =>
   startBattle(buildSortie(ruinsDungeon.battles[index]!, 'main', initialRoster, catalog), jobs, battleRules, seed, spells, strikes, passives);
 const configs = { player: aiConfig, enemy: aiConfig };

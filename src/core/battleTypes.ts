@@ -30,8 +30,46 @@ export interface UnitStats {
  */
 export type SpellElement = 'fire' | 'wind' | 'thunder' | 'light' | 'none';
 
-/** 武器の種類。装備が入るまでは、ジョブごとに固定 */
+/** 武器の種類。装備している武器で決まる（フェーズ2-4。それまではジョブごとに固定だった） */
 export type WeaponType = 'sword' | 'bow' | 'staff';
+
+/** 防具の種類（鎧・軽装・ローブ） */
+export type ArmorType = 'heavy' | 'light' | 'robe';
+
+/** 装備の枠（武器・防具・装飾品） */
+export type EquipSlot = 'weapon' | 'armor' | 'accessory';
+
+/**
+ * 装備の特別な効果（主に装飾品）。数値は src/data の定義に置く。
+ * - statusImmunity: その状態変化が付かない
+ * - steadyCasting: 詠唱中に受けるダメージの増加（chargingDamagePercent）を打ち消す
+ */
+export type EquipmentEffect =
+  | { readonly kind: 'statusImmunity'; readonly status: StatusId }
+  | { readonly kind: 'steadyCasting' };
+
+/**
+ * 装備の定義（src/data に置く）。部隊が持つのは、この定義を指す「個体」（progression.ts の ItemInstance）。
+ * 画面に出す名前と説明は src/ui/text.ts に id で引く。
+ */
+export interface EquipmentDefinition {
+  readonly id: string;
+  readonly slot: EquipSlot;
+  /** 武器の種類（slot が weapon の時） */
+  readonly weaponType?: WeaponType;
+  /** 防具の種類（slot が armor の時） */
+  readonly armorType?: ArmorType;
+  /** 強さの段階（1〜3。店で買えない特別な物は 0） */
+  readonly tier: number;
+  /** 買値（ゴールド）。売値はこの半分（src/data の shopRules）。店に並ぶかどうかは店の定義で決まる */
+  readonly price: number;
+  /** 能力値に足す値 */
+  readonly stats: Partial<UnitStats>;
+  /** 武器の届き方（slot が weapon の時） */
+  readonly attack?: AttackProfile;
+  /** 特別な効果 */
+  readonly effects?: readonly EquipmentEffect[];
+}
 
 /** 能力値のうち、レベルが上がると伸びるもの（移動力とジャンプ力は伸びない） */
 export type GrowthStat = 'maxHp' | 'maxMp' | 'attack' | 'magic' | 'speed';
@@ -224,11 +262,17 @@ export interface JobRequirement {
 
 export interface JobDefinition {
   readonly id: string;
-  /** 基本の能力値。ユニットの能力値は、これに成長値を足したもの */
+  /** 基本の能力値。ユニットの能力値は、これに成長値と装備を足したもの */
   readonly stats: UnitStats;
+  /**
+   * 通常攻撃の届き方。装備（UnitPlacement.equipment）を指定しない配置（テスト用）だけで使う。
+   * 装備を指定した配置では、武器の届き方（武器がなければ BattleRules.unarmedAttack）を使う
+   */
   readonly attack: AttackProfile;
-  /** 武器の種類（装備が入るまでは、ジョブごとに固定） */
-  readonly weapon?: WeaponType;
+  /** 装備できる武器の種類。装備を指定しない配置（テスト用）では、先頭の種類の武器を持っているものとして扱う */
+  readonly weaponTypes?: readonly WeaponType[];
+  /** 装備できる防具の種類 */
+  readonly armorTypes?: readonly ArmorType[];
   /** 行動アビリティの一覧（このジョブのコマンド） */
   readonly abilities?: readonly JobAbility[];
   /** 受動的なアビリティ（リアクション・サポート・ムーブ）の一覧。習得すると、ジョブを問わず付けられる */
@@ -273,6 +317,8 @@ export interface BattleRules {
   readonly knockback: KnockbackRules;
   /** 罠の数値 */
   readonly trap: TrapRules;
+  /** 武器を装備していない時の通常攻撃の届き方（素手） */
+  readonly unarmedAttack: AttackProfile;
 }
 
 /** 罠の数値（src/data に置く） */
@@ -434,6 +480,11 @@ export interface UnitPlacement {
    * 敵の強さの段階の調整に使う（例: 「やさしい」の敵の癒し手は MP が少ない）
    */
   readonly statBonus?: Partial<UnitStats>;
+  /**
+   * 装備（定義データそのもの）。指定すると、能力値に装備の値を足し、武器の種類と通常攻撃の届き方は武器で決まる
+   * （武器がなければ素手）。省くと、ジョブの attack と weaponTypes の先頭を使う（テスト用）
+   */
+  readonly equipment?: readonly EquipmentDefinition[];
   /** 部隊のユニットの経験値と JP（渡すと、戦闘中に経験値と JP を得てレベルが上がる。敵には渡さない） */
   readonly progress?: PlacementProgress;
 }
@@ -540,11 +591,13 @@ export interface UnitState {
   readonly growth: GrowthValues;
   /** 今のジョブの成長率 */
   readonly growthRates: GrowthValues;
-  /** 能力値の補正（敵の強さの段階の調整。なければ空） */
+  /** 能力値の補正（装備の値と、敵の強さの段階の調整を合わせたもの。なければ空） */
   readonly statBonus: Partial<UnitStats>;
+  /** 装備（定義データをそのまま持つ。情報の欄の表示と、装飾品の効果に使う） */
+  readonly equipment: readonly EquipmentDefinition[];
   /** 経験値と JP の進み具合（部隊のユニットだけ。敵は null） */
   readonly progress: UnitProgressState | null;
-  /** 武器の種類。合わないアビリティは使えない */
+  /** 装備している武器の種類（素手なら null）。合わないアビリティは使えない */
   readonly weapon: WeaponType | null;
   /** 行動アビリティのコマンド（主コマンドが先頭）。画面のメニューの並び */
   readonly commands: readonly UnitCommand[];
@@ -660,6 +713,8 @@ export type BattleEvent =
     }
   | { readonly type: 'statusAdded'; readonly unitId: string; readonly status: StatusId; readonly turns: number }
   | { readonly type: 'statusExpired'; readonly unitId: string; readonly status: StatusId }
+  /** 装備の効果で状態変化を防いだ（itemId は防いだ装備） */
+  | { readonly type: 'statusBlocked'; readonly unitId: string; readonly status: StatusId; readonly itemId: string }
   | {
       /** リアクションが発動した（画面でアビリティの名前を短く表示する） */
       readonly type: 'reaction';

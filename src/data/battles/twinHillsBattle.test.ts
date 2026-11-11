@@ -5,9 +5,11 @@ import { manhattan } from '../../core/geometry';
 import { getTile } from '../../core/map';
 import { buildSortie } from '../../core/sortie';
 import type { Roster } from '../../core/progression';
-import { changeJob, gainExp, learnAbility, unitStats, validateRoster } from '../../core/progression';
+import { changeJob, gainExp, learnAbility, validateRoster } from '../../core/progression';
 import { spells, strikes } from '../abilities';
+import { equipment } from '../equipment';
 import { passives } from '../passives';
+import { equippedStats } from '../../core/equipment';
 import { aiConfig } from '../aiConfig';
 import { battleRules } from '../battleRules';
 import { jobs } from '../jobs';
@@ -15,7 +17,7 @@ import { progressionRules } from '../progression';
 import { initialRoster } from '../roster';
 import { twinHillsBattle } from './twinHillsBattle';
 
-const catalog = { jobs, spells, strikes, passives };
+const catalog = { jobs, spells, strikes, passives, equipment };
 const start = (seed: number, tierId = 'easy', roster: Roster = initialRoster) =>
   startBattle(buildSortie(twinHillsBattle, tierId, roster, catalog), jobs, battleRules, seed, spells, strikes, passives);
 const configs = { player: aiConfig, enemy: aiConfig };
@@ -79,12 +81,21 @@ describe('ふたつの丘の戦場と最初の部隊', () => {
     expect(passiveCount(easy)).toBe(0);
     expect(passiveCount(normal)).toBeGreaterThan(0);
     expect(passiveCount(hard)).toBeGreaterThan(passiveCount(normal));
-    // 「やさしい」の敵の癒し手は MP が少ない（癒しを2回まで）
+    // 装備（フェーズ2-4）: 「やさしい」は1段階目の武器だけで防具なし（癒し手は杖もなし）、
+    // 「ふつう」は2段階目の武器と防具、「むずかしい」は3段階目の武器と防具と装飾品。能力値の補正は使わない
+    const gear = (list: typeof easy) => list!.map((u) => u.equipment.map((e) => e.id));
+    expect(gear(easy)).toEqual([['sword-1'], ['sword-1'], ['bow-1'], ['staff-1'], []]);
+    expect(gear(normal)!.every((ids) => ids.length === 2 && ids.every((id) => id.endsWith('-2')))).toBe(true);
+    expect(gear(hard)!.every((ids) => ids.length === 3 && ids.slice(0, 2).every((id) => id.endsWith('-3')))).toBe(true);
+    expect([...easy!, ...normal!, ...hard!].every((u) => Object.keys(u.statBonus).every((k) => u.equipment.some((e) => k in e.stats)))).toBe(true);
+    // 「やさしい」の敵の癒し手は杖を持たないので、素手（武器の種類なし）で、魔力が低い
     const healer = easy!.find((u) => u.jobId === 'healer')!;
-    expect(healer.stats.maxMp).toBe(16);
-    // 付けている受動的なアビリティは、能力値に反映される（重装で最大 HP、早足で移動力）
+    expect(healer.weapon).toBeNull();
+    expect(healer.stats.magic).toBe(jobs.find((j) => j.id === 'healer')!.stats.magic);
+    // 付けている受動的なアビリティは、能力値に反映される（重装で最大 HP、早足で移動力）。装飾品も（跳ね靴でジャンプ力）
     const hardWarrior = warrior(hard);
     expect(hardWarrior.stats.move).toBe(jobs.find((j) => j.id === 'warrior')!.stats.move + 1);
+    expect(hardWarrior.stats.jump).toBe(jobs.find((j) => j.id === 'warrior')!.stats.jump + 1);
   });
 
   it('部隊の育成の状態（ジョブ・成長値・副コマンド）が、戦闘のユニットに反映される', () => {
@@ -99,10 +110,10 @@ describe('ふたつの丘の戦場と最初の部隊', () => {
     );
     warrior = changeJob(warrior, 'warrior', catalog, progressionRules);
     warrior = { ...warrior, slots: { ...warrior.slots, secondary: 'mage' } };
-    const roster = { units: [warrior, ...initialRoster.units.slice(1)] };
+    const roster = { ...initialRoster, units: [warrior, ...initialRoster.units.slice(1)] };
     const unit = start(1, 'easy', roster).state.units.find((u) => u.id === 'hero-1')!;
     expect(unit.level).toBe(warrior.level);
-    expect(unit.stats).toEqual(unitStats(warrior, catalog));
+    expect(unit.stats).toEqual(equippedStats(warrior, roster, catalog));
     expect(unit.commands).toEqual([
       { jobId: 'warrior', abilityIds: [] },
       { jobId: 'mage', abilityIds: ['wind', 'fire'] },

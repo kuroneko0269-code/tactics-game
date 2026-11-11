@@ -201,6 +201,48 @@ describe('詠唱のある魔法の経験値と JP', () => {
     expect(gained(done.events)).toEqual([{ type: 'progressGained', unitId: 'm', exp: 14, jp: 20 }]);
   });
 
+  it('攻撃の魔法は、巻き込んだ敵だけで計算する（巻き込んだ高いレベルの味方は数えない。PR #11 の回答）', () => {
+    const base = mageScene();
+    // e1（Lv 3）の隣に、Lv 30 の味方 ally を置く。炎の範囲に両方が入る
+    const state: BattleState = {
+      ...base,
+      units: [...base.units, { ...getUnit(base, 'e1'), id: 'ally', team: 'player', x: 3, z: 1, level: 30, progress: null }],
+    };
+    const done = untilDone(applyAction(state, { type: 'cast', spellId: 'fire', target: { kind: 'tile', x: 3, z: 2 } }).state, 'm');
+    const resolved = done.events.find((e) => e.type === 'spellResolved');
+    expect(resolved && resolved.type === 'spellResolved' && resolved.results.map((r) => r.unitId).sort()).toEqual(['ally', 'e1', 'e2']);
+    // 敵の中で最も高い e2（Lv 6）で計算: 14（味方の Lv 30 なら 200% で 20 になるはず）
+    expect(gained(done.events)).toEqual([{ type: 'progressGained', unitId: 'm', exp: 14, jp: 20 }]);
+  });
+
+  it('攻撃の魔法で、巻き込んだのが味方だけ（敵が1体もいない）なら、経験値は最低の 1（JP はいつもどおり）', () => {
+    const base = mageScene();
+    const state: BattleState = {
+      ...base,
+      units: [...base.units, { ...getUnit(base, 'e1'), id: 'ally', team: 'player', x: 1, z: 4, level: 30, progress: null }],
+    };
+    const done = untilDone(applyAction(state, { type: 'cast', spellId: 'fire', target: { kind: 'tile', x: 1, z: 4 } }).state, 'm');
+    expect(gained(done.events)).toEqual([{ type: 'progressGained', unitId: 'm', exp: 1, jp: 20 }]);
+  });
+
+  it('回復の魔法は、巻き込んだ味方だけで計算する（敵を巻き込んでも数えない）。味方がいなければ最低の 1', () => {
+    const state = makeState({
+      heights: flat(5, 5),
+      units: [
+        { id: 'h', team: 'player', job: testHealer, x: 0, z: 2, progress: fresh() },
+        { id: 'p', team: 'player', x: 2, z: 2, level: 1, hp: 10 },
+        { id: 'e', team: 'enemy', x: 2, z: 3, level: 30, hp: 10 },
+        { id: 'e2', team: 'enemy', x: 2, z: 0, level: 30, hp: 10 },
+      ],
+      progression: rules,
+    });
+    const both = untilDone(applyAction(state, { type: 'cast', spellId: 'heal', target: { kind: 'tile', x: 2, z: 2 } }).state, 'h');
+    // 味方 p（Lv 1）で計算: 15。巻き込んだ敵の Lv 30 は数えない
+    expect(gained(both.events)).toEqual([{ type: 'progressGained', unitId: 'h', exp: 15, jp: 20 }]);
+    const enemyOnly = untilDone(applyAction(state, { type: 'cast', spellId: 'heal', target: { kind: 'tile', x: 2, z: 0 } }).state, 'h');
+    expect(gained(enemyOnly.events)).toEqual([{ type: 'progressGained', unitId: 'h', exp: 1, jp: 20 }]);
+  });
+
   it('対象が1体もいない時は入らない', () => {
     const cast = applyAction(mageScene(), { type: 'cast', spellId: 'fire', target: { kind: 'tile', x: 1, z: 5 } });
     const done = untilDone(cast.state, 'm');

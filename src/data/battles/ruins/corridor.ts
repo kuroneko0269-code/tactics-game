@@ -1,7 +1,7 @@
 import type { MapDefinition } from '../../../core/map';
 import type { BattleSite } from '../../../core/sortie';
 import { archer, healer, mage, warrior } from '../../jobs';
-import { enemyUnit } from '../enemyUnits';
+import { enemyUnit, kit } from '../enemyUnits';
 
 /**
  * 第2戦「崩れた回廊」: 7×14 の細長いマップ。勝利は、味方のだれかが奥（北の端）の扉のマスに到達すること。
@@ -52,8 +52,8 @@ const map: MapDefinition = {
 const level = 2;
 /** 後方からの増援（2体）。id には、イベントの何回目かが付く（r2-wave-warrior-1 など） */
 const wave = [
-  { ...enemyUnit({ id: 'r2-wave-warrior', job: warrior, x: 2, z: 13, level, facing: 'north', abilities: ['powerStrike'] }), team: 'enemy' as const },
-  { ...enemyUnit({ id: 'r2-wave-archer', job: archer, x: 4, z: 13, level, facing: 'north' }), team: 'enemy' as const },
+  { ...enemyUnit({ id: 'r2-wave-warrior', job: warrior, x: 2, z: 13, level, facing: 'north', abilities: ['powerStrike'], equipment: kit(warrior, 1) }), team: 'enemy' as const },
+  { ...enemyUnit({ id: 'r2-wave-archer', job: archer, x: 4, z: 13, level, facing: 'north', equipment: kit(archer, 1) }), team: 'enemy' as const },
 ];
 
 export const ruinsCorridor: BattleSite = {
@@ -69,12 +69,21 @@ export const ruinsCorridor: BattleSite = {
   tiers: [
     {
       id: 'main',
+      // 勝った時の報酬（フェーズ2-4）
+      reward: {
+        gold: 220,
+        loot: [
+          { itemId: 'quiet-amulet', percent: 15 },
+          { itemId: 'light-2', percent: 10 },
+          { itemId: 'robe-2', percent: 10 },
+        ],
+      },
       units: [
-        enemyUnit({ id: 'r2-warrior-1', job: warrior, x: 3, z: 6, level, abilities: ['powerStrike'], passives: ['quickStep'] }),
-        enemyUnit({ id: 'r2-archer-1', job: archer, x: 2, z: 2, level, passives: ['focus'] }),
-        enemyUnit({ id: 'r2-warrior-2', job: warrior, x: 3, z: 3, level, abilities: ['knockback'], passives: ['quickStep'] }),
-        enemyUnit({ id: 'r2-mage-1', job: mage, x: 4, z: 1, level, abilities: ['wind', 'fire'] }),
-        enemyUnit({ id: 'r2-healer-1', job: healer, x: 3, z: 0, level, abilities: ['heal'], statBonus: { maxMp: -24 } }),
+        enemyUnit({ id: 'r2-warrior-1', job: warrior, x: 3, z: 6, level, abilities: ['powerStrike'], passives: ['quickStep'], equipment: kit(warrior, 1) }),
+        enemyUnit({ id: 'r2-archer-1', job: archer, x: 2, z: 2, level, passives: ['focus'], equipment: kit(archer, 1) }),
+        enemyUnit({ id: 'r2-warrior-2', job: warrior, x: 3, z: 3, level, abilities: ['knockback'], passives: ['quickStep'], equipment: kit(warrior, 1) }),
+        enemyUnit({ id: 'r2-mage-1', job: mage, x: 4, z: 1, level, abilities: ['wind', 'fire'], equipment: kit(mage, 1) }),
+        enemyUnit({ id: 'r2-healer-1', job: healer, x: 3, z: 0, level, abilities: ['heal'], statBonus: { maxMp: -24 }, equipment: kit(healer, 1) }),
       ],
     },
   ],

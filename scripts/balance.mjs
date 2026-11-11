@@ -59,11 +59,12 @@ async function main() {
   const { jobs } = await load('/src/data/jobs.ts');
   const { spells, strikes } = await load('/src/data/abilities.ts');
   const { passives } = await load('/src/data/passives.ts');
+  const E = await load('/src/data/equipment.ts');
   const { battleRules } = await load('/src/data/battleRules.ts');
   const { aiConfig } = await load('/src/data/aiConfig.ts');
   const { progressionRules: rules } = await load('/src/data/progression.ts');
   const { initialRoster } = await load('/src/data/roster.ts');
-  const catalog = { jobs, spells, strikes, passives };
+  const catalog = { jobs, spells, strikes, passives, equipment: E.equipment };
 
   const play = (seed, tierId, roster) => {
     const setup = buildSortie(twinHillsBattle, tierId, roster, catalog, rules);
@@ -91,6 +92,7 @@ async function main() {
 
   /** 十分に育てた部隊: 全員が今のジョブで TRAINED_LEVEL まで上がり、今のジョブのアビリティをすべて覚えて、受動的なアビリティを付けている */
   const trainedRoster = {
+    ...initialRoster,
     units: initialRoster.units.map((u0) => {
       let u = u0;
       while (u.level < TRAINED_LEVEL) u = P.levelUp(u, catalog, rules);
@@ -122,6 +124,7 @@ async function main() {
   /** ダンジョン「はじまりの遺跡」の3つの戦闘 */
   function dungeonReport() {
     const midRoster = {
+      ...initialRoster,
       units: initialRoster.units.map((u0) => {
         let u = u0;
         while (u.level < MID_LEVEL) u = P.levelUp(u, catalog, rules);
@@ -179,7 +182,7 @@ async function main() {
           const { state } = playDungeon(site, 5000 + k * 10 + i, roster);
           if (state.winner === 'player') chainWins[i]++;
           else all = false;
-          roster = { units: P.applyBattleResult(roster, state, catalog, rules).roster.units.map((u) => learnAll(u)) };
+          roster = { ...roster, units: P.applyBattleResult(roster, state, catalog, rules).roster.units.map((u) => learnAll(u)) };
         }
         if (all) cleared++;
       }
@@ -280,6 +283,7 @@ async function main() {
       actionsByUnit[r.unitId].push(r.actions);
     }
     roster = {
+      ...roster,
       units: roster.units.map((u0) => {
         const u = learnAll(u0, () => {
           firstLearn[u0.id] ??= b;
