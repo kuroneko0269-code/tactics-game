@@ -88,6 +88,12 @@ export interface AiConfig {
   readonly sealMaxDanger?: number;
   /** 引き戻し（フェーズ2-6）を使う目安: 味方の HP をこの量以上戻せる時に使う。省くと使わない */
   readonly rewindMinHp?: number;
+  /**
+   * 状態変化を付ける技（騎士の破壊・盗賊の目くらまし。鈍足を除く）を選ぶ時に、まだ付いていない不利な状態変化を何ダメージぶんの値打ちとみなすか（フェーズ2-6）
+   */
+  readonly statusValue?: number;
+  /** 盗む技を選ぶ時に、成功を何ダメージぶんの値打ちとみなすか（成功率を掛けて比べる。フェーズ2-6）。省くと盗まない */
+  readonly stealValue?: number;
 }
 
 /** 陣営ごとの AI の設定 */
@@ -263,14 +269,19 @@ function withBestStrike(state: BattleState, unit: UnitState, plan: AttackPlan, c
   const target = state.units.find((u) => u.id === plan.targetId)!;
   const expected = (strike?: UnitState['strikes'][number]) => {
     const p = previewAttack(state, unit, target, plan.position, strike);
-    const slow =
-      strike?.inflicts === 'slow' && !hasStatus(target, 'slow') && !statusBlocker(target, 'slow') ? (config?.slowValue ?? 0) : 0;
+    const status = strike?.inflicts;
+    const fresh = status !== undefined && !hasStatus(target, status) && !statusBlocker(target, status);
+    const slow = !fresh ? 0 : status === 'slow' ? (config?.slowValue ?? 0) : state.rules.status[status!].harmful ? (config?.statusValue ?? 0) : 0;
+    // 盗む: 成功率 × 値打ち（盗める物がなければ 0）
+    if (strike?.steal) return p.hitPercent * (config?.stealValue ?? 0);
     // 斬り分けは、巻き込む敵の分も足す（フェーズ2-6）
     const extra = (p.sweep ?? []).reduce((sum, x) => {
       const u = state.units.find((v) => v.id === x.unitId)!;
       return sum + x.hitPercent * Math.min(x.damage, u.hp);
     }, 0);
-    return p.hitPercent * (Math.min(p.damage + (p.knockback?.damage ?? 0), target.hp) + slow) + extra;
+    // 連撃は回数ぶん（相手の残り HP まで）
+    const hits = Math.min(p.hits * p.damage, target.hp);
+    return p.hitPercent * (Math.min(hits + (p.knockback?.damage ?? 0), target.hp) + slow) + extra;
   };
   let best: { abilityId?: string; value: number } = { value: expected() };
   for (const strike of unit.strikes) {
@@ -500,8 +511,31 @@ export function chooseRewind(state: BattleState, unit: UnitState, canMove: boole
   return best?.plan;
 }
 
-/** 回復か蘇生の魔法を持つ相手か（蘇生役は倒す価値が高い。フェーズ2-5） */
-const isSupportCaster = (u: UnitState) => u.spells.some((s) => s.effect === 'heal' || s.effect === 'revive');
+/** 回復か蘇生の魔法を持つ相手か（蘇生役は倒す価値が高い。フェーズ2-5）。格闘家の気功のような技は数えない */
+const isSupportCaster = (u: UnitState) => u.spells.some((s) => s.kind === 'magic' && (s.effect === 'heal' || s.effect === 'revive'));
+
+/**
+ * 喝（状態変化をすべて解く技。フェーズ2-6）を使う相手を選ぶ。自分か隣の味方に、不利な状態変化が 2 つ以上、または停止が付いていれば使う。
+ * 解ける不利な状態変化の数が多い → 自分 の順。動かずに使える相手だけ
+ */
+export function chooseCleanse(state: BattleState, unit: UnitState): SpellPlan | undefined {
+  const spells = unit.spells.filter((s) => s.effect === 'cleanse' && canCast(unit, s));
+  if (spells.length === 0) return undefined;
+  const bad = (u: UnitState) => u.statuses.filter((x) => state.rules.status[x.id].harmful);
+  let best: { plan: SpellPlan; score: number[] } | undefined;
+  for (const spell of spells) {
+    for (const ally of state.units) {
+      if (ally.team !== unit.team || !isAlive(ally) || manhattan(unit, ally) > spell.range) continue;
+      const n = bad(ally).length;
+      if (n < 2 && !hasStatus(ally, 'stop')) continue;
+      const score = [-n, ally.id === unit.id ? 0 : 1, tieBreak(state, ally.x, ally.z)];
+      if (!best || compareScores(score, best.score) < 0) {
+        best = { plan: { position: { x: unit.x, z: unit.z }, spellId: spell.id, target: { kind: 'unit', unitId: ally.id } }, score };
+      }
+    }
+  }
+  return best?.plan;
+}
 
 /**
  * 蘇生が、対象の退場より先に間に合うか。詠唱が満ちるまでの時計の回数が、対象のカウントが 0 になるまでの回数以下なら間に合う
@@ -625,7 +659,8 @@ export function isStalemate(state: BattleState, config: AiConfig): boolean {
 /** 治癒師として振る舞うか（主コマンドに回復魔法がある） */
 const isHealer = (unit: UnitState) => {
   const main = unit.commands[0];
-  return unit.spells.some((s) => s.effect === 'heal' && (!main || main.abilityIds.includes(s.id)));
+  // 回復の魔法だけを数える（格闘家の気功のような技では、治癒師として振る舞わない。フェーズ2-6）
+  return unit.spells.some((s) => s.kind === 'magic' && s.effect === 'heal' && (!main || main.abilityIds.includes(s.id)));
 };
 
 /** unit の陣営で、生きているのが治癒師だけか */
@@ -744,6 +779,13 @@ function choosePlan(state: BattleState, unit: UnitState, canMove: boolean, confi
   if (spell) return { kind: 'cast', ...spell.plan };
   const rewind = chooseRewind(state, unit, canMove, config);
   if (rewind) return { kind: 'cast', ...rewind };
+  // 格闘家（フェーズ2-6）: 自分か隣の味方が弱っていれば気功で回復し、不利な状態変化が重なっていれば喝で解く
+  if (unit.spells.some((s) => s.instant && s.effect === 'heal')) {
+    const heal = chooseHealSpell(state, unit, canMove, config);
+    if (heal) return { kind: 'cast', ...heal };
+  }
+  const cleanse = chooseCleanse(state, unit);
+  if (cleanse) return { kind: 'cast', ...cleanse };
   const knock = chooseKnockback(state, unit, canMove);
   if (knock) return { kind: 'attack', ...knock };
   const attack = chooseAttack(state, unit, canMove, false, config);

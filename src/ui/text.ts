@@ -98,6 +98,9 @@ export const TEXT = {
     mage: '魔道士',
     healer: '治癒師',
     timekeeper: '時守',
+    knight: '騎士',
+    monk: '格闘家',
+    thief: '盗賊',
   } as Readonly<Record<string, string>>,
 
   /** 行動順の欄に出す、ジョブの1文字の略 */
@@ -107,6 +110,9 @@ export const TEXT = {
     mage: '魔',
     healer: '治',
     timekeeper: '時',
+    knight: '騎',
+    monk: '拳',
+    thief: '盗',
   } as Readonly<Record<string, string>>,
 
   /** ジョブのコマンド（行動アビリティのまとまり）の名前。ジョブの id で引く */
@@ -116,6 +122,9 @@ export const TEXT = {
     mage: '攻撃魔法',
     healer: '回復魔法',
     timekeeper: '時の業',
+    knight: '破壊術',
+    monk: '拳法',
+    thief: '盗術',
   } as Readonly<Record<string, string>>,
 
   /** アビリティ（行動アビリティと、受動的なアビリティ）の名前。id で引く */
@@ -149,6 +158,24 @@ export const TEXT = {
     timeDelay: '時送り',
     endure: '踏みとどまる',
     timekeeperWisdom: '時守の心得',
+    breakWeapon: '武器破壊',
+    breakArmor: '鎧破壊',
+    breakSpeed: '速度破壊',
+    breakMagic: '魔力破壊',
+    cover: 'かばう',
+    backGuard: '背水',
+    doubleStrike: '連撃',
+    chakra: '気功',
+    earthWave: '地走り',
+    shout: '喝',
+    parry: '見切り',
+    ironFist: '鍛えた拳',
+    stealGold: 'ゴールドを盗む',
+    stealGear: '装備を盗む',
+    blindStrike: '目くらまし',
+    backstab: '不意打ち',
+    flee: '逃げ足',
+    swiftFeet: '俊足',
   } as Readonly<Record<string, string>>,
 
   /** 行動順の欄に出す、詠唱のある魔法・技の1文字の略 */
@@ -195,6 +222,24 @@ export const TEXT = {
     timeDelay: '敵ひとりの CT を 40 減らし、次の行動を遅らせる。射程 3、詠唱なし',
     endure: 'HP が 0 になるダメージを受けた時、1戦に1度だけ HP 1 で耐える',
     timekeeperWisdom: '待機した時に残る CT +20（40 → 60）',
+    breakWeapon: '通常攻撃の 60% のダメージ。当たると攻撃力低下（-25%、3手番）。剣が必要',
+    breakArmor: '通常攻撃の 60% のダメージ。当たると最大 HP 低下（-20%、3手番）。剣が必要',
+    breakSpeed: '通常攻撃の 60% のダメージ。当たると素早さ低下（-25%、3手番）。剣が必要',
+    breakMagic: '通常攻撃の 60% のダメージ。当たると魔力低下（-25%、3手番）。剣が必要',
+    cover: '隣の味方の HP が半分以下の時、その味方への武器による攻撃を代わりに受ける',
+    backGuard: '背面から攻撃された時の、ダメージの増加を受けない',
+    doubleStrike: '素手で2回攻撃する（1回は通常攻撃の 60%。1回ごとに命中を判定）。素手が必要',
+    chakra: '自分か隣の味方の HP を回復する（攻撃力ぶん）。詠唱なし',
+    earthWave: '正面の直線 3 マスの敵にダメージ（攻撃力の 80%。必ず当たる）。高さの差が 1 を超えるマスで止まる。詠唱なし',
+    shout: '自分か隣の味方の状態変化をすべて解く。詠唱なし',
+    parry: '正面からの、武器による攻撃の命中率 -20',
+    ironFist: '素手の時の攻撃力 +3',
+    stealGold: 'ゴールドを盗む（成功すると、戦闘の後に増える）。成功率は背面が高く、正面が低い',
+    stealGear: '敵の装備をひとつ盗む（武器 → 防具 → 装飾品の順）。ボスの専用の装備は盗めない。成功率は背面が高く、正面が低い',
+    blindStrike: '通常攻撃の 50% のダメージ。当たると目くらまし（武器による攻撃の命中率 -30、3手番）。短剣が必要',
+    backstab: '背面から攻撃した時だけ、通常攻撃の 2 倍のダメージ。短剣が必要',
+    flee: '武器による攻撃を受けて生き残った時、攻撃した相手から1マス離れる',
+    swiftFeet: '移動力 +2',
   } as Readonly<Record<string, string>>,
 
   /** 状態変化の名前 */
@@ -503,6 +548,13 @@ export const TEXT = {
   turnSkipped: '停止中',
   ctDelayed: (n: number) => `CT -${n}`,
   swapped: '入れ替わった',
+  /** 盗み（フェーズ2-6） */
+  stole: {
+    gold: (n: number) => `+${n} G`,
+    item: (name: string) => `${name}を奪った`,
+    failed: '盗めなかった',
+  },
+  cleared: '状態変化が解けた',
   interrupted: '中断',
 
   /** アビリティのボタンに添える、使えない理由 */
@@ -544,6 +596,16 @@ export const TEXT = {
     sweepLabel: '巻き込む',
     sweepTarget: (name: string, damage: number, hit: number) => `${name} ${damage}（命中 ${hit}%）`,
     blind: (n: number) => `目くらましで命中 -${n}`,
+    /** フェーズ2-6: 騎士・格闘家・盗賊 */
+    parry: (name: string, n: number) => `相手の「${name}」で命中 -${n}`,
+    cover: (name: string, ability: string) => `${name}が「${ability}」で代わりに受ける`,
+    hits: (n: number) => `${n}回攻撃（1回ごとに命中を判定）`,
+    stealTitle: (name: string) => `「${name}」の予測`,
+    stealPercent: '成功率',
+    stealGold: (gold: number) => `成功すると ${gold} G（戦闘の後に入る）`,
+    stealItem: (item: string) => `成功すると「${item}」を奪う`,
+    stealNothing: '盗める装備がありません',
+    backstabNote: '背面からなら 2 倍',
     endures: (name: string) => `相手の「${name}」で HP 1 残る`,
   },
 
@@ -644,7 +706,7 @@ export const TEXT = {
   report: {
     keep: '負けても、得た経験値と JP は持ち帰れます',
     totalsTitle: 'この戦闘で得た合計',
-    levelUpsTitle: 'レベルが上がったユニット',
+    levelUpsTitle: 'レベルアップ・新しいジョブ',
     exp: (n: number) => `${n} EXP`,
     jp: (n: number) => `${n} JP`,
     bonus: (jp: number) => `勝利ボーナス: 全員に経験値と ${jp} JP`,
@@ -678,6 +740,8 @@ export const TEXT = {
     bossItem: (name: string) => `祭壇の主から「${name}」を手に入れた！`,
     /** 戦利品の欄で、ボスからの初回の報酬に付ける印 */
     specialItem: (name: string) => `★ ${name}（祭壇の主から）`,
+    /** 盗賊が盗んだ装備（フェーズ2-6） */
+    stolenItem: (name: string) => `盗んだ ${name}`,
   },
 
   /** 店（フェーズ2-4） */
@@ -745,6 +809,8 @@ export const TEXT = {
     exclusiveNote: (name: string) => `${name}だけが就ける専用ジョブ`,
     /** 解放条件を満たした瞬間の知らせ */
     unlockToast: (name: string, job: string) => `${name}が「${job}」に就けるようになった！`,
+    /** 結果の画面の札 */
+    unlockChip: (name: string, job: string) => `${name}: ${job}に就ける`,
     changeJobTitle: (job: string) => `${job}に変える`,
     compareNow: '今',
     compareAfter: '変更後',

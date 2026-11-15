@@ -20,6 +20,8 @@ export interface ReportExtras {
   readonly notes?: readonly string[];
   /** 目立たせる短い文（初めてのクリアなど） */
   readonly highlights?: readonly string[];
+  /** 新しく就けるようになったジョブ（フェーズ2-6。「レベルアップ」の欄に札で出す） */
+  readonly unlocks?: readonly string[];
   /**
    * 手に入れたゴールドと戦利品（フェーズ2-4）。goldTotal は受け取った後の所持金、items は装備の名前。
    * special は、ボスからの初回の報酬のように目立たせる物（items の後ろに、印を付けて並べる）
@@ -125,6 +127,11 @@ export function showReportScreen(
       }
       r.jobTag.hidden = jobLevel <= u.jobLevelBefore;
       r.jobTag.textContent = TEXT.report.jobLevelTag(TEXT.jobs[u.jobId] ?? u.jobId, jobLevel);
+    }
+    for (const [i, text] of (extras.unlocks ?? []).entries()) {
+      const chip = el('span', 'report-chip unlock', text);
+      chip.dataset.key = `unlock:${i}`;
+      ups.append(chip);
     }
     const any = ups.children.length > 0;
     upsTitle.hidden = !any;

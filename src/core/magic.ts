@@ -65,9 +65,25 @@ export function targetCenter(state: BattleState, target: SpellTarget): Coord | u
 }
 
 /** center を中心に spell が届くマス（範囲の内側で、中心との高さの差が許容以下のマス） */
-export function spellArea(map: BattleMap, spell: SpellDefinition, center: Coord): Coord[] {
+export function spellArea(map: BattleMap, spell: SpellDefinition, center: Coord, from?: Coord): Coord[] {
   const centerTile = getTile(map, center.x, center.z);
   if (!centerTile) return [];
+  // 直線（地走り。フェーズ2-6）: 詠唱者から狙ったマスへの向きに、狙ったマスから lineLength マス。
+  // 隣り合うマスの高さの差が lineMaxStep を超えたところで止まる（そのマスから先には届かない）
+  if (spell.shape === 'line') {
+    if (!from) return [{ x: center.x, z: center.z }];
+    const dx = Math.sign(center.x - from.x);
+    const dz = Math.sign(center.z - from.z);
+    const line: Coord[] = [];
+    let prev = getTile(map, from.x, from.z);
+    for (let i = 0; i < (spell.lineLength ?? 1); i++) {
+      const t = getTile(map, center.x + dx * i, center.z + dz * i);
+      if (!t || (prev && Math.abs(t.height - prev.height) > (spell.lineMaxStep ?? 1))) break;
+      line.push({ x: t.x, z: t.z });
+      prev = t;
+    }
+    return line;
+  }
   const result: Coord[] = [];
   for (const t of map.tiles) {
     if (manhattan(center, t) > spell.areaRadius) continue;
@@ -94,7 +110,7 @@ export function spellAmountOn(
   target: UnitState,
   angle?: { side: RelativeSide; heightPercent: number },
 ): number {
-  if (spell.effect === 'status' || spell.effect === 'swap') return 0;
+  if (spell.effect === 'status' || spell.effect === 'swap' || spell.effect === 'cleanse') return 0;
   if (spell.effect === 'revive') return reviveHp(target, spell);
   // 引き戻し: 最後に手番が始まった時の HP に戻す（今の方が高ければ何もしない）。最大 HP は超えない
   if (spell.effect === 'rewind') return Math.max(0, Math.min(target.turnStartHp, target.stats.maxHp) - target.hp);
@@ -125,6 +141,10 @@ export function affectsUnit(spell: SpellDefinition, unit: UnitState, caster?: Pi
   if (!isAlive(unit)) return false;
   if (spell.targets === 'ally') return caster !== undefined && unit.team === caster.team && unit.id !== caster.id;
   if (spell.targets === 'enemy') return caster !== undefined && unit.team !== caster.team;
+  if (spell.targets === 'allyOrSelf') return caster !== undefined && unit.team === caster.team;
+  // 敵だけ・味方だけに効く（地走り・召喚。フェーズ2-6）
+  if (spell.affects === 'enemies') return caster !== undefined && unit.team !== caster.team;
+  if (spell.affects === 'allies') return caster !== undefined && unit.team === caster.team;
   return true;
 }
 
@@ -158,8 +178,8 @@ export function previewSpellAt(
   center: Coord,
   casterOverride?: UnitState,
 ): SpellPreview {
-  const tiles = spellArea(state.map, spell, center);
   const from = casterOverride ?? caster;
+  const tiles = spellArea(state.map, spell, center, from);
   const heightOf = (c: Coord) => getTile(state.map, c.x, c.z)?.height ?? 0;
   const results: { unitId: string; amount: number; hp: number; side?: RelativeSide; heightPercent?: number; endured?: boolean }[] = [];
   for (const unit of state.units) {
@@ -217,5 +237,5 @@ export function chargeArea(state: BattleState, caster: UnitState): Coord[] {
   if (!charge || !isAlive(caster)) return [];
   const center = targetCenter(state, charge.target);
   if (!center) return [];
-  return spellArea(state.map, spellOf(caster, charge.spellId), center);
+  return spellArea(state.map, spellOf(caster, charge.spellId), center, caster);
 }

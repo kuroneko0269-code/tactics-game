@@ -69,6 +69,21 @@ export const timekeeperWisdom: PassiveDefinition = {
   effect: { kind: 'waitCtBonus', amount: 20 },
 };
 
+// ---- 騎士・格闘家・盗賊（フェーズ2-6）----
+
+/** かばう（騎士・リアクション）: 隣の味方が HP の半分以下の時、その味方への武器による攻撃を代わりに受ける */
+export const cover: PassiveDefinition = { id: 'cover', slot: 'reaction', effect: { kind: 'cover' } };
+/** 背水（騎士・サポート）: 背面からのダメージの補正（125%）を受けない */
+export const backGuard: PassiveDefinition = { id: 'backGuard', slot: 'support', effect: { kind: 'backGuard' } };
+/** 見切り（格闘家・リアクション）: 正面からの、武器による攻撃の命中率 -20 */
+export const parry: PassiveDefinition = { id: 'parry', slot: 'reaction', effect: { kind: 'parry', hitPenalty: 20 } };
+/** 鍛えた拳（格闘家・サポート）: 素手の時の攻撃力 +3 */
+export const ironFist: PassiveDefinition = { id: 'ironFist', slot: 'support', effect: { kind: 'unarmedAttackBonus', amount: 3 } };
+/** 逃げ足（盗賊・リアクション）: 武器による攻撃を受けて生き残った時、攻撃した相手から1マス離れる */
+export const flee: PassiveDefinition = { id: 'flee', slot: 'reaction', effect: { kind: 'flee' } };
+/** 俊足（盗賊・ムーブ）: 移動力 +2 */
+export const swiftFeet: PassiveDefinition = { id: 'swiftFeet', slot: 'movement', effect: { kind: 'moveBonus', amount: 2 } };
+
 export const passives: readonly PassiveDefinition[] = [
   counter,
   evade,
@@ -82,4 +97,10 @@ export const passives: readonly PassiveDefinition[] = [
   lightFoot,
   endure,
   timekeeperWisdom,
+  cover,
+  backGuard,
+  parry,
+  ironFist,
+  flee,
+  swiftFeet,
 ];

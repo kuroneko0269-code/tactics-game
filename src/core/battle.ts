@@ -87,7 +87,7 @@ import {
   ZERO_GROWTH,
 } from './progression';
 import { createMap, getTile } from './map';
-import { isAlive, reachableTiles, unitAt } from './movement';
+import { canStep, isAlive, isOnMap, reachableTiles, unitAt } from './movement';
 import { createRng, restoreRng } from './rng';
 import {
   DEFAULT_OBJECTIVES,
@@ -215,7 +215,9 @@ function buildUnit(
   const weapon = p.equipment ? (weaponItem?.weaponType ?? null) : (job.weaponTypes?.[0] ?? null);
   const attack = p.equipment ? (weaponItem?.attack ?? rules.unarmedAttack) : job.attack;
   // 素手（武器の枠が空）の時のジョブの補正（格闘家。フェーズ2-6）
-  const unarmed = weapon === null && job.unarmedBonus ? [job.unarmedBonus] : [];
+  // 鍛えた拳（受動的なアビリティ）も、素手の時だけ攻撃力に足す
+  const fist = weapon === null ? unitPassives.flatMap((x) => (x.effect.kind === 'unarmedAttackBonus' ? [{ attack: x.effect.amount }] : [])) : [];
+  const unarmed = [...(weapon === null && job.unarmedBonus ? [job.unarmedBonus] : []), ...fist];
   const statBonus = sumStats([p.statBonus ?? {}, ...equipment.map((e) => e.stats), ...unarmed]);
   const stats = computeStats(job.stats, growth, statBonus, unitPassives);
   return {
@@ -383,11 +385,22 @@ export function applyAction(state: BattleState, action: BattleAction): ActionRes
       // 斬り分け: 正面の左右のマスの敵を先に、選んだ相手（正面）を最後に攻撃する（反撃は正面の相手だけなので、最後に起きる）
       const extras = strike?.sweep ? sweepExtraTargets(state, unit, unit, target) : [];
       let next = state;
-      for (const extra of extras) {
-        if (!isAlive(getUnit(next, unit.id))) break;
-        next = resolveWeaponAttack(next, unit.id, extra.id, { ...strike!, sweep: false }, false, events);
+      if (strike?.steal) {
+        next = resolveSteal(next, unit.id, target.id, strike, events);
+      } else {
+        for (const extra of extras) {
+          if (!isAlive(getUnit(next, unit.id))) break;
+          next = resolveWeaponAttack(next, unit.id, extra.id, { ...strike!, sweep: false }, false, events);
+        }
+        // 連撃: 1回ごとに命中を判定する。途中で相手か自分が倒れたら、そこで終わる
+        const hits = Math.max(1, strike?.hits ?? 1);
+        for (let i = 0; i < hits; i++) {
+          if (!isAlive(getUnit(next, unit.id)) || !isAlive(getUnit(next, target.id))) break;
+          // 相手が逃げ足で離れたら、続きは届かない
+          if (i > 0 && !attackableTargets(next, getUnit(next, unit.id), getUnit(next, unit.id)).some((u) => u.id === target.id)) break;
+          next = resolveWeaponAttack(next, unit.id, target.id, strike, false, events);
+        }
       }
-      if (isAlive(getUnit(next, unit.id))) next = resolveWeaponAttack(next, unit.id, target.id, strike, false, events);
       // 当たっても外れても、同じ量の経験値と JP（反撃を受けて倒れても入る）。巻き込んだ敵の中で最もレベルの高い相手で計算する
       next = grantProgress(next, unit.id, Math.max(target.level, ...extras.map((e) => e.level)), false, events);
       next = runStateEvents(next, events);
@@ -546,8 +559,13 @@ function resolveWeaponAttack(
   events: BattleEvent[],
 ): BattleState {
   const attacker = getUnit(state, attackerId);
+  const preview = previewAttack(state, attacker, getUnit(state, targetId), attacker, strike, { counter: isCounter });
+  // かばう: 隣の味方が代わりに受ける（フェーズ2-6）
+  if (preview.coveredBy) {
+    events.push({ type: 'reaction', unitId: preview.coveredBy, abilityId: passiveIdOf(getUnit(state, preview.coveredBy), 'cover') ?? '' });
+    targetId = preview.coveredBy;
+  }
   const target = getUnit(state, targetId);
-  const preview = previewAttack(state, attacker, target, attacker, strike, { counter: isCounter });
   const rng = restoreRng(state.rngState);
   const hit = rng.nextInt(1, 100) <= preview.hitPercent;
   const damage = hit ? Math.min(preview.damage, target.hp) : 0;
@@ -596,6 +614,8 @@ function resolveWeaponAttack(
   }
   if (strike?.inflicts) next = inflict(next, targetId, strike.inflicts, events);
   next = meditate(next, targetId, events);
+  // 逃げ足: 生き残ったら、攻撃した相手から1マス離れる（離れられるマスがなければ発動しない）
+  if (!isCounter) next = flee(next, targetId, attackerId, events);
 
   // 反撃: 隣接するマスからの近接攻撃を受けて生き残り、まだ隣にいて、通常攻撃が届くなら
   if (!isCounter) {
@@ -618,6 +638,76 @@ function resolveWeaponAttack(
   return next;
 }
 
+/**
+ * 逃げ足（フェーズ2-6）: unitId が、攻撃した fromId から1マス離れる。離れる向きは、攻撃側から自分への向き（縦横の差の大きい方）。
+ * マップの外・ほかのユニット（戦闘不能を含む）がいる・ジャンプ力で進めない段差なら、発動しない
+ */
+function flee(state: BattleState, unitId: string, fromId: string, events: BattleEvent[]): BattleState {
+  const unit = getUnit(state, unitId);
+  const id = passiveIdOf(unit, 'flee');
+  if (!id || !isAlive(unit)) return state;
+  const from = getUnit(state, fromId);
+  const dx = unit.x - from.x;
+  const dz = unit.z - from.z;
+  const step = Math.abs(dx) >= Math.abs(dz) ? { x: Math.sign(dx), z: 0 } : { x: 0, z: Math.sign(dz) };
+  const to = { x: unit.x + step.x, z: unit.z + step.z };
+  if (!getTile(state.map, to.x, to.z) || state.units.some((u) => isOnMap(u) && u.x === to.x && u.z === to.z)) return state;
+  if (!canStep(state, unit, to, unit.stats.jump)) return state;
+  events.push({ type: 'reaction', unitId, abilityId: id });
+  events.push({ type: 'fled', unitId, from: { x: unit.x, z: unit.z }, to });
+  return arrive(updateUnit(state, unitId, { x: to.x, z: to.z }), unitId, events);
+}
+
+/**
+ * 盗む（フェーズ2-6）。成功を乱数で1回判定する。ゴールドは味方が盗んだ時だけ戦闘の後に部隊へ入る。
+ * 装備を盗むと、相手はその装備を失い（能力値が下がる。武器なら素手になる）、味方が盗んだ物は戦闘の後に所持品に加わる
+ */
+function resolveSteal(state: BattleState, thiefId: string, targetId: string, strike: StrikeDefinition, events: BattleEvent[]): BattleState {
+  const thief = getUnit(state, thiefId);
+  const target = getUnit(state, targetId);
+  const p = previewAttack(state, thief, target, thief, strike);
+  const rng = restoreRng(state.rngState);
+  const success = rng.nextInt(1, 100) <= p.hitPercent;
+  let next: BattleState = { ...updateUnit(state, thiefId, { facing: p.attackerFacing }), rngState: rng.getState() };
+  const kind = strike.steal!;
+  const mine = thief.team === 'player';
+  const stolen = next.stolen ?? { gold: 0, items: [] };
+  if (!success) {
+    events.push({ type: 'stole', thiefId, targetId, kind, success: false, percent: p.hitPercent });
+    return next;
+  }
+  if (kind === 'gold') {
+    const steal = state.rules.steal!;
+    const gold = steal.goldBase + steal.goldPerLevel * target.level;
+    events.push({ type: 'stole', thiefId, targetId, kind, success: true, percent: p.hitPercent, gold });
+    return mine ? { ...next, stolen: { ...stolen, gold: stolen.gold + gold } } : next;
+  }
+  const itemId = p.stealItemId!;
+  events.push({ type: 'stole', thiefId, targetId, kind, success: true, percent: p.hitPercent, itemId });
+  next = loseItem(next, targetId, itemId);
+  return mine ? { ...next, stolen: { ...stolen, items: [...stolen.items, itemId] } } : next;
+}
+
+/** 戦闘中に装備を失う（盗まれた）。能力値から装備の値を引き、武器なら素手になる */
+function loseItem(state: BattleState, unitId: string, itemId: string): BattleState {
+  const u = getUnit(state, unitId);
+  const index = u.equipment.findIndex((e) => e.id === itemId);
+  if (index < 0) return state;
+  const item = u.equipment[index]!;
+  const statBonus: Record<string, number> = { ...u.statBonus };
+  for (const key of Object.keys(item.stats) as (keyof UnitStats)[]) statBonus[key] = (statBonus[key] ?? 0) - (item.stats[key] ?? 0);
+  const equipment = u.equipment.filter((_, i) => i !== index);
+  const weaponLost = item.slot === 'weapon';
+  const patched: UnitState = {
+    ...u,
+    equipment,
+    statBonus,
+    ...(weaponLost ? { weapon: null, attack: state.rules.unarmedAttack } : {}),
+  };
+  const stats = currentStats(patched, state.rules);
+  return updateUnit(state, unitId, { ...patched, stats, hp: Math.min(u.hp, stats.maxHp), mp: Math.min(u.mp, stats.maxMp) });
+}
+
 /** 支援の魔法（回復・味方に有利な状態変化）か。経験値の元の量が変わる */
 function isSupportive(state: BattleState, spell: SpellDefinition): boolean {
   return (
@@ -625,6 +715,7 @@ function isSupportive(state: BattleState, spell: SpellDefinition): boolean {
     spell.effect === 'revive' ||
     spell.effect === 'rewind' ||
     spell.effect === 'swap' ||
+    spell.effect === 'cleanse' ||
     (spell.effect === 'status' && !state.rules.status[spell.inflicts!].harmful)
   );
 }
@@ -914,6 +1005,16 @@ function resolveSpellAt(state: BattleState, casterId: string, spell: SpellDefini
     preview.results.length > 0 ? grantProgress(s, casterId, targetLevel, supportive, events) : s;
   if (spell.effect === 'status') {
     for (const r of preview.results) next = inflict(next, r.unitId, spell.inflicts!, events);
+    return grant(next);
+  }
+  // 喝: 状態変化をすべて解く（フェーズ2-6）
+  if (spell.effect === 'cleanse') {
+    for (const r of preview.results) {
+      const u = getUnit(next, r.unitId);
+      if (u.statuses.length === 0) continue;
+      events.push({ type: 'statusCleared', unitId: u.id, statuses: u.statuses.map((x) => x.id) });
+      next = setStatuses(next, u.id, []);
+    }
     return grant(next);
   }
   // 引き戻し: 最後に手番が始まった時の HP に戻す（今の方が高ければ何もしない）

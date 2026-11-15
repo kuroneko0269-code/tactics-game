@@ -53,4 +53,9 @@ export const battleRules: BattleRules = {
    * そのユニットの手番が来るはずだった時（CT が 100 に達した時）に 1 減って CT は 0 に戻る。0 で退場（マップから消える）
    */
   knockout: { count: 3, ctAfterTick: 0 },
+  /**
+   * 盗み（フェーズ2-6）: 成功率は、相手から見た盗む側の位置で決まる（正面 30%、側面 55%、背面 80%）。
+   * ゴールドは 20 + 10 × 相手のレベル
+   */
+  steal: { percent: { front: 30, side: 55, back: 80 }, goldBase: 20, goldPerLevel: 10 },
 };

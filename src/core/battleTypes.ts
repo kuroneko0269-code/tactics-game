@@ -89,13 +89,13 @@ export type GrowthValues = Readonly<Record<GrowthStat, number>>;
  * 魔法の効果の種類。status は状態変化を付けるだけ（ダメージも回復もない）。
  * revive は蘇生（戦闘不能のユニットだけに効き、最大 HP の power% で復帰させる。フェーズ2-5）
  */
-export type SpellEffect = 'damage' | 'heal' | 'status' | 'revive' | 'rewind' | 'swap' | 'delay';
+export type SpellEffect = 'damage' | 'heal' | 'status' | 'revive' | 'rewind' | 'swap' | 'delay' | 'cleanse';
 
 /**
  * 狙える相手（ユニットだけを狙う魔法・業。フェーズ2-6）。ally は自分以外の味方、enemy は敵。
  * 省くと、どのマスもどのユニットも狙える（今までの魔法）
  */
-export type SpellTargetRule = 'ally' | 'enemy';
+export type SpellTargetRule = 'ally' | 'enemy' | 'allyOrSelf';
 
 /**
  * 詠唱のある行動アビリティの種類。magic は魔法（沈黙で使えなくなり、魔力の殻で軽くなる）、
@@ -209,6 +209,16 @@ export type PassiveEffect =
   | { readonly kind: 'jumpBonus'; readonly amount: number }
   /** 踏みとどまる（フェーズ2-6）: HP が 0 になるダメージを受けた時、1戦に1度だけ HP 1 で耐える */
   | { readonly kind: 'endure' }
+  /** かばう（フェーズ2-6）: 隣の味方の HP が半分以下の時、その味方への武器による攻撃を代わりに受ける */
+  | { readonly kind: 'cover' }
+  /** 背水（フェーズ2-6）: 背面からのダメージの補正を受けない（正面・側面と同じ倍率） */
+  | { readonly kind: 'backGuard' }
+  /** 見切り（フェーズ2-6）: 正面からの、武器による攻撃の命中率を下げる */
+  | { readonly kind: 'parry'; readonly hitPenalty: number }
+  /** 鍛えた拳（フェーズ2-6）: 素手（武器の枠が空）の時の攻撃力に足す値 */
+  | { readonly kind: 'unarmedAttackBonus'; readonly amount: number }
+  /** 逃げ足（フェーズ2-6）: 武器による攻撃を受けて生き残った時、攻撃した相手から1マス離れる */
+  | { readonly kind: 'flee' }
   /** 時守の心得（フェーズ2-6）: 待機した（移動も行動もしなかった）時に、手番の後の CT に足す値 */
   | { readonly kind: 'waitCtBonus'; readonly amount: number };
 
@@ -259,6 +269,15 @@ export interface SpellDefinition {
   readonly targets?: SpellTargetRule;
   /** effect が delay の時に、相手の CT から引く値（0 より下にはしない） */
   readonly ctDelay?: number;
+  /** 効く相手（範囲の中の、敵だけ・味方だけ。フェーズ2-6）。省くと範囲の全員 */
+  readonly affects?: 'enemies' | 'allies';
+  /**
+   * 範囲の形（フェーズ2-6）。line は、狙った隣のマス（正面）から直線に lineLength マス。
+   * 隣り合うマスの高さの差が lineMaxStep を超えたところで止まる（地走り）。省くと中心からの歩数（areaRadius）
+   */
+  readonly shape?: 'line';
+  readonly lineLength?: number;
+  readonly lineMaxStep?: number;
   /** 範囲の大きさ（中心からの歩数）。0 なら単体、1 なら中心と上下左右の5マス */
   readonly areaRadius: number;
   /** 高さの許容。中心のマスとの高さの差がこれを超えるマスには届かない */
@@ -302,6 +321,15 @@ export interface StrikeDefinition {
    * 正面は選んだ相手の方向。1体ずつ命中を判定する
    */
   readonly sweep?: boolean;
+  /** 攻撃の回数（連撃。1回ごとに命中を判定する）。省くと 1 */
+  readonly hits?: number;
+  /** 背面から攻撃した時だけの倍率（%。不意打ち）。省くと damagePercent のまま */
+  readonly backDamagePercent?: number;
+  /**
+   * 盗む（フェーズ2-6）。gold はゴールド、item は装備をひとつ。ダメージは与えない。
+   * 成功率は向きで決まる（BattleRules.steal）。命中の代わりに成功を判定する
+   */
+  readonly steal?: 'gold' | 'item';
   /** true なら、当たった相手を1マス押し出す（突き飛ばし）。相手が詠唱中なら、詠唱を中断させる */
   readonly knockback?: boolean;
   /** 当たった相手に付ける状態変化（足止めの矢の鈍足など） */
@@ -406,6 +434,17 @@ export interface BattleRules {
   readonly unarmedAttack: AttackProfile;
   /** 戦闘不能の数値（フェーズ2-5） */
   readonly knockout: KnockoutRules;
+  /** 盗みの数値（フェーズ2-6。省くと盗めない） */
+  readonly steal?: StealRules;
+}
+
+/** 盗みの数値（src/data に置く） */
+export interface StealRules {
+  /** 成功率（%）。相手から見た盗む側の位置で決まる */
+  readonly percent: Readonly<Record<RelativeSide, number>>;
+  /** ゴールドを盗んだ時の量 = goldBase + goldPerLevel × 相手のレベル */
+  readonly goldBase: number;
+  readonly goldPerLevel: number;
 }
 
 /**
@@ -775,6 +814,11 @@ export interface BattleState {
   readonly lastAggressionTurn: number;
   /** 勝敗条件・イベント・罠・予告済みの増援 */
   readonly scenario: ScenarioState;
+  /**
+   * 味方が盗んだ物（フェーズ2-6）。戦闘の後に部隊へ入れる（ゴールドと、装備の id）。
+   * 省いた状態（以前の途中の戦闘）は、何も盗んでいないものとして扱う
+   */
+  readonly stolen?: { readonly gold: number; readonly items: readonly string[] };
 }
 
 /** プレイヤーや AI が選ぶ行動 */
@@ -901,6 +945,23 @@ export type BattleEvent =
   | { readonly type: 'turnSkipped'; readonly unitId: string; readonly ct: number }
   /** 門渡り: 2体の位置が入れ替わった（a は使ったユニット。フェーズ2-6） */
   | { readonly type: 'swapped'; readonly a: string; readonly b: string; readonly aTo: Coord; readonly bTo: Coord }
+  /**
+   * 盗んだ（フェーズ2-6）。success が false なら失敗。gold は盗んだゴールド、itemId は盗んだ装備
+   */
+  | {
+      readonly type: 'stole';
+      readonly thiefId: string;
+      readonly targetId: string;
+      readonly kind: 'gold' | 'item';
+      readonly success: boolean;
+      readonly percent: number;
+      readonly gold?: number;
+      readonly itemId?: string;
+    }
+  /** 逃げ足: 攻撃を受けた後に1マス離れた */
+  | { readonly type: 'fled'; readonly unitId: string; readonly from: Coord; readonly to: Coord }
+  /** 喝などで、状態変化がすべて解けた */
+  | { readonly type: 'statusCleared'; readonly unitId: string; readonly statuses: readonly StatusId[] }
   /** 踏みとどまる: HP 0 になるダメージを HP 1 で耐えた */
   | { readonly type: 'endured'; readonly unitId: string; readonly abilityId: string }
   /** 戦闘不能のカウントが 0 になり、退場した（マップから消える） */

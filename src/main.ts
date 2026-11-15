@@ -258,7 +258,7 @@ function main(): void {
       const b = before.units.find((x) => x.id === u.id);
       if (!b) return [];
       return newlyUnlockedJobs(b, u, catalog, progressionRules).map((jobId) =>
-        TEXT.roster.unlockToast(unitName(u.id, u.jobId), TEXT.jobs[jobId] ?? jobId),
+        TEXT.roster.unlockChip(unitName(u.id, u.jobId), TEXT.jobs[jobId] ?? jobId),
       );
     });
   /** 戦闘中: そのユニットの jobId の JP の累計が jpTotal になった時に、新しく就けるようになったジョブ */
@@ -289,11 +289,18 @@ function main(): void {
    */
   const takeSpoils = (base: Roster, reward: BattleReward | undefined, state: BattleState, extraItems: readonly string[] = []) => {
     const spoils = rollSpoils(reward, state.winner === 'player', state.rngState);
-    const all = { gold: spoils.gold, itemIds: [...spoils.itemIds, ...extraItems] };
+    // 盗賊が盗んだ物（フェーズ2-6）は、勝ち負けに関わらず入る
+    const stolen = state.stolen ?? { gold: 0, items: [] };
+    const all = { gold: spoils.gold + stolen.gold, itemIds: [...spoils.itemIds, ...extraItems, ...stolen.items] };
     const granted = grantSpoils(base, all);
     return {
       roster: granted.roster,
-      view: { gold: all.gold, goldTotal: granted.roster.gold, items: spoils.itemIds.map(itemName), special: extraItems.map(itemName) },
+      view: {
+        gold: all.gold,
+        goldTotal: granted.roster.gold,
+        items: [...spoils.itemIds.map(itemName), ...stolen.items.map((id) => TEXT.report.stolenItem(itemName(id)))],
+        special: extraItems.map(itemName),
+      },
     };
   };
 
@@ -309,7 +316,7 @@ function main(): void {
       setScreen('result');
       showReportScreen(screenEl, result.report, jobOf, canLearn, [{ label: TEXT.report.toBase, onClick: showBase, primary: true }], {
         spoils: spoils.view,
-        highlights: unlockNotes(before, roster),
+        unlocks: unlockNotes(before, roster),
       });
     });
   };
@@ -358,8 +365,8 @@ function main(): void {
           highlights: [
             ...(outcome.firstClear ? [TEXT.report.firstClear] : []),
             TEXT.report.reward(clearRewardJp(ruinsDungeon, outcome.firstClear)),
-            ...unlocks,
           ],
+          unlocks,
           notes: [],
           spoils: spoils.view,
         });
@@ -375,7 +382,7 @@ function main(): void {
             { label: TEXT.report.editRoster, onClick: () => showRoster(show) },
             { label: TEXT.report.suspend, onClick: showBase },
           ],
-          { heading, notes: [TEXT.report.healed], spoils: spoils.view, highlights: unlocks },
+          { heading, notes: [TEXT.report.healed], spoils: spoils.view, unlocks },
         );
       } else {
         showReportScreen(
@@ -395,7 +402,7 @@ function main(): void {
               },
             },
           ],
-          { heading, notes: [TEXT.report.lostNote], spoils: spoils.view, highlights: unlocks },
+          { heading, notes: [TEXT.report.lostNote], spoils: spoils.view, unlocks },
         );
       }
     };
@@ -439,7 +446,8 @@ function main(): void {
     const lost: BattleState = { ...s.state, winner: 'enemy', turn: null };
     const result = applyBattleResult(roster, lost, catalog, progressionRules);
     const unlocks = unlockNotes(roster, result.roster);
-    roster = result.roster;
+    // 撤退しても、盗んだ物は持ち帰る（フェーズ2-6）
+    roster = takeSpoils(result.roster, undefined, lost).roster;
     if (s.origin.kind === 'dungeon') dungeonState = retreat(dungeonState);
     suspended = null;
     persist();
@@ -448,7 +456,7 @@ function main(): void {
     showReportScreen(screenEl, result.report, jobOf, canLearn, [{ label: TEXT.report.toBase, onClick: showBase, primary: true }], {
       heading: suspendedTitle(s.origin),
       title: TEXT.report.retreatTitle,
-      highlights: unlocks,
+      unlocks,
       notes: [s.origin.kind === 'dungeon' ? TEXT.report.retreatDungeonNote : TEXT.report.retreatNote],
     });
   };

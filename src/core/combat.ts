@@ -172,6 +172,44 @@ export interface AttackPreview {
   readonly endures: boolean;
   /** 斬り分けで、ほかに巻き込む敵の見込み（正面のマスの左、右の順） */
   readonly sweep?: readonly SweepPreview[];
+  /** 攻撃の回数（連撃は 2。damage と hitPercent は1回ぶん） */
+  readonly hits: number;
+  /** 相手の「見切り」で下がった命中率（なければ 0） */
+  readonly parryPenalty: number;
+  /** 相手の隣の味方が「かばう」で代わりに受ける時、その味方の id（このとき target 以外の数値は、その味方に対するもの） */
+  readonly coveredBy?: string;
+  /** 盗む技なら、盗む物（hitPercent は成功率、damage は 0） */
+  readonly steal?: 'gold' | 'item';
+  /** 装備を盗む時に、盗める装備（なければ undefined。失敗ではなく、盗める物がない） */
+  readonly stealItemId?: string;
+}
+
+/**
+ * 「かばう」（フェーズ2-6）: target の隣にいる、かばうを付けた味方（target 以外・攻撃側以外・立っている）。
+ * target の HP が最大 HP の半分以下の時だけ。複数いれば並び順で先のユニット
+ */
+export function coverFor(state: BattleState, attacker: UnitState, target: UnitState): UnitState | undefined {
+  if (target.hp * 2 > target.stats.maxHp) return undefined;
+  return state.units.find(
+    (u) =>
+      u.id !== target.id &&
+      u.id !== attacker.id &&
+      u.team === target.team &&
+      isAlive(u) &&
+      manhattan(u, target) === 1 &&
+      passiveEffect(u, 'cover') !== undefined,
+  );
+}
+
+/**
+ * 装備を盗む時に盗める装備（武器 → 防具 → 装飾品の順に、最初の1つ）。店で買えない特別な物（段階 0。ボスの物）は盗めない
+ */
+export function stealableItem(target: UnitState): string | undefined {
+  for (const slot of ['weapon', 'armor', 'accessory'] as const) {
+    const item = target.equipment.find((e) => e.slot === slot && e.tier > 0);
+    if (item) return item.id;
+  }
+  return undefined;
 }
 
 /** 斬り分けで巻き込む敵1体の見込み */
@@ -192,13 +230,15 @@ function weaponHit(
   target: UnitState,
   side: RelativeSide,
   strike: StrikeDefinition | undefined,
-): { hitPercent: number; evadePenalty: number; focusBonus: number; blindPenalty: number } {
+): { hitPercent: number; evadePenalty: number; focusBonus: number; blindPenalty: number; parryPenalty: number } {
   const focusBonus = passiveEffect(attacker, 'weaponHitBonus')?.bonus ?? 0;
   const evade = side === 'back' ? undefined : passiveEffect(target, 'evade');
   const evadePenalty = evade?.hitPenalty ?? 0;
   const blind = blindPenalty(attacker, rules);
-  const hit = rules.hitPercent[side] + (strike?.hitBonus ?? 0) + focusBonus - evadePenalty - blind;
-  return { hitPercent: Math.max(0, Math.min(100, hit)), evadePenalty, focusBonus, blindPenalty: blind };
+  // 見切り: 正面からの攻撃だけ
+  const parryPenalty = side === 'front' ? (passiveEffect(target, 'parry')?.hitPenalty ?? 0) : 0;
+  const hit = rules.hitPercent[side] + (strike?.hitBonus ?? 0) + focusBonus - evadePenalty - blind - parryPenalty;
+  return { hitPercent: Math.max(0, Math.min(100, hit)), evadePenalty, focusBonus, blindPenalty: blind, parryPenalty };
 }
 
 /**
@@ -243,15 +283,24 @@ export function previewAttack(
   target: UnitState,
   from: Coord = attacker,
   strike?: StrikeDefinition,
-  options: { counter?: boolean } = {},
+  options: { counter?: boolean; noCover?: boolean } = {},
 ): AttackPreview {
   const rules = state.rules;
+  if (strike?.steal) return previewSteal(state, attacker, target, from, strike);
+  // かばう: HP が半分以下の相手の隣に、かばうを付けた味方がいれば、その味方が代わりに受ける（盗む技と反撃は除く）
+  if (!options.noCover && !options.counter && !strike?.steal) {
+    const coverer = coverFor(state, attacker, target);
+    if (coverer) return { ...previewAttack(state, attacker, coverer, from, strike, { noCover: true }), coveredBy: coverer.id };
+  }
   const side = relativeSide(from, target, target.facing);
   const heightPercent = heightDamagePercent(rules, heightAt(state.map, from), heightAt(state.map, target));
   const chargingPercent = chargingPercentOf(rules, target);
   const protectPercent = hasStatus(target, 'protect') ? rules.status.protect.damageTakenPercent : 100;
   const hit = weaponHit(rules, attacker, target, side, strike);
-  const raw = computeDamage(rules, attacker.stats.attack, side, heightPercent, 100, strike?.damagePercent ?? 100);
+  // 背水: 背面からのダメージの補正を受けない。不意打ち: 背面からの時だけ倍率が上がる
+  const damageSide = side === 'back' && passiveEffect(target, 'backGuard') ? 'side' : side;
+  const abilityPercent = side === 'back' && strike?.backDamagePercent !== undefined ? strike.backDamagePercent : (strike?.damagePercent ?? 100);
+  const raw = computeDamage(rules, attacker.stats.attack, damageSide, heightPercent, 100, abilityPercent);
   // 「踏みとどまる」: HP が 0 になるダメージなら、HP 1 で耐える（1戦に1度）
   const full = damageTaken(rules, target, raw);
   const hitResult = enduredDamage(target, full);
@@ -305,5 +354,34 @@ export function previewAttack(
     blindPenalty: hit.blindPenalty,
     endures: hitResult.endured,
     ...(sweep ? { sweep } : {}),
+    hits: Math.max(1, strike?.hits ?? 1),
+    parryPenalty: hit.parryPenalty,
+  };
+}
+
+/**
+ * 盗む技の予測（フェーズ2-6）。成功率は相手から見た盗む側の位置で決まる（背面が最も高く、正面が最も低い）。ダメージは与えない
+ */
+export function previewSteal(state: BattleState, thief: UnitState, target: UnitState, from: Coord, strike: StrikeDefinition): AttackPreview {
+  const side = relativeSide(from, target, target.facing);
+  const percent = state.rules.steal?.percent[side] ?? 0;
+  const itemId = strike.steal === 'item' ? stealableItem(target) : undefined;
+  return {
+    side,
+    hitPercent: strike.steal === 'item' && !itemId ? 0 : percent,
+    heightPercent: 0,
+    chargingPercent: 100,
+    protectPercent: 100,
+    evadePenalty: 0,
+    focusBonus: 0,
+    damage: 0,
+    attackerFacing: directionToward(from, target, thief.facing),
+    interrupts: false,
+    blindPenalty: 0,
+    endures: false,
+    hits: 1,
+    parryPenalty: 0,
+    steal: strike.steal,
+    ...(itemId ? { stealItemId: itemId } : {}),
   };
 }

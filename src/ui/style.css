@@ -2745,3 +2745,10 @@ body {
 .job-grid .screen-button.exclusive {
   border-color: #7fd6ff;
 }
+
+/* 結果の画面: 新しく就けるようになったジョブ（フェーズ2-6） */
+.report-chip.unlock {
+  background: rgba(127, 214, 255, 0.18);
+  border-color: #7fd6ff;
+  color: #d9f3ff;
+}

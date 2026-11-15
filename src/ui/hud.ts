@@ -122,6 +122,8 @@ export interface AttackPreviewView {
   readonly extraRows: readonly { readonly label: string; readonly value: string; readonly className?: string }[];
   /** 補正の内訳などの注記（相手の「身かわし」で命中 -20 など） */
   readonly notes: readonly string[];
+  /** 盗む技（フェーズ2-6）: 命中率の代わりに成功率を出し、ダメージと高低差の行を出さない */
+  readonly steal?: boolean;
 }
 
 export interface HudHandlers {
@@ -441,18 +443,20 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
         table.append(dt, dd);
       };
       row(TEXT.preview.direction, TEXT.sides[p.side], `side-${p.side}`);
-      row(TEXT.preview.hit, `${p.hitPercent}%`);
-      row(TEXT.preview.damage, `${p.damage}（${TEXT.hp} ${p.targetHp} → ${Math.max(0, p.targetHp - p.damage)}）`);
+      row(p.steal ? TEXT.preview.stealPercent : TEXT.preview.hit, `${p.hitPercent}%`);
+      if (!p.steal) row(TEXT.preview.damage, `${p.damage}（${TEXT.hp} ${p.targetHp} → ${Math.max(0, p.targetHp - p.damage)}）`);
       if (p.chargingPercent !== 100) {
         const note = el('dd', 'charging-note');
         note.textContent = TEXT.preview.charging(p.chargingPercent);
         table.append(el('dt'), note);
       }
-      row(
-        TEXT.preview.height,
-        TEXT.preview.heightPercent(p.heightPercent),
-        p.heightPercent > 0 ? 'up' : p.heightPercent < 0 ? 'down' : '',
-      );
+      if (!p.steal) {
+        row(
+          TEXT.preview.height,
+          TEXT.preview.heightPercent(p.heightPercent),
+          p.heightPercent > 0 ? 'up' : p.heightPercent < 0 ? 'down' : '',
+        );
+      }
       for (const r of p.extraRows) row(r.label, r.value, r.className ?? '');
       body.append(table);
       preview.append(title, body);

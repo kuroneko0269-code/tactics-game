@@ -56,6 +56,7 @@ export const testRules: BattleRules = {
   trap: { rockfallDamagePercent: 20 },
   unarmedAttack: { kind: 'melee', maxHeightDiff: 1 },
   knockout: { count: 3, ctAfterTick: 0 },
+  steal: { percent: { front: 30, side: 55, back: 80 }, goldBase: 20, goldPerLevel: 10 },
 };
 
 export const testWarrior: JobDefinition = {
@@ -229,6 +230,29 @@ export const testTimeDelay: SpellDefinition = { ...instantSkill, id: 'timeDelay'
 /** 斬り分け: 正面と左右のマスの敵を、通常攻撃の 70% で */
 export const testSweep: StrikeDefinition = { id: 'sweep', damagePercent: 70, hitBonus: 0, weapons: ['sword'], sweep: true };
 
+/** 騎士・格闘家・盗賊（フェーズ2-6） */
+export const testBreakWeapon: StrikeDefinition = { id: 'breakWeapon', damagePercent: 60, hitBonus: 0, weapons: ['sword'], inflicts: 'attackDown' };
+export const testDoubleStrike: StrikeDefinition = { id: 'doubleStrike', damagePercent: 60, hitBonus: 0, weapons: ['unarmed'], hits: 2 };
+export const testStealGold: StrikeDefinition = { id: 'stealGold', damagePercent: 0, hitBonus: 0, steal: 'gold' };
+export const testStealGear: StrikeDefinition = { id: 'stealGear', damagePercent: 0, hitBonus: 0, steal: 'item' };
+export const testBackstab: StrikeDefinition = { id: 'backstab', damagePercent: 100, backDamagePercent: 200, hitBonus: 0 };
+export const testChakra: SpellDefinition = { ...instantSkill, id: 'chakra', effect: 'heal', stat: 'attack', targets: 'allyOrSelf', power: 100, range: 1, mpCost: 0 };
+export const testShout: SpellDefinition = { ...instantSkill, id: 'shout', effect: 'cleanse', targets: 'allyOrSelf', range: 1, mpCost: 0 };
+export const testEarthWave: SpellDefinition = {
+  ...instantSkill,
+  id: 'earthWave',
+  effect: 'damage',
+  stat: 'attack',
+  affects: 'enemies',
+  shape: 'line',
+  lineLength: 3,
+  lineMaxStep: 1,
+  power: 80,
+  range: 1,
+  minRange: 1,
+  mpCost: 0,
+};
+
 export const testSpells = [
   testFire,
   testWind,
@@ -242,8 +266,21 @@ export const testSpells = [
   testRewind,
   testGateSwap,
   testTimeDelay,
+  testChakra,
+  testShout,
+  testEarthWave,
 ];
-export const testStrikes = [testPowerStrike, testKnockback, testSlowArrow, testSweep];
+export const testStrikes = [
+  testPowerStrike,
+  testKnockback,
+  testSlowArrow,
+  testSweep,
+  testBreakWeapon,
+  testDoubleStrike,
+  testStealGold,
+  testStealGear,
+  testBackstab,
+];
 
 /** テスト用の受動的なアビリティ（本番の数値は src/data/passives.ts） */
 export const testPassives: readonly PassiveDefinition[] = [
@@ -259,6 +296,12 @@ export const testPassives: readonly PassiveDefinition[] = [
   { id: 'lightFoot', slot: 'movement', effect: { kind: 'jumpBonus', amount: 1 } },
   { id: 'endure', slot: 'reaction', effect: { kind: 'endure' } },
   { id: 'timekeeperWisdom', slot: 'support', effect: { kind: 'waitCtBonus', amount: 20 } },
+  { id: 'cover', slot: 'reaction', effect: { kind: 'cover' } },
+  { id: 'backGuard', slot: 'support', effect: { kind: 'backGuard' } },
+  { id: 'parry', slot: 'reaction', effect: { kind: 'parry', hitPenalty: 20 } },
+  { id: 'ironFist', slot: 'support', effect: { kind: 'unarmedAttackBonus', amount: 3 } },
+  { id: 'flee', slot: 'reaction', effect: { kind: 'flee' } },
+  { id: 'swiftFeet', slot: 'movement', effect: { kind: 'moveBonus', amount: 2 } },
 ];
 
 /** id の受動的なアビリティの定義（テスト用） */
