@@ -245,7 +245,7 @@ async function main() {
           `  装備と店: 店で買う ${r.buys}回・売る ${r.sells}回、装備の付け替え ${r.equips}回、「おまかせ」 ${r.autoEquips}回、ゴールドと戦利品の表示 ✔`,
         );
         console.log(
-          `  育成: 戦闘中のレベルアップの表示 ✔、結果の画面 ✔、編成のタブ ${r.tabs}回・習得 ${r.learned}回・ジョブチェンジ ${r.jobChanges}回・副コマンド ${r.subChanges}回、再び出撃 ✔`,
+          `  育成: 戦闘中のレベルアップの表示 ✔、結果の画面 ✔、編成のタブ ${r.tabs}回・習得 ${r.learned}回・ジョブチェンジ ${r.jobChanges}回・副コマンド ${r.subChanges}回、再び出撃 ✔、魔法のジョブの行動 ${r.newJobActions}回・状態変化の目印と膠着の表示 ✔`,
         );
         console.log(
           `  （技・突き飛ばし・罠・反撃・詠唱の中断・受動的なアビリティ・はじめから・ダンジョンは、短くした版では ${VIEWPORT_OPTIONS[VIEWPORTS[0]]?.label ?? VIEWPORTS[0]} だけで確かめる）`,
@@ -1442,10 +1442,60 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   }
   check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
 
+  // ---- 魔法のジョブと目印・膠着の表示（フェーズ2-6 PR C）----
+  async function magicJobScenes(jd) {
+    // (4) 魔法のジョブ（フェーズ2-6 PR C）: 時魔道士の早送り、召喚士の炎の精霊（敵だけに効く赤い範囲）、魔法剣士の炎の剣
+    for (const d of jd.spells) {
+      await page.evaluate((r) => window.__tactics.load(r), d.start);
+      await waitFor('魔法のジョブの手番', (id) => window.__tactics.mode() === 'main' && window.__tactics.state().turn?.unitId === id, d.unitId);
+      await waitForInput();
+      const me = (await getState()).units.find((u) => u.id === d.unitId);
+      await openCommandOf(me, d.abilityId);
+      await pressButton(text.abilities[d.abilityId]);
+      await waitFor(`「${d.abilityId}」の狙い`, (id) => {
+        const m = window.__tactics.modeDetail();
+        return (m.kind === 'spellTarget' && m.spellId === id) || (m.kind === 'targeting' && m.abilityId === id);
+      }, d.abilityId);
+      await tapUnit(d.targetId);
+      if ((await getMode()).kind === 'spellTargetKind') await pressButton(d.tile ? text.buttons.targetTile : text.buttons.targetUnit);
+      const m = await getMode();
+      check(m.kind === 'spellConfirm' || m.kind === 'confirm', `「${d.abilityId}」の確定の前の画面になっていません（${JSON.stringify(m)}）`);
+      const previewText = await page.locator('.preview').textContent();
+      for (const want of d.previewIncludes) check(previewText.includes(want), `「${d.abilityId}」の予測に「${want}」がありません（${previewText}）`);
+      if (d.markKind) {
+        const kinds = await T(() => window.__tactics.marks().map((x) => x.kind));
+        check(kinds.includes(d.markKind), `「${d.abilityId}」の範囲の色分け（${d.markKind}）がありません（${JSON.stringify([...new Set(kinds)])}）`);
+      }
+      check(!(await overlaps('.preview', '.actions')), `「${d.abilityId}」の予測が行動のボタンに重なっています`);
+      await screenshot(`newjob-${d.abilityId}`);
+      await pressButton('確定');
+      await waitFor(`「${d.abilityId}」の後`, () => !['busy', 'confirm', 'spellConfirm'].includes(window.__tactics.mode()));
+      const pick = (st) => JSON.stringify(st.units.filter((u) => [d.unitId, d.targetId].includes(u.id)).map((u) => [u.id, u.hp, u.mp, u.charging, u.statuses]));
+      check(pick(await getState()) === pick(d.expected), `「${d.abilityId}」の結果が core の計算と違います（画面 ${pick(await getState())} / core ${pick(d.expected)}）`);
+      stats.newJobActions++;
+    }
+
+    // (5) 頭上の状態変化の目印は2つまでで、残りは「+N」。膠着まで残り 10 手番になると、勝敗条件の帯に残りの手番数が出る
+    await page.evaluate((r) => window.__tactics.load(r), jd.markers.start);
+    await waitFor('目印の場面', (id) => window.__tactics.mode() === 'main' && window.__tactics.state().turn?.unitId === id, jd.markers.unitId);
+    await waitForInput();
+    const badges = await T((id) => {
+      const labels = [...document.querySelectorAll('.unit-label')];
+      const i = window.__tactics.state().units.findIndex((u) => u.id === id);
+      return [...labels[i].querySelectorAll('.status-badge')].map((b) => b.textContent);
+    }, jd.markers.targetId);
+    check(JSON.stringify(badges) === JSON.stringify(jd.markers.badges), `頭上の状態変化の目印が違います（画面 ${JSON.stringify(badges)} / 期待 ${JSON.stringify(jd.markers.badges)}）`);
+    const quietBar = await page.locator('.objective-bar').textContent();
+    check(quietBar.includes(jd.markers.stalemate), `膠着までの残りの手番数が出ていません（${quietBar}）`);
+    await screenshot('status-markers-stalemate');
+  }
+
   // 短くした版（CI）では、ここから先（技・突き飛ばし・罠と増援・反撃・詠唱の中断・読み込み直し・受動的なアビリティ・はじめから・ダンジョン）は
   // 最初の画面サイズ（縦向き）だけで確かめる。画面サイズによって変わるのはタップの位置と画面の収まりで、それはここまでと画面の収まりの確認で見ているため。
   // 検査全体を5分以内に収めるため（フェーズ2-4 で店と装備の操作を足し、5分を少し超えた）
   if (QUICK && name !== VIEWPORTS[0]) {
+    await magicJobScenes(jobDrills(core, passiveDrill(core, plan.afterSell).expected));
+    check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
     await context.close();
     for (const d of finger.details) log(`押し直し: ${d}`);
     return {
@@ -1909,50 +1959,8 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
     check(pick(await getState()) === pick(d.expected), `「${d.abilityId}」の結果が core の計算と違います（画面 ${pick(await getState())} / core ${pick(d.expected)}）`);
     stats.newJobActions++;
   }
-  // (4) 魔法のジョブ（フェーズ2-6 PR C）: 時魔道士の早送り、召喚士の炎の精霊（敵だけに効く赤い範囲）、魔法剣士の炎の剣
-  for (const d of jd.spells) {
-    await page.evaluate((r) => window.__tactics.load(r), d.start);
-    await waitFor('魔法のジョブの手番', (id) => window.__tactics.mode() === 'main' && window.__tactics.state().turn?.unitId === id, d.unitId);
-    await waitForInput();
-    const me = (await getState()).units.find((u) => u.id === d.unitId);
-    await openCommandOf(me, d.abilityId);
-    await pressButton(text.abilities[d.abilityId]);
-    await waitFor(`「${d.abilityId}」の狙い`, (id) => {
-      const m = window.__tactics.modeDetail();
-      return (m.kind === 'spellTarget' && m.spellId === id) || (m.kind === 'targeting' && m.abilityId === id);
-    }, d.abilityId);
-    await tapUnit(d.targetId);
-    if ((await getMode()).kind === 'spellTargetKind') await pressButton(d.tile ? text.buttons.targetTile : text.buttons.targetUnit);
-    const m = await getMode();
-    check(m.kind === 'spellConfirm' || m.kind === 'confirm', `「${d.abilityId}」の確定の前の画面になっていません（${JSON.stringify(m)}）`);
-    const previewText = await page.locator('.preview').textContent();
-    for (const want of d.previewIncludes) check(previewText.includes(want), `「${d.abilityId}」の予測に「${want}」がありません（${previewText}）`);
-    if (d.markKind) {
-      const kinds = await T(() => window.__tactics.marks().map((x) => x.kind));
-      check(kinds.includes(d.markKind), `「${d.abilityId}」の範囲の色分け（${d.markKind}）がありません（${JSON.stringify([...new Set(kinds)])}）`);
-    }
-    check(!(await overlaps('.preview', '.actions')), `「${d.abilityId}」の予測が行動のボタンに重なっています`);
-    await screenshot(`newjob-${d.abilityId}`);
-    await pressButton('確定');
-    await waitFor(`「${d.abilityId}」の後`, () => !['busy', 'confirm', 'spellConfirm'].includes(window.__tactics.mode()));
-    const pick = (st) => JSON.stringify(st.units.filter((u) => [d.unitId, d.targetId].includes(u.id)).map((u) => [u.id, u.hp, u.mp, u.charging, u.statuses]));
-    check(pick(await getState()) === pick(d.expected), `「${d.abilityId}」の結果が core の計算と違います（画面 ${pick(await getState())} / core ${pick(d.expected)}）`);
-    stats.newJobActions++;
-  }
-
-  // (5) 頭上の状態変化の目印は2つまでで、残りは「+N」。膠着まで残り 10 手番になると、勝敗条件の帯に残りの手番数が出る
-  await page.evaluate((r) => window.__tactics.load(r), jd.markers.start);
-  await waitFor('目印の場面', (id) => window.__tactics.mode() === 'main' && window.__tactics.state().turn?.unitId === id, jd.markers.unitId);
-  await waitForInput();
-  const badges = await T((id) => {
-    const labels = [...document.querySelectorAll('.unit-label')];
-    const i = window.__tactics.state().units.findIndex((u) => u.id === id);
-    return [...labels[i].querySelectorAll('.status-badge')].map((b) => b.textContent);
-  }, jd.markers.targetId);
-  check(JSON.stringify(badges) === JSON.stringify(jd.markers.badges), `頭上の状態変化の目印が違います（画面 ${JSON.stringify(badges)} / 期待 ${JSON.stringify(jd.markers.badges)}）`);
-  const quietBar = await page.locator('.objective-bar').textContent();
-  check(quietBar.includes(jd.markers.stalemate), `膠着までの残りの手番数が出ていません（${quietBar}）`);
-  await screenshot('status-markers-stalemate');
+  // (4)(5) は短くした版では、2つ目の画面サイズ（横向き）で確かめる（検査全体を5分以内に収めるため。PR C）
+  if (!QUICK) await magicJobScenes(jd);
 
   // 撤退の後の部隊に戻して、拠点へ戻る（用意した場面の戦闘は、部隊に反映しない）
   await page.evaluate((r) => window.__tactics.setRoster(r), retreated);
