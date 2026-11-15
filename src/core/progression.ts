@@ -386,7 +386,7 @@ export function learnRefusal(
   if (!entry) return 'unknownAbility';
   const p = jobProgress(unit, jobId);
   if (p.learned.includes(abilityId)) return 'alreadyLearned';
-  if (!isJobUnlocked(unit, job, rules, catalog)) return 'jobLocked';
+  if (!canTakeJob(unit, job, rules, catalog)) return 'jobLocked';
   if (jobLevel(unit, jobId, rules) < (entry.jobLevel ?? 1)) return 'jobLevelTooLow';
   if (p.jp < entry.jpCost) return 'notEnoughJp';
   return null;
@@ -433,6 +433,48 @@ export function isJobUnlocked(
 }
 
 /**
+ * その人物が就ける対象のジョブか（フェーズ2-6）。だれでも就けるジョブ、その人物の専用ジョブなら true。
+ * ほかの人物の専用ジョブと、敵専用のジョブは false。人物の id は部隊のユニットの id
+ */
+export function isJobEligible(unit: Pick<RosterUnit, 'id'>, job: JobDefinition): boolean {
+  const e = job.eligibility;
+  if (!e || e.kind === 'everyone') return true;
+  if (e.kind === 'characters') return e.characterIds.includes(unit.id);
+  return false;
+}
+
+/** 特定の人物だけが就ける専用ジョブか */
+export function isExclusiveJob(job: JobDefinition): boolean {
+  return job.eligibility?.kind === 'characters';
+}
+
+/** そのジョブに今就けるか（就ける対象で、解放条件をすべて満たしている） */
+export function canTakeJob(unit: RosterUnit, job: JobDefinition, rules: ProgressionRules, catalog?: Pick<GameCatalog, 'jobs'>): boolean {
+  return isJobEligible(unit, job) && isJobUnlocked(unit, job, rules, catalog);
+}
+
+/** 編成の画面に出すジョブ（その人物が就ける対象のもの。ジョブの並び順） */
+export function eligibleJobs(unit: RosterUnit, catalog: Pick<GameCatalog, 'jobs'>): JobDefinition[] {
+  return catalog.jobs.filter((j) => isJobEligible(unit, j));
+}
+
+/**
+ * before から after になった時に、新しく就けるようになったジョブ（解放条件のあるジョブだけ。ジョブの並び順）。
+ * 戦闘で JP を得た時などに「〇〇に就けるようになった」と知らせるため
+ */
+export function newlyUnlockedJobs(
+  before: RosterUnit,
+  after: RosterUnit,
+  catalog: Pick<GameCatalog, 'jobs'>,
+  rules: ProgressionRules,
+): string[] {
+  return catalog.jobs
+    .filter((j) => (j.unlock ?? []).length > 0 && isJobEligible(after, j))
+    .filter((j) => !isJobUnlocked(before, j, rules, catalog) && isJobUnlocked(after, j, rules, catalog))
+    .map((j) => j.id);
+}
+
+/**
  * ジョブを変える（戦闘の外でいつでも）。そのジョブの「最初から習得済み」のアビリティは、この時に習得済みになる。
  * 副コマンドが新しいジョブと同じなら、副コマンドを外す。解放されていなければエラー
  */
@@ -443,7 +485,7 @@ export function changeJob(
   rules: ProgressionRules,
 ): RosterUnit {
   const job = findJob(catalog, jobId);
-  if (!isJobUnlocked(unit, job, rules, catalog)) throw new Error(`${unit.id} はまだ ${jobId} に就けません`);
+  if (!canTakeJob(unit, job, rules, catalog)) throw new Error(`${unit.id} はまだ ${jobId} に就けません`);
   const p = jobProgress(unit, jobId);
   const starters = (job.abilities ?? []).filter((a) => a.starter && !p.learned.includes(a.id)).map((a) => a.id);
   return {
@@ -487,6 +529,7 @@ export type RosterProblem =
   | { readonly kind: 'duplicateUnit'; readonly unitId: string }
   | { readonly kind: 'unknownJob'; readonly unitId: string; readonly jobId: string }
   | { readonly kind: 'jobLocked'; readonly unitId: string; readonly jobId: string }
+  | { readonly kind: 'jobNotEligible'; readonly unitId: string; readonly jobId: string }
   | { readonly kind: 'badLevel'; readonly unitId: string }
   | { readonly kind: 'badExp'; readonly unitId: string }
   | { readonly kind: 'badGrowth'; readonly unitId: string; readonly stat: GrowthStat }
@@ -523,6 +566,7 @@ export function validateRoster(roster: Roster, catalog: GameCatalog, rules: Prog
     seen.add(unitId);
     const job = catalog.jobs.find((j) => j.id === u.jobId);
     if (!job) problems.push({ kind: 'unknownJob', unitId, jobId: u.jobId });
+    else if (!isJobEligible(u, job)) problems.push({ kind: 'jobNotEligible', unitId, jobId: u.jobId });
     else if (!isJobUnlocked(u, job, rules, catalog)) problems.push({ kind: 'jobLocked', unitId, jobId: u.jobId });
     if (!isInt(u.level) || u.level < 1 || u.level > rules.maxLevel) problems.push({ kind: 'badLevel', unitId });
     if (!isInt(u.exp) || u.exp < 0 || (isInt(u.level) && u.level < rules.maxLevel && u.exp >= expToNext(u.level, rules))) {

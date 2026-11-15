@@ -10,7 +10,7 @@
  *   （行動はできない。手番と同じ決まりで順番が決まる）。退場したユニットは数えない。
  */
 import type { BattleRules, BattleState, UnitState } from './battleTypes';
-import { castSpeedOf } from './effects';
+import { castSpeedOf, hasStatus, passiveEffect } from './effects';
 import { spellOf } from './magic';
 import { isAlive, isKnockedOut } from './movement';
 
@@ -79,6 +79,12 @@ export function ctAfterTurn(rules: BattleRules, moved: boolean, acted: boolean):
   return rules.ctAfterWait;
 }
 
+/** 手番の後の CT（そのユニットの「時守の心得」で、待機した時に増える。フェーズ2-6） */
+export function ctAfterTurnFor(rules: BattleRules, unit: Pick<UnitState, 'passives'>, moved: boolean, acted: boolean): number {
+  const bonus = !moved && !acted ? (passiveEffect(unit, 'waitCtBonus')?.amount ?? 0) : 0;
+  return ctAfterTurn(rules, moved, acted) + bonus;
+}
+
 /**
  * この先の行動順の予測（先頭は今の手番のユニット）。
  * - 今の手番のユニットは、ここまでにした移動・行動から決まる CT に戻るものとする。
@@ -99,7 +105,7 @@ export function predictTimeline(
   const pending = options.pendingSpellId;
   let units = state.units.map((u) => {
     if (u.id !== turn.unitId) return u;
-    const ct = ctAfterTurn(rules, turn.moved, turn.acted || pending !== undefined);
+    const ct = ctAfterTurnFor(rules, u, turn.moved, turn.acted || pending !== undefined);
     if (pending === undefined) return { ...u, ct };
     return { ...u, ct, charging: { spellId: pending, target: { kind: 'unit' as const, unitId: u.id }, progress: 0 } };
   });
@@ -108,6 +114,13 @@ export function predictTimeline(
     const entry = next.entry;
     if (entry.kind === 'knockout') {
       units = next.units.map((u) => (u.id === entry.unitId ? { ...u, ct: rules.knockout.ctAfterTick } : u));
+      continue;
+    }
+    // 停止しているユニットの手番は、何もできずに過ぎる（予測には出さない。停止はその手番で消えるものとして数える）
+    if (entry.kind === 'turn' && hasStatus(next.units.find((u) => u.id === entry.unitId)!, 'stop')) {
+      units = next.units.map((u) =>
+        u.id === entry.unitId ? { ...u, ct: rules.status.stop.ctAfterSkip, statuses: u.statuses.filter((x) => x.id !== 'stop') } : u,
+      );
       continue;
     }
     result.push(entry);

@@ -14,7 +14,7 @@ import { attackableTargets, attackRangeTiles, previewAttack, strikeOf, weaponFit
 import { isSilencedFor, mpCostOf, passiveIdOf, statusBlocker } from '../core/effects';
 import { directionToward, type Coord, type Direction } from '../core/geometry';
 import { affectsUnit, chargeArea, hasMpFor, inSpellRange, previewSpellAt, spellOf, spellRangeTiles, targetCenter } from '../core/magic';
-import { isKnockedOut, occupantAt, reachableTiles, unitAt } from '../core/movement';
+import { isAlive, isKnockedOut, occupantAt, reachableTiles, unitAt } from '../core/movement';
 import { targetUnitIds } from '../core/scenario';
 import { predictTimeline } from '../core/turnOrder';
 import { objectivesView, overlayTiles, type OverlayKind } from './objectives';
@@ -76,6 +76,11 @@ export interface BattleControllerDeps {
    * 出来事を再生する前に呼ぶので、再生の途中で閉じても、その行動の結果は残る
    */
   readonly onStateChanged?: (state: BattleState) => void;
+  /**
+   * 戦闘中にジョブのレベルが上がった時、そのユニットが新しく就けるようになったジョブ（フェーズ2-6。解放条件を満たした瞬間に知らせる）。
+   * jpTotal は、そのジョブの今の JP の累計
+   */
+  readonly unlockedJobs?: (unitId: string, jobId: string, jpTotal: number) => readonly string[];
 }
 
 export interface BattleController {
@@ -138,6 +143,8 @@ export function createBattleController(start: ActionResult, deps: BattleControll
   let finished = false;
   /** 途中でやめたか */
   let disposed = false;
+  /** この戦闘で知らせた、新しく就けるようになったジョブ（ユニット:ジョブ） */
+  const announcedUnlocks = new Set<string>();
 
   const turn = () => state.turn;
   const actor = (): UnitState => {
@@ -204,7 +211,9 @@ export function createBattleController(start: ActionResult, deps: BattleControll
   /** 魔法の狙い先として選べるマスか（射程の内側。蘇生は、戦闘不能のユニットがいるマスだけ） */
   const canAim = (spell: SpellDefinition, c: Coord) =>
     inSpellRange(spell, actor(), c) &&
-    (spell.effect !== 'revive' || state.units.some((u) => affectsUnit(spell, u) && u.x === c.x && u.z === c.z));
+    (!unitOnly(spell) || state.units.some((u) => affectsUnit(spell, u, actor()) && u.x === c.x && u.z === c.z));
+  /** ユニットだけを狙う魔法・業か（蘇生と、狙える相手が決まっている時守の業） */
+  const unitOnly = (spell: SpellDefinition) => spell.effect === 'revive' || spell.targets !== undefined;
 
   /** 頭上の戦闘不能のカウントを、状態に合わせて出し直す（戦闘の開始・再開の時） */
   const syncKnockoutLabels = () => {
@@ -220,7 +229,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
     const strike = unit.strikes.find((s) => s.id === abilityId);
     const weapons = spell?.weapons ?? strike?.weapons;
     if (!weaponFits(weapons, unit.weapon)) {
-      return { disabled: true, detail: TEXT.abilityBlocked.weapon(weapons!.map((w) => TEXT.weapons[w]).join('・')) };
+      return { disabled: true, detail: TEXT.abilityBlocked.weapon(weapons!.map((w) => (w === 'unarmed' ? TEXT.unarmed : TEXT.weapons[w])).join('・')) };
     }
     if (spell && isSilencedFor(unit, spell)) return { disabled: true, detail: TEXT.abilityBlocked.silence };
     // 蘇生は、戦闘不能の味方がいる時だけ
@@ -241,6 +250,8 @@ export function createBattleController(start: ActionResult, deps: BattleControll
     if (p.focusBonus > 0) notes.push(TEXT.preview.focus(abilityName(passiveIdOf(attacker, 'weaponHitBonus') ?? ''), p.focusBonus));
     if (p.evadePenalty > 0) notes.push(TEXT.preview.evade(abilityName(passiveIdOf(target, 'evade') ?? ''), p.evadePenalty));
     if (p.protectPercent !== 100) notes.push(TEXT.preview.protect(p.protectPercent));
+    if (p.blindPenalty > 0) notes.push(TEXT.preview.blind(p.blindPenalty));
+    if (p.endures) notes.push(TEXT.preview.endures(abilityName(passiveIdOf(target, 'endure') ?? '')));
     if (p.interrupts) notes.push(TEXT.preview.interrupts);
     if (p.inflicts) {
       const blocker = statusBlocker(target, p.inflicts);
@@ -263,6 +274,11 @@ export function createBattleController(start: ActionResult, deps: BattleControll
         const total = p.damage + kb.damage;
         extraRows.push({ label: '', value: TEXT.preview.total(total, Math.max(0, target.hp - total)) });
       }
+    }
+    // 斬り分けで巻き込む敵（フェーズ2-6）
+    for (const x of p.sweep ?? []) {
+      const u = getUnit(state, x.unitId);
+      extraRows.push({ label: TEXT.preview.sweepLabel, value: TEXT.preview.sweepTarget(unitName(u.id, u.jobId), x.damage, x.hitPercent) });
     }
     if (p.counter) {
       extraRows.push({
@@ -365,9 +381,16 @@ export function createBattleController(start: ActionResult, deps: BattleControll
         const abilityId = mode.abilityId;
         const strike = abilityId === null ? undefined : strikeOf(unit, abilityId);
         // 突き飛ばしは、押し出す先もマップ上に示す
-        const pushTo =
-          mode.kind === 'confirm' ? previewAttack(state, unit, getUnit(state, mode.targetId), unit, strike).knockback?.to : undefined;
-        view.setMarks([...range, ...targetMarks, ...(pushTo ? [{ ...pushTo, kind: 'push' as const }] : [])]);
+        const confirmPreview = mode.kind === 'confirm' ? previewAttack(state, unit, getUnit(state, mode.targetId), unit, strike) : undefined;
+        const pushTo = confirmPreview?.knockback?.to;
+        // 斬り分けは、巻き込む敵のマスも選んだ印で示す
+        const sweepMarks = (confirmPreview?.sweep ?? []).map((x) => ({ ...getUnit(state, x.unitId), kind: 'selected' as const }));
+        view.setMarks([
+          ...range,
+          ...targetMarks,
+          ...sweepMarks.map((u) => ({ x: u.x, z: u.z, kind: u.kind })),
+          ...(pushTo ? [{ ...pushTo, kind: 'push' as const }] : []),
+        ]);
         const backFromTargeting = (): Mode =>
           abilityId === null ? { kind: 'main' } : { kind: 'abilityMenu', command: commandIndexOf(unit, abilityId) };
         if (mode.kind === 'targeting') {
@@ -416,16 +439,26 @@ export function createBattleController(start: ActionResult, deps: BattleControll
         const range = spellRangeTiles(state.map, spell, unit).map((c) => ({ ...c, kind: 'spellRange' as const }));
         if (mode.kind === 'spellTarget') {
           // 蘇生は、狙える戦闘不能のユニットのマスも示す
-          const downs =
-            spell.effect === 'revive'
-              ? state.units.filter((u) => affectsUnit(spell, u) && inSpellRange(spell, unit, u)).map((u) => ({ x: u.x, z: u.z, kind: 'target' as const }))
-              : [];
+          // 時守の業も、狙える味方・敵のマスを示す
+          const downs = unitOnly(spell)
+            ? state.units
+                .filter((u) => affectsUnit(spell, u, unit) && inSpellRange(spell, unit, u))
+                .map((u) => ({ x: u.x, z: u.z, kind: 'target' as const }))
+            : [];
           view.setMarks([...range, ...downs, self]);
-          hud.setHint(spell.effect === 'revive' ? TEXT.hints.chooseReviveTarget : TEXT.hints.chooseSpellTarget);
+          hud.setHint(
+            spell.effect === 'revive'
+              ? TEXT.hints.chooseReviveTarget
+              : spell.targets === 'ally'
+                ? TEXT.hints.chooseAllyTarget
+                : spell.targets === 'enemy'
+                  ? TEXT.hints.chooseEnemyTarget
+                  : TEXT.hints.chooseSpellTarget,
+          );
           hud.setActions([
             { label: TEXT.buttons.back, onClick: () => setMode({ kind: 'abilityMenu', command: commandIndexOf(unit, spell.id) }) },
           ]);
-          showTurnOrder(spell.id);
+          showTurnOrder(spell.instant ? undefined : spell.id);
           break;
         }
         if (mode.kind === 'spellTargetKind') {
@@ -454,14 +487,31 @@ export function createBattleController(start: ActionResult, deps: BattleControll
         view.setMarks([...range, ...area]);
         hud.setHint('');
         const timeline = predictTimeline(state, TIMING_LOOKAHEAD, { pendingSpellId: spell.id });
-        const timing = timeline.findIndex((e, i) => i > 0 && e.kind === 'spell' && e.casterId === unit.id) + 1;
+        // 詠唱のない業は、その場で発動する（0 なら予測欄に「詠唱なし」と出す）
+        const timing = spell.instant ? 0 : timeline.findIndex((e, i) => i > 0 && e.kind === 'spell' && e.casterId === unit.id) + 1;
+        const aimed = mode.target;
+        const instantText = (unitId: string, amount: number, hp: number): string | undefined => {
+          const u = getUnit(state, unitId);
+          if (spell.effect === 'rewind') return amount > 0 ? TEXT.spellPreview.rewind(u.hp, hp) : TEXT.spellPreview.rewindNone;
+          if (spell.effect === 'swap') return TEXT.spellPreview.swap;
+          if (spell.effect !== 'delay') return undefined;
+          if (amount === 0) return TEXT.spellPreview.delayNone;
+          // 行動順のどこまで下がるか: 使う前（この手番で行動したものとして）と、使った後の行動順で、相手の手番が何番目か
+          const position = (st: BattleState) =>
+            predictTimeline(st, TIMING_LOOKAHEAD).findIndex((e) => e.kind === 'turn' && e.unitId === unitId) + 1;
+          const before = position({ ...state, turn: { ...t, acted: true } });
+          const after = position(applyAction(state, { type: 'cast', spellId: spell.id, target: aimed }).state);
+          return TEXT.spellPreview.delay(amount, before, after);
+        };
         const affected = preview.results.map((r) => ({ ...r, unit: getUnit(state, r.unitId) }));
         const allies = affected.filter((r) => r.unit.team === unit.team).length;
         const enemies = affected.length - allies;
         const harmful = spell.effect === 'damage' || (spell.effect === 'status' && state.rules.status[spell.inflicts!].harmful);
         // 蘇生で敵を復帰させる時も警告する（回復と同じ文言の代わりに、蘇生の文言）
-        const warning =
-          harmful && allies > 0
+        // 狙える相手が決まっている業（時守）は、相手を選んで使うので警告しない
+        const warning = spell.targets
+          ? ''
+          : harmful && allies > 0
             ? TEXT.spellPreview.allyWarning(allies)
             : !harmful && enemies > 0
               ? spell.effect === 'revive'
@@ -475,7 +525,9 @@ export function createBattleController(start: ActionResult, deps: BattleControll
           effect: spell.effect,
           targetText:
             target.kind === 'unit'
-              ? TEXT.spellPreview.targetUnit(unitName(target.unitId, getUnit(state, target.unitId).jobId))
+              ? (spell.instant ? TEXT.spellPreview.targetInstant : TEXT.spellPreview.targetUnit)(
+                  unitName(target.unitId, getUnit(state, target.unitId).jobId),
+                )
               : TEXT.spellPreview.targetTile,
           timing,
           mpText: mpCostOf(unit, spell) > 0 ? TEXT.spellPreview.mp(mpCostOf(unit, spell), unit.mp) : '',
@@ -496,8 +548,9 @@ export function createBattleController(start: ActionResult, deps: BattleControll
               amount: r.amount,
               hp: r.hp,
               maxHp: u.stats.maxHp,
-              statusText:
-                spell.effect !== 'status'
+              statusText: spell.instant
+                ? instantText(r.unitId, r.amount, r.hp)
+                : spell.effect !== 'status'
                   ? undefined
                   : blocker
                     ? TEXT.preview.blocked(TEXT.equipment[blocker.id]?.name ?? blocker.id, TEXT.statuses[spell.inflicts!])
@@ -507,12 +560,13 @@ export function createBattleController(start: ActionResult, deps: BattleControll
                   r.side ? TEXT.spellPreview.angle(TEXT.sides[r.side], TEXT.preview.heightPercent(r.heightPercent ?? 0)) : '',
                   interrupts ? TEXT.spellPreview.interrupt : '',
                   reducedBy.length > 0 ? TEXT.spellPreview.reduced(reducedBy.join('・')) : '',
+                  r.endured ? TEXT.spellPreview.endures(abilityName(passiveIdOf(u, 'endure') ?? '')) : '',
                 ].join('') || undefined,
             };
           }),
           warning,
         });
-        showTurnOrder(spell.id);
+        showTurnOrder(spell.instant ? undefined : spell.id);
         hud.setActions([
           { label: TEXT.buttons.back, onClick: () => setMode({ kind: 'spellTarget', spellId: spell.id }) },
           { label: TEXT.buttons.confirm, primary: true, onClick: () => void perform({ type: 'cast', spellId: spell.id, target }) },
@@ -600,13 +654,39 @@ export function createBattleController(start: ActionResult, deps: BattleControll
           showReserved();
           break;
         }
-        case 'statusAdded':
+        case 'statusAdded': {
           labels.popText(ev.unitId, TEXT.statuses[ev.status]);
           labels.setStatuses(ev.unitId, statusesAfter(ev.unitId));
+          // 最大 HP 低下などで能力値が変わる（フェーズ2-6）
+          const u = getUnit(state, ev.unitId);
+          labels.setHp(ev.unitId, u.hp, u.stats.maxHp);
           await view.wait(0.25);
           break;
-        case 'statusExpired':
+        }
+        case 'statusExpired': {
           labels.setStatuses(ev.unitId, statusesAfter(ev.unitId));
+          const u = getUnit(state, ev.unitId);
+          if (isAlive(u)) labels.setHp(ev.unitId, u.hp, u.stats.maxHp);
+          break;
+        }
+        case 'endured':
+          // 踏みとどまる: HP 1 で耐えた
+          labels.popText(ev.unitId, abilityName(ev.abilityId), 'reaction');
+          await view.wait(0.35);
+          break;
+        case 'turnSkipped':
+          // 停止: 手番が何もできずに過ぎた
+          await view.focusTiles([getUnit(state, ev.unitId)]);
+          labels.popText(ev.unitId, TEXT.turnSkipped);
+          await view.wait(0.5);
+          break;
+        case 'swapped':
+          // 門渡り: 2体の位置が入れ替わる
+          labels.popText(ev.a, TEXT.swapped, 'reaction');
+          await view.wait(0.25);
+          view.sync(state);
+          await view.wait(0.25);
+          showReserved();
           break;
         case 'statusBlocked':
           // 装備で状態変化を防いだ時は、装備の名前と「沈黙を防いだ」を短く表示する
@@ -640,8 +720,12 @@ export function createBattleController(start: ActionResult, deps: BattleControll
             for (const r of ev.results) {
               const u = getUnit(state, r.unitId);
               // 蘇生の HP の表示は、続く「復帰」の出来事で出す
-              if (ev.effect === 'revive') continue;
-              if (ev.effect === 'heal') labels.popHeal(r.unitId, r.amount);
+              if (ev.effect === 'revive' || ev.effect === 'swap') continue;
+              if (ev.effect === 'delay') {
+                labels.popText(r.unitId, TEXT.ctDelayed(r.amount));
+                continue;
+              }
+              if (ev.effect === 'heal' || ev.effect === 'rewind') labels.popHeal(r.unitId, r.amount);
               else labels.popDamage(r.unitId, r.amount);
               labels.setHp(r.unitId, r.hp, u.stats.maxHp);
             }
@@ -754,9 +838,19 @@ export function createBattleController(start: ActionResult, deps: BattleControll
           await view.wait(0.45);
           break;
         }
-        case 'jobLeveledUp':
+        case 'jobLeveledUp': {
           labels.popText(ev.unitId, TEXT.gain.jobLevelUp(TEXT.jobs[ev.jobId] ?? ev.jobId, ev.to), 'joblevel');
+          // 解放条件を満たしたジョブがあれば、短く知らせる（同じ戦闘で同じ知らせは1回だけ）
+          const u = getUnit(state, ev.unitId);
+          for (const jobId of deps.unlockedJobs?.(ev.unitId, ev.jobId, u.progress?.jpTotal ?? 0) ?? []) {
+            const key = `${ev.unitId}:${jobId}`;
+            if (announcedUnlocks.has(key)) continue;
+            announcedUnlocks.add(key);
+            hud.showMessage(TEXT.roster.unlockToast(unitName(u.id, u.jobId), TEXT.jobs[jobId] ?? jobId));
+            await view.wait(0.6);
+          }
           break;
+        }
         case 'eventFired':
         case 'battleEnded':
           break;
@@ -909,8 +1003,8 @@ export function createBattleController(start: ActionResult, deps: BattleControll
       const c = candidates.find((c) => canAim(spell, c));
       if (c) {
         // 蘇生は、戦闘不能のユニットを狙う（マスを狙う選択は出さない）
-        if (spell.effect === 'revive') {
-          const down = state.units.find((u) => affectsUnit(spell, u) && u.x === c.x && u.z === c.z)!;
+        if (unitOnly(spell)) {
+          const down = state.units.find((u) => affectsUnit(spell, u, actor()) && u.x === c.x && u.z === c.z)!;
           return setMode({ kind: 'spellConfirm', spellId: spell.id, target: { kind: 'unit', unitId: down.id } });
         }
         // ユニットのいるマスなら、ユニットを狙うかマスを狙うかを選ばせる

@@ -31,7 +31,60 @@ import type {
 } from './battleTypes';
 
 /** 状態変化の並び（表示や処理は、いつもこの順で行う） */
-export const STATUS_IDS: readonly StatusId[] = ['protect', 'slow', 'silence'];
+export const STATUS_IDS: readonly StatusId[] = [
+  'protect',
+  'haste',
+  'slow',
+  'silence',
+  'attackDown',
+  'magicDown',
+  'speedDown',
+  'maxHpDown',
+  'blind',
+  'stop',
+];
+
+/** 能力値を割合で変える状態変化と、変える能力値（フェーズ2-6） */
+const STAT_STATUSES = [
+  ['attackDown', 'attack'],
+  ['magicDown', 'magic'],
+  ['speedDown', 'speed'],
+  ['haste', 'speed'],
+  ['maxHpDown', 'maxHp'],
+] as const;
+
+/**
+ * 能力値に、付いている状態変化（攻撃力低下・魔力低下・素早さ低下・最大 HP 低下・加速）を反映する（フェーズ2-6）。
+ * 倍率を掛けて切り捨てる。素早さと最大 HP は最低 1。素早さ低下と加速が両方付いていれば、両方を順に掛ける
+ */
+export function applyStatusStats(stats: UnitStats, statuses: readonly StatusState[], rules: BattleRules): UnitStats {
+  let result = stats;
+  for (const [id, stat] of STAT_STATUSES) {
+    if (!statuses.some((s) => s.id === id && s.turns > 0)) continue;
+    const min = stat === 'speed' || stat === 'maxHp' ? 1 : 0;
+    result = { ...result, [stat]: Math.max(min, Math.floor((result[stat] * rules.status[id].percent) / 100)) };
+  }
+  return result;
+}
+
+/** 目くらましで下がる、武器による攻撃の命中率（付いていなければ 0） */
+export function blindPenalty(unit: Pick<UnitState, 'statuses'>, rules: BattleRules): number {
+  return hasStatus(unit, 'blind') ? rules.status.blind.hitPenalty : 0;
+}
+
+/** 「踏みとどまる」で、HP が 0 になるダメージを HP 1 で耐えられるか（付けていて、この戦闘でまだ使っていない） */
+export function canEndure(unit: Pick<UnitState, 'passives' | 'endureUsed'>): boolean {
+  return passiveEffect(unit, 'endure') !== undefined && !unit.endureUsed;
+}
+
+/**
+ * 受けるダメージ（HP まで）を、「踏みとどまる」で耐える場合に直す。damage が HP 以上で、耐えられるなら HP 1 を残す
+ */
+export function enduredDamage(unit: Pick<UnitState, 'passives' | 'endureUsed' | 'hp'>, damage: number): { damage: number; endured: boolean } {
+  const d = Math.min(damage, unit.hp);
+  if (d >= unit.hp && unit.hp > 0 && canEndure(unit)) return { damage: unit.hp - 1, endured: true };
+  return { damage: d, endured: false };
+}
 
 /** 付いている状態変化の残りの手番数（付いていなければ 0） */
 export function statusTurns(unit: Pick<UnitState, 'statuses'>, id: StatusId): number {

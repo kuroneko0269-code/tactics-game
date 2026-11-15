@@ -10,8 +10,17 @@
  * - 突き飛ばし: 当たった相手を1マス押し出す。押し出した先が低ければ落下ダメージ、押し出せなければ追加のダメージ。
  * - 反撃: 隣接するマスから近接攻撃を受けて生き残った相手が「反撃」を付けていれば、通常攻撃で反撃する。
  */
-import type { AttackProfile, BattleRules, BattleState, StatusId, StrikeDefinition, UnitState, WeaponType } from './battleTypes';
-import { chargingPercentOf, damageTaken, hasStatus, passiveEffect, passiveIdOf } from './effects';
+import type {
+  AttackProfile,
+  BattleRules,
+  BattleState,
+  StatusId,
+  StrikeDefinition,
+  UnitState,
+  WeaponRequirement,
+  WeaponType,
+} from './battleTypes';
+import { blindPenalty, chargingPercentOf, damageTaken, enduredDamage, hasStatus, passiveEffect, passiveIdOf } from './effects';
 import { directionToward, manhattan, relativeSide, type Coord, type Direction, type RelativeSide } from './geometry';
 import { getTile, type BattleMap } from './map';
 import { isAlive, isOnMap } from './movement';
@@ -74,9 +83,38 @@ export function computeDamage(
   return Math.max(rules.minimumDamage, Math.floor((withAbility * chargingPercent) / 100));
 }
 
-/** 武器の種類が合っていて、そのアビリティを使えるか（必要な武器がなければ、いつでも使える） */
-export function weaponFits(weapons: readonly WeaponType[] | undefined, weapon: WeaponType | null): boolean {
-  return !weapons || (weapon !== null && weapons.includes(weapon));
+/**
+ * 武器の種類が合っていて、そのアビリティを使えるか（必要な武器がなければ、いつでも使える）。
+ * 'unarmed' は素手（武器の枠が空）の時に合う（フェーズ2-6）
+ */
+export function weaponFits(weapons: readonly WeaponRequirement[] | undefined, weapon: WeaponType | null): boolean {
+  if (!weapons) return true;
+  return weapon === null ? weapons.includes('unarmed') : weapons.includes(weapon);
+}
+
+/**
+ * 斬り分け（フェーズ2-6）: from から target の方向を正面として、正面のマスとその左右のマス（正面のマスの両隣）。
+ * 正面のマス、左、右の順。マップの外は含まない
+ */
+export function sweepTiles(state: BattleState, from: Coord, target: Coord): Coord[] {
+  const dx = Math.sign(target.x - from.x);
+  const dz = Math.sign(target.z - from.z);
+  const front = { x: from.x + dx, z: from.z + dz };
+  const tiles = [front, { x: front.x - dz, z: front.z + dx }, { x: front.x + dz, z: front.z - dx }];
+  return tiles.filter((t) => getTile(state.map, t.x, t.z));
+}
+
+/**
+ * 斬り分けで、選んだ相手のほかに巻き込む敵（正面の左右のマスにいる、立っている敵）。
+ * 高さの差が近接の届く範囲（届き方が近接でなければ 2）を超える敵は含まない
+ */
+export function sweepExtraTargets(state: BattleState, attacker: UnitState, from: Coord, target: UnitState): UnitState[] {
+  const maxDiff = attacker.attack.kind === 'melee' ? attacker.attack.maxHeightDiff : 2;
+  const h = heightAt(state.map, from);
+  return sweepTiles(state, from, target)
+    .slice(1)
+    .map((t) => state.units.find((u) => isAlive(u) && u.team !== attacker.team && u.x === t.x && u.z === t.z))
+    .filter((u): u is UnitState => u !== undefined && Math.abs(heightAt(state.map, u) - h) <= maxDiff);
 }
 
 /** ユニットが持っている技の定義。持っていなければエラー */
@@ -128,6 +166,21 @@ export interface AttackPreview {
   readonly interrupts: boolean;
   /** 相手が反撃する見込み（当たって相手が倒れなかった場合）。反撃しなければ undefined */
   readonly counter?: CounterPreview;
+  /** 自分の目くらましで下がった命中率（なければ 0。フェーズ2-6） */
+  readonly blindPenalty: number;
+  /** 当たると、相手が「踏みとどまる」で HP 1 で耐えるか（damage は耐えた後の値） */
+  readonly endures: boolean;
+  /** 斬り分けで、ほかに巻き込む敵の見込み（正面のマスの左、右の順） */
+  readonly sweep?: readonly SweepPreview[];
+}
+
+/** 斬り分けで巻き込む敵1体の見込み */
+export interface SweepPreview {
+  readonly unitId: string;
+  readonly side: RelativeSide;
+  readonly hitPercent: number;
+  readonly damage: number;
+  readonly endures: boolean;
 }
 
 /**
@@ -139,12 +192,13 @@ function weaponHit(
   target: UnitState,
   side: RelativeSide,
   strike: StrikeDefinition | undefined,
-): { hitPercent: number; evadePenalty: number; focusBonus: number } {
+): { hitPercent: number; evadePenalty: number; focusBonus: number; blindPenalty: number } {
   const focusBonus = passiveEffect(attacker, 'weaponHitBonus')?.bonus ?? 0;
   const evade = side === 'back' ? undefined : passiveEffect(target, 'evade');
   const evadePenalty = evade?.hitPenalty ?? 0;
-  const hit = rules.hitPercent[side] + (strike?.hitBonus ?? 0) + focusBonus - evadePenalty;
-  return { hitPercent: Math.max(0, Math.min(100, hit)), evadePenalty, focusBonus };
+  const blind = blindPenalty(attacker, rules);
+  const hit = rules.hitPercent[side] + (strike?.hitBonus ?? 0) + focusBonus - evadePenalty - blind;
+  return { hitPercent: Math.max(0, Math.min(100, hit)), evadePenalty, focusBonus, blindPenalty: blind };
 }
 
 /**
@@ -198,15 +252,23 @@ export function previewAttack(
   const protectPercent = hasStatus(target, 'protect') ? rules.status.protect.damageTakenPercent : 100;
   const hit = weaponHit(rules, attacker, target, side, strike);
   const raw = computeDamage(rules, attacker.stats.attack, side, heightPercent, 100, strike?.damagePercent ?? 100);
-  const damage = damageTaken(rules, target, raw);
+  // 「踏みとどまる」: HP が 0 になるダメージなら、HP 1 で耐える（1戦に1度）
+  const full = damageTaken(rules, target, raw);
+  const hitResult = enduredDamage(target, full);
+  const damage = hitResult.endured ? hitResult.damage : full;
   const attackerFacing = directionToward(from, target, attacker.facing);
   const adjacent = manhattan(from, target) === 1;
   const survives = target.hp - damage > 0;
   const interrupts = Boolean(strike?.knockback && adjacent && target.charging);
-  const knockback =
+  let knockback =
     strike?.knockback && adjacent && survives
       ? knockbackOutcome(state, attacker.id, from, { ...target, charging: null })
       : undefined;
+  // 押し出しの落下・追加のダメージも、まだ使っていなければ「踏みとどまる」で耐える
+  if (knockback && knockback.damage > 0) {
+    const kb = enduredDamage({ ...target, hp: target.hp - damage, endureUsed: target.endureUsed || hitResult.endured }, knockback.damage);
+    knockback = { ...knockback, damage: kb.damage };
+  }
   const after = target.hp - damage - (knockback?.damage ?? 0);
   // 反撃: 隣接するマスからの攻撃で、当たっても倒れず、押し出されずに隣に残り、通常攻撃が届くなら
   let counter: CounterPreview | undefined;
@@ -219,6 +281,13 @@ export function previewAttack(
       counter = { abilityId: counterId, hitPercent: p.hitPercent, damage: p.damage };
     }
   }
+  // 斬り分け: 正面の左右のマスの敵も、1体ずつ同じ計算で攻撃する（反撃はできない位置なので数えない）
+  const sweep = strike?.sweep
+    ? sweepExtraTargets(state, attacker, from, target).map((u): SweepPreview => {
+        const p = previewAttack(state, attacker, u, from, { ...strike, sweep: false }, { counter: true });
+        return { unitId: u.id, side: p.side, hitPercent: p.hitPercent, damage: p.damage, endures: p.endures };
+      })
+    : undefined;
   return {
     side,
     hitPercent: hit.hitPercent,
@@ -233,5 +302,8 @@ export function previewAttack(
     inflicts: strike?.inflicts,
     interrupts,
     counter,
+    blindPenalty: hit.blindPenalty,
+    endures: hitResult.endured,
+    ...(sweep ? { sweep } : {}),
   };
 }

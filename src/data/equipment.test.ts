@@ -50,6 +50,8 @@ describe('装備の定義（フェーズ2-4）', () => {
       archer: { maxHp: 50, attack: 11, maxMp: 0, magic: 0 },
       mage: { maxHp: 40, attack: 6, maxMp: 36, magic: 12 },
       healer: { maxHp: 45, attack: 6, maxMp: 40, magic: 12 },
+      // 時守（フェーズ2-6）: 戦士に近く、素早さが少し高い
+      timekeeper: { maxHp: 74, attack: 13, maxMp: 12, magic: 3 },
     };
     for (const u of initialRoster.units) {
       expect(equippedStats(u, initialRoster, catalog)).toMatchObject(before[u.jobId]!);
@@ -80,15 +82,16 @@ describe('装備の定義（フェーズ2-4）', () => {
     const tierOf = (id: string) => equipment.find((e) => e.id === id)!;
     const weaponsArmor = (list: string[]) => list.map(tierOf).filter((e) => e.slot !== 'accessory');
     const start = weaponsArmor(shopStock(shop, { trainingWins: {}, dungeonClears: {} }));
-    expect(start.filter((e) => e.tier === 1)).toHaveLength(6);
+    // 1段階目は、剣・弓・杖・短剣（フェーズ2-6）・鎧・軽装・ローブ
+    expect(start.filter((e) => e.tier === 1)).toHaveLength(7);
     expect(start.filter((e) => e.tier === 2).length).toBeGreaterThan(0);
     expect(start.filter((e) => e.tier === 2).length).toBeLessThan(6);
     expect(start.some((e) => e.tier === 3)).toBe(false);
     const cleared = weaponsArmor(shopStock(shop, { trainingWins: {}, dungeonClears: { ruins: 1 } }));
-    expect(cleared.filter((e) => e.tier === 2)).toHaveLength(6);
+    expect(cleared.filter((e) => e.tier === 2)).toHaveLength(7);
     expect(cleared.some((e) => e.tier === 3)).toBe(false);
     const won = weaponsArmor(shopStock(shop, { trainingWins: { normal: 1 }, dungeonClears: {} }));
-    expect(won.filter((e) => e.tier === 3)).toHaveLength(6);
+    expect(won.filter((e) => e.tier === 3)).toHaveLength(7);
   });
 
   it('お金の段階: 難しい戦闘ほど多くのゴールドを得る', () => {

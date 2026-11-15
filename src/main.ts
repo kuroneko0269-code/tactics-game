@@ -6,6 +6,8 @@ import {
   applyBattleResult,
   expToNext,
   findUnit,
+  jobProgress,
+  newlyUnlockedJobs,
   learnRefusal,
   validateRoster,
   type GameCatalog,
@@ -54,7 +56,7 @@ import { createRosterScreen } from './ui/rosterScreen';
 import { createShopScreen } from './ui/shopScreen';
 import { itemName } from './ui/equipmentText';
 import { showVersion } from './ui/version';
-import { TEXT } from './ui/text';
+import { TEXT, unitName } from './ui/text';
 import { createUnitLabels, type UnitLabels } from './ui/unitLabels';
 
 /**
@@ -250,6 +252,23 @@ function main(): void {
   };
 
   const jobOf = (id: string) => findUnit(roster, id).jobId;
+  /** before から after になって新しく就けるようになったジョブの知らせ（結果の画面に出す。フェーズ2-6） */
+  const unlockNotes = (before: Roster, after: Roster): string[] =>
+    after.units.flatMap((u) => {
+      const b = before.units.find((x) => x.id === u.id);
+      if (!b) return [];
+      return newlyUnlockedJobs(b, u, catalog, progressionRules).map((jobId) =>
+        TEXT.roster.unlockToast(unitName(u.id, u.jobId), TEXT.jobs[jobId] ?? jobId),
+      );
+    });
+  /** 戦闘中: そのユニットの jobId の JP の累計が jpTotal になった時に、新しく就けるようになったジョブ */
+  const unlockedInBattle = (unitId: string, jobId: string, jpTotal: number): string[] => {
+    const u = roster.units.find((x) => x.id === unitId);
+    if (!u) return [];
+    const p = jobProgress(u, jobId);
+    const after = { ...u, jobs: { ...u.jobs, [jobId]: { ...p, jpTotal: Math.max(p.jpTotal, jpTotal) } } };
+    return newlyUnlockedJobs(u, after, catalog, progressionRules);
+  };
   const canLearn = (id: string) => {
     const u = findUnit(roster, id);
     const job = catalog.jobs.find((j) => j.id === u.jobId)!;
@@ -280,6 +299,7 @@ function main(): void {
 
   /** 訓練戦が終わった: 経験値と JP、勝てばゴールドと戦利品を部隊に入れて保存し、結果の画面を出す */
   const finishBattle = (tierId: string, state: BattleState) => {
+    const before = roster;
     const result = applyBattleResult(roster, state, catalog, progressionRules);
     const spoils = takeSpoils(result.roster, site.tiers.find((t) => t.id === tierId)?.reward, state);
     if (result.report.victory) records = { ...records, trainingWins: recordTrainingWin(records.trainingWins, tierId) };
@@ -289,6 +309,7 @@ function main(): void {
       setScreen('result');
       showReportScreen(screenEl, result.report, jobOf, canLearn, [{ label: TEXT.report.toBase, onClick: showBase, primary: true }], {
         spoils: spoils.view,
+        highlights: unlockNotes(before, roster),
       });
     });
   };
@@ -311,6 +332,7 @@ function main(): void {
    */
   const finishDungeonBattle = (state: BattleState) => {
     const played = dungeonState.run!.battle;
+    const before = roster;
     const result = applyBattleResult(roster, state, catalog, progressionRules);
     const progress = finishRunBattle(dungeonState, ruinsDungeon, result.report.victory);
     const cleared = progress.outcome.kind === 'cleared';
@@ -323,6 +345,7 @@ function main(): void {
     suspended = null;
     persist();
     const outcome = progress.outcome;
+    const unlocks = unlockNotes(before, roster);
     const t = battleTitle(played);
     const dungeonName = TEXT.dungeons[ruinsDungeon.id] ?? ruinsDungeon.id;
     const show = () => {
@@ -335,6 +358,7 @@ function main(): void {
           highlights: [
             ...(outcome.firstClear ? [TEXT.report.firstClear] : []),
             TEXT.report.reward(clearRewardJp(ruinsDungeon, outcome.firstClear)),
+            ...unlocks,
           ],
           notes: [],
           spoils: spoils.view,
@@ -351,7 +375,7 @@ function main(): void {
             { label: TEXT.report.editRoster, onClick: () => showRoster(show) },
             { label: TEXT.report.suspend, onClick: showBase },
           ],
-          { heading, notes: [TEXT.report.healed], spoils: spoils.view },
+          { heading, notes: [TEXT.report.healed], spoils: spoils.view, highlights: unlocks },
         );
       } else {
         showReportScreen(
@@ -371,7 +395,7 @@ function main(): void {
               },
             },
           ],
-          { heading, notes: [TEXT.report.lostNote], spoils: spoils.view },
+          { heading, notes: [TEXT.report.lostNote], spoils: spoils.view, highlights: unlocks },
         );
       }
     };
@@ -414,6 +438,7 @@ function main(): void {
     if (!s) return showBase();
     const lost: BattleState = { ...s.state, winner: 'enemy', turn: null };
     const result = applyBattleResult(roster, lost, catalog, progressionRules);
+    const unlocks = unlockNotes(roster, result.roster);
     roster = result.roster;
     if (s.origin.kind === 'dungeon') dungeonState = retreat(dungeonState);
     suspended = null;
@@ -423,6 +448,7 @@ function main(): void {
     showReportScreen(screenEl, result.report, jobOf, canLearn, [{ label: TEXT.report.toBase, onClick: showBase, primary: true }], {
       heading: suspendedTitle(s.origin),
       title: TEXT.report.retreatTitle,
+      highlights: unlocks,
       notes: [s.origin.kind === 'dungeon' ? TEXT.report.retreatDungeonNote : TEXT.report.retreatNote],
     });
   };
@@ -517,6 +543,7 @@ function main(): void {
       ai: aiConfig,
       onFinished,
       onStateChanged,
+      unlockedJobs: unlockedInBattle,
     });
   };
 

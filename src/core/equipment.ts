@@ -67,7 +67,13 @@ export function equippedDefinitions(unit: RosterUnit, roster: Roster, catalog: P
 
 /** ユニットの能力値（ジョブの基本値 + 成長値 + 装備。受動的なアビリティは戦闘の開始時に反映するので含めない） */
 export function equippedStats(unit: RosterUnit, roster: Roster, catalog: Catalog): UnitStats {
-  return addEquipmentStats(unitStats(unit, catalog), equippedDefinitions(unit, roster, catalog));
+  const stats = addEquipmentStats(unitStats(unit, catalog), equippedDefinitions(unit, roster, catalog));
+  // 素手（武器の枠が空）の時のジョブの補正（格闘家。フェーズ2-6）
+  const bonus = unit.equipment.weapon === null ? findJob(catalog, unit.jobId).unarmedBonus : undefined;
+  if (!bonus) return stats;
+  const result: Record<keyof UnitStats, number> = { ...stats };
+  for (const key of Object.keys(bonus) as (keyof UnitStats)[]) result[key] = Math.max(0, stats[key] + (bonus[key] ?? 0));
+  return result;
 }
 
 /** 装備の枠を変えたユニット */

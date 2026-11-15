@@ -124,7 +124,7 @@ describe('戦闘の途中保存と再開（フェーズ2-5）', () => {
   it('部隊やダンジョンの進み具合と合わない途中の戦闘は、読み込む時に捨てる（部隊はそのまま）', () => {
     const half = play(start, (s) => s.turnNumber > 3).state;
     // 部隊のユニットのジョブが、戦闘の中と違う
-    const changed = replaceUnit(initialRoster, { ...findUnit(initialRoster, 'hero-1'), jobId: 'archer', equipment: { weapon: null, armor: null, accessory: null } });
+    const changed = replaceUnit(initialRoster, { ...findUnit(initialRoster, 'touma'), jobId: 'archer', equipment: { weapon: null, armor: null, accessory: null } });
     const store = createSaveStore(memory(), catalog, progressionRules, saveMigrationContext);
     store.save({ roster: changed, dungeon: EMPTY_DUNGEON_STATE, records: EMPTY_RECORDS, battle: { origin: { kind: 'training', tierId: 'easy' }, state: half } });
     expect(store.load()).toMatchObject({ roster: changed, battle: null });

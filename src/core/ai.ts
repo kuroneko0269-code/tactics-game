@@ -86,6 +86,8 @@ export interface AiConfig {
    * 届く位置からは、魔法を詠唱中の相手と回復魔法を使う相手だけを狙う。省くと 0
    */
   readonly sealMaxDanger?: number;
+  /** 引き戻し（フェーズ2-6）を使う目安: 味方の HP をこの量以上戻せる時に使う。省くと使わない */
+  readonly rewindMinHp?: number;
 }
 
 /** 陣営ごとの AI の設定 */
@@ -263,7 +265,12 @@ function withBestStrike(state: BattleState, unit: UnitState, plan: AttackPlan, c
     const p = previewAttack(state, unit, target, plan.position, strike);
     const slow =
       strike?.inflicts === 'slow' && !hasStatus(target, 'slow') && !statusBlocker(target, 'slow') ? (config?.slowValue ?? 0) : 0;
-    return p.hitPercent * (Math.min(p.damage + (p.knockback?.damage ?? 0), target.hp) + slow);
+    // 斬り分けは、巻き込む敵の分も足す（フェーズ2-6）
+    const extra = (p.sweep ?? []).reduce((sum, x) => {
+      const u = state.units.find((v) => v.id === x.unitId)!;
+      return sum + x.hitPercent * Math.min(x.damage, u.hp);
+    }, 0);
+    return p.hitPercent * (Math.min(p.damage + (p.knockback?.damage ?? 0), target.hp) + slow) + extra;
   };
   let best: { abilityId?: string; value: number } = { value: expected() };
   for (const strike of unit.strikes) {
@@ -455,6 +462,37 @@ export function chooseProtectSpell(
         const score = [-allies, danger, target.kind === 'unit' ? 0 : 1, pos.steps, tieBreak(state, pos.x, pos.z, center.x, center.z)];
         if (!best || compareScores(score, best.score) < 0) {
           best = { plan: { position: { x: pos.x, z: pos.z }, spellId: spell.id, target }, score };
+        }
+      }
+    }
+  }
+  return best?.plan;
+}
+
+/**
+ * 引き戻し（時守の業。フェーズ2-6）を使う位置と相手を選ぶ。戻せる HP が config.rewindMinHp 以上の味方がいる時だけ。
+ * 戻せる HP が大きい → 攻撃の届かない位置 → 移動の少ない位置 の順
+ */
+export function chooseRewind(state: BattleState, unit: UnitState, canMove: boolean, config: AiConfig): SpellPlan | undefined {
+  const min = config.rewindMinHp;
+  if (min === undefined) return undefined;
+  const spells = unit.spells.filter((s) => s.effect === 'rewind' && canCast(unit, s));
+  if (spells.length === 0) return undefined;
+  const threat = threatMap(state, unit.team);
+  let best: { plan: SpellPlan; score: number[] } | undefined;
+  for (const pos of candidatePositions(state, unit, canMove)) {
+    const self = { ...unit, x: pos.x, z: pos.z };
+    const danger = threat.get(keyOf(state, pos)) ?? 0;
+    for (const spell of spells) {
+      for (const ally of state.units) {
+        if (ally.id === unit.id || ally.team !== unit.team || !isAlive(ally)) continue;
+        const d = manhattan(pos, ally);
+        if (d < (spell.minRange ?? 0) || d > spell.range) continue;
+        const gain = previewSpellAt(state, unit, spell, ally, self).results.find((r) => r.unitId === ally.id)?.amount ?? 0;
+        if (gain < min) continue;
+        const score = [-gain, danger, pos.steps, tieBreak(state, pos.x, pos.z, ally.x, ally.z)];
+        if (!best || compareScores(score, best.score) < 0) {
+          best = { plan: { position: { x: pos.x, z: pos.z }, spellId: spell.id, target: { kind: 'unit', unitId: ally.id } }, score };
         }
       }
     }
@@ -704,6 +742,8 @@ function choosePlan(state: BattleState, unit: UnitState, canMove: boolean, confi
   if (spell && spell.net >= 2) return { kind: 'cast', ...spell.plan };
   if (seal) return { kind: 'cast', ...seal };
   if (spell) return { kind: 'cast', ...spell.plan };
+  const rewind = chooseRewind(state, unit, canMove, config);
+  if (rewind) return { kind: 'cast', ...rewind };
   const knock = chooseKnockback(state, unit, canMove);
   if (knock) return { kind: 'attack', ...knock };
   const attack = chooseAttack(state, unit, canMove, false, config);

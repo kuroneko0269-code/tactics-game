@@ -5,7 +5,7 @@ import { passives } from '../data/passives';
 import { jobs } from '../data/jobs';
 import { progressionRules } from '../data/progression';
 import { initialRoster } from '../data/roster';
-import { findUnit, gainJp, learnAbility, replaceUnit, setPassive, validateRoster } from '../core/progression';
+import { changeJob, findUnit, gainJp, learnAbility, replaceUnit, setPassive, validateRoster } from '../core/progression';
 import { changeJobWithEquipment, equippedDefinitions } from '../core/equipment';
 import { EMPTY_DUNGEON_STATE } from '../core/dungeon';
 import { EMPTY_RECORDS } from '../core/saveData';
@@ -28,21 +28,31 @@ const memory = (): SaveBackend & { text: string | null } => {
 const storeOf = (backend: SaveBackend, onFail?: (r: string) => void) =>
   createSaveStore(backend, catalog, progressionRules, saveMigrationContext, onFail);
 
-/** 版 2 までの部隊のユニット（装備の枠がない） */
-const oldUnits = initialRoster.units.map((u) => Object.fromEntries(Object.entries(u).filter(([key]) => key !== 'equipment')));
+/**
+ * 版 4 までの最初の部隊（ユニットの id は hero-1〜5、トウマは戦士）。フェーズ2-6 で id を人物の id にし、トウマを時守から始めるようにした
+ */
+const legacyIds = ['hero-1', 'hero-2', 'hero-3', 'hero-4', 'hero-5'];
+const legacyTouma = { ...initialRoster.units[0]!, jobId: 'warrior', jobs: { warrior: { jp: 0, jpTotal: 0, learned: [] } } };
+/** 版 4 までの最初の部隊を、版 5 に直した形（id は人物の id。トウマは戦士のまま） */
+const migratedInitialRoster = { ...initialRoster, units: [legacyTouma, ...initialRoster.units.slice(1)] };
+/** 版 2 までの部隊のユニット（装備の枠がない。id は hero-1〜5） */
+const oldUnits: Record<string, unknown>[] = migratedInitialRoster.units.map((u, i) => ({
+  ...Object.fromEntries(Object.entries(u).filter(([key]) => key !== 'equipment')),
+  id: legacyIds[i]!,
+}));
 
 describe('セーブの出入口', () => {
   it('部隊（所持金・所持品・装備を含む）とダンジョンの記録・訓練戦の記録を保存して読み込むと、元に戻る（版の番号も保存される）', () => {
     const backend = memory();
     const store = storeOf(backend);
     expect(store.load()).toBeUndefined();
-    let u = gainJp(findUnit(initialRoster, 'hero-1'), 'warrior', 300);
+    let u = gainJp(findUnit(initialRoster, 'touma'), 'warrior', 300);
     u = learnAbility(u, 'warrior', 'powerStrike', catalog, progressionRules);
-    const roster = changeJobWithEquipment(replaceUnit(initialRoster, u), 'hero-1', 'archer', catalog, progressionRules).roster;
+    const roster = changeJobWithEquipment(replaceUnit(initialRoster, u), 'touma', 'archer', catalog, progressionRules).roster;
     const dungeon = { run: { dungeonId: 'ruins', battle: 2 }, clears: { ruins: 1 } };
     const records = { trainingWins: { easy: 3, normal: 1 } };
     store.save({ roster: { ...roster, gold: 1234 }, dungeon, records, battle: null });
-    expect(JSON.parse(backend.text!).version).toBe(4);
+    expect(JSON.parse(backend.text!).version).toBe(5);
     expect(store.load()).toEqual({ roster: { ...roster, gold: 1234 }, dungeon, records, battle: null });
     store.clear();
     expect(store.load()).toBeUndefined();
@@ -65,7 +75,7 @@ describe('セーブの出入口', () => {
     expect(reasons).toEqual(['invalidJson', 'invalidRoster', 'newerVersion', 'invalidRoster']);
   });
 
-  it('フェーズ2-1a のセーブデータ（版 1）は、版 4 に直して読み込めて、育てた状態が残り、今のジョブの最初の装備が配られる', () => {
+  it('フェーズ2-1a のセーブデータ（版 1）は、版 5 に直して読み込めて（ユニットの id は人物の id になる）、育てた状態が残り、今のジョブの最初の装備が配られる', () => {
     // 2-1a の版が保存した形そのまま（リアクション・サポート・ムーブの枠は空。装備の枠はない）
     const saved21a = {
       version: 1,
@@ -98,7 +108,7 @@ describe('セーブの出入口', () => {
     expect(loaded.roster.gold).toBe(startingGold);
     expect(validateRoster(loaded.roster, catalog, progressionRules)).toEqual([]);
     // 育てた状態はそのまま
-    const hero = findUnit(loaded.roster, 'hero-1');
+    const hero = findUnit(loaded.roster, 'touma');
     expect(hero).toMatchObject({ jobId: 'archer', level: 12, exp: 31, growth: saved21a.roster.units[0]!.growth });
     expect(hero.jobs).toEqual(saved21a.roster.units[0]!.jobs);
     // 今のジョブ（弓使い）の最初の装備を付けている。ほかの4人も、それぞれのジョブの物
@@ -115,8 +125,8 @@ describe('セーブの出入口', () => {
     let u = learnAbility(hero, 'warrior', 'counter', catalog, progressionRules);
     u = setPassive(u, 'reaction', 'counter', catalog);
     store.save({ roster: replaceUnit(loaded.roster, u), dungeon: loaded.dungeon, records: loaded.records, battle: null });
-    expect(JSON.parse(backend.text!).version).toBe(4);
-    expect(findUnit(store.load()!.roster, 'hero-1').slots).toEqual({ secondary: 'warrior', reaction: 'counter', support: null, movement: null });
+    expect(JSON.parse(backend.text!).version).toBe(5);
+    expect(findUnit(store.load()!.roster, 'touma').slots).toEqual({ secondary: 'warrior', reaction: 'counter', support: null, movement: null });
   });
 
   it('版 2 のデータ（ダンジョンの挑戦中・クリアの記録あり）は、記録を残したまま版 3 に直す。最初の部隊なら、はじめからの部隊と同じになる', () => {
@@ -129,8 +139,13 @@ describe('セーブの出入口', () => {
     backend.text = JSON.stringify(v2);
     const loaded = storeOf(backend).load()!;
     expect(loaded.dungeon).toEqual(v2.dungeon);
-    expect(loaded.roster).toEqual(initialRoster);
+    expect(loaded.roster).toEqual(migratedInitialRoster);
     expect(loaded.battle).toBeNull();
+    // 古いセーブデータのトウマ（戦士）も、専用ジョブの時守に就ける（就くと斬り分けを覚える）
+    const touma = changeJob(findUnit(loaded.roster, 'touma'), 'timekeeper', catalog, progressionRules);
+    expect(touma.jobs.timekeeper?.learned).toEqual(['sweep']);
+    // ほかの人物は、トウマの専用ジョブに就けない
+    expect(() => changeJob(findUnit(loaded.roster, 'gord'), 'timekeeper', catalog, progressionRules)).toThrow();
   });
 
   it('版 3 のデータ（フェーズ2-4）は、育てた状態と記録をそのまま残し、「途中の戦闘なし」として版 4 に直す', () => {

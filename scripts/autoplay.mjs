@@ -111,6 +111,7 @@ async function main() {
   core.sortie = await server.ssrLoadModule('/src/core/sortie.ts');
   core.equipment = await server.ssrLoadModule('/src/core/equipment.ts');
   core.shop = await server.ssrLoadModule('/src/core/shop.ts');
+  core.turnOrder = await server.ssrLoadModule('/src/core/turnOrder.ts');
   const abilities = await server.ssrLoadModule('/src/data/abilities.ts');
   const equipData = await server.ssrLoadModule('/src/data/equipment.ts');
   const data = {
@@ -255,7 +256,7 @@ async function main() {
         );
         console.log(
           `  育成: 戦闘中のレベルアップの表示 ✔、結果の画面 ✔、編成のタブ ${r.tabs}回・習得 ${r.learned}回・ジョブチェンジ ${r.jobChanges}回・副コマンド ${r.subChanges}回、再び出撃 ✔、` +
-            `強打 ✔、突き飛ばし ${r.knockbacks}回、反撃 ${r.counters}回、受動的なアビリティの習得と付け替え ${r.passives}回、読み込み直し ✔、はじめから ✔`,
+            `強打 ✔、突き飛ばし ${r.knockbacks}回、時守の業 ${r.timekeeper}回、反撃 ${r.counters}回、受動的なアビリティの習得と付け替え ${r.passives}回、読み込み直し ✔、はじめから ✔`,
         );
         console.log(
           `  勝敗条件・イベント・罠: 配置の入れ替え ${r.swaps}回、罠の発動 ${r.traps}回、増援の出現 ${r.appeared}体、到達で勝利 ${r.reached}回`,
@@ -334,6 +335,7 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
     jobChanges: 0,
     subChanges: 0,
     knockbacks: 0,
+    timekeeper: 0,
     counters: 0,
     passives: 0,
     swaps: 0,
@@ -953,9 +955,9 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
       check(names.every((n) => equipText.includes(n)), `敵の情報の欄に装備が出ていません（${equipText} / ${names}）`);
       await screenshot('00-deploy-enemy-info');
       // 2人を入れ替えて、もう一度入れ替えて元に戻す（core だけの計算と同じ配置で戦うため）
-      await swapOnDeploy('hero-1', 'hero-3');
+      await swapOnDeploy('touma', 'kiri');
       await screenshot('00-deploy-swapped');
-      await swapOnDeploy('hero-3', 'hero-1');
+      await swapOnDeploy('kiri', 'touma');
     }
     await pressButton(text.deploy.start);
     await waitFor('戦闘の開始', () => window.__tactics.screen() === 'battle' && window.__tactics.state() !== null);
@@ -1598,6 +1600,37 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   stats.counters++;
   check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
 
+  // ---- 時守の4つの行動（フェーズ2-6）----
+  // トウマ（時守）が、敵の戦士2体（正面と、その左のマス）の前で手番を迎えた場面を用意して、
+  // 斬り分け・引き戻し・門渡り・時送りを1つずつ、メニュー → 相手 → 予測 → 確定 で行い、結果を core の計算と比べる
+  await waitForInput();
+  const tk = timekeeperDrill(core);
+  for (const d of tk.drills) {
+    await page.evaluate((r) => window.__tactics.load(r), tk.start);
+    await waitFor('時守の手番', (id) => window.__tactics.mode() === 'main' && window.__tactics.state().turn?.unitId === id, tk.unitId);
+    await waitForInput();
+    const me = (await getState()).units.find((u) => u.id === tk.unitId);
+    await openCommandOf(me, d.abilityId);
+    await pressButton(text.abilities[d.abilityId]);
+    await waitFor(`「${d.abilityId}」の相手を選ぶ`, (id) => {
+      const m = window.__tactics.modeDetail();
+      return (m.kind === 'targeting' && m.abilityId === id) || (m.kind === 'spellTarget' && m.spellId === id);
+    }, d.abilityId);
+    await tapUnit(d.targetId);
+    const m = await getMode();
+    check(m.kind === 'confirm' || (m.kind === 'spellConfirm' && m.target.kind === 'unit' && m.target.unitId === d.targetId), `「${d.abilityId}」の相手の選択が違います（${JSON.stringify(m)}）`);
+    const previewText = await page.locator('.preview').textContent();
+    for (const want of d.previewIncludes) check(previewText.includes(want), `「${d.abilityId}」の予測に「${want}」がありません（${previewText}）`);
+    check(!(await overlaps('.preview', '.actions')), `「${d.abilityId}」の予測が行動のボタンに重なっています`);
+    await screenshot(`timekeeper-${d.abilityId}`);
+    await pressButton('確定');
+    await waitFor(`「${d.abilityId}」の後`, () => !['busy', 'confirm', 'spellConfirm'].includes(window.__tactics.mode()));
+    const pick = (st) => JSON.stringify(st.units.filter((u) => d.compare.includes(u.id)).map((u) => [u.id, u.x, u.z, u.hp, u.ct]));
+    check(pick(await getState()) === pick(d.expected), `「${d.abilityId}」の結果が core の計算と違います（画面 ${pick(await getState())} / core ${pick(d.expected)}）`);
+    stats.timekeeper++;
+  }
+  check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
+
   // ---- 詠唱の中断 ----
   // 詠唱中の味方の魔道士に手番が来た場面を用意して、移動しようとすると確認が出ること、
   // 「やめない」で何も変わらないこと、「詠唱をやめる」で中断されて移動することを確かめる
@@ -2168,7 +2201,7 @@ function playerPolicy(core) {
 function interruptDrill(core) {
   const { spells } = core.data;
   const base = core.start(core.data.roster, 'easy', SEED + 1).state;
-  const unitId = 'hero-4';
+  const unitId = 'fen';
   const fire = spells.find((s) => s.id === 'fire');
   const units = base.units.map((u) =>
     u.id === unitId
@@ -2228,23 +2261,23 @@ function rosterPlan(core, finalState) {
       if (P.learnRefusal(u, job.id, a.id, catalog, rules) === null) candidates.push({ unitId: u.id, jobId: job.id, abilityId: a.id });
     }
   }
-  learn = candidates.find((c) => c.abilityId === 'powerStrike' && c.unitId === 'hero-1') ?? candidates.find((c) => c.abilityId === 'powerStrike') ?? candidates[0];
+  learn = candidates.find((c) => c.abilityId === 'powerStrike' && c.unitId === 'gord') ?? candidates.find((c) => c.abilityId === 'powerStrike') ?? candidates[0];
   let roster = afterBuy;
   if (learn) roster = P.replaceUnit(roster, P.learnAbility(P.findUnit(roster, learn.unitId), learn.jobId, learn.abilityId, catalog, rules));
   // ジョブを変えて戻る（魔道士になると剣と鎧が外れ、戦士に戻っても外れたまま）
-  const jobUnitId = 'hero-2';
+  const jobUnitId = 'gord';
   const homeJobId = P.findUnit(roster, jobUnitId).jobId;
   const subJobId = 'mage';
   const toSub = E.changeJobWithEquipment(roster, jobUnitId, subJobId, catalog, rules);
   const removed = toSub.removed.map((i) => i.itemId);
   roster = E.changeJobWithEquipment(toSub.roster, jobUnitId, homeJobId, catalog, rules).roster;
-  // 装備のタブ: 買った剣を hero-1 の武器の枠に付ける。hero-2 は「おまかせ」
-  const equipUnitId = 'hero-1';
+  // 装備のタブ: 買った剣をトウマ（時守）の武器の枠に付ける。ゴード（戦士）は「おまかせ」
+  const equipUnitId = 'touma';
   roster = E.equipItem(roster, equipUnitId, 'weapon', bought.item.uid, catalog);
   roster = E.autoEquip(roster, jobUnitId, catalog, core.data.equip.autoEquipWeights);
   roster = P.replaceUnit(roster, P.setSecondary(P.findUnit(roster, jobUnitId), subJobId, catalog));
   const afterEdit = roster;
-  // 売る: だれも付けていない旅人の剣。装備中の物（hero-1 の買った剣）は売れない
+  // 売る: だれも付けていない旅人の剣。装備中の物（トウマの買った剣）は売れない
   const free = afterEdit.items.find((i) => !E.wearerOf(afterEdit, i.uid) && i.itemId === 'sword-1');
   if (!free) throw new Error('売る物がありません');
   const afterSell = S.sellItem(afterEdit, free.uid, catalog, core.data.equip.shop);
@@ -2305,15 +2338,15 @@ function strikeDrill(core, plan) {
 }
 
 /**
- * 戦闘不能と蘇生の場面（フェーズ2-5）。蘇生を覚えた治癒師（hero-5）の手番。
- * 隣に戦闘不能の味方（hero-1。カウント 2）、少し先に戦闘不能の敵（e-archer-1。カウント 1、CT 99 なので、すぐ退場する）。
+ * 戦闘不能と蘇生の場面（フェーズ2-5）。蘇生を覚えた治癒師（ノノ）の手番。
+ * 隣に戦闘不能の味方（トウマ。カウント 2）、少し先に戦闘不能の敵（e-archer-1。カウント 1、CT 99 なので、すぐ退場する）。
  * finish(facing) は、蘇生を指定して待機し、向きを決めて手番を終えた後の状態（core だけで計算。蘇生は次の手番までに発動する）。
  */
 function knockoutDrill(core) {
   const P = core.progression;
   const { catalog, progression: rules } = core.data;
-  const unitId = 'hero-5';
-  const downId = 'hero-1';
+  const unitId = 'nono';
+  const downId = 'touma';
   const enemyId = 'e-archer-1';
   const healer = P.findUnit(core.data.roster, unitId);
   const learned = { ...healer, jobs: { ...healer.jobs, healer: { ...healer.jobs.healer, learned: [...healer.jobs.healer.learned, 'revive'] } } };
@@ -2378,7 +2411,7 @@ function scenarioDrills(core) {
     core.data.strikes,
     core.data.passives,
   ).state;
-  const unitId = 'hero-1';
+  const unitId = 'touma';
   const start = (state) => ({ state, events: [{ type: 'turnStarted', unitId, turnNumber: state.turnNumber }] });
   // 罠
   const trapTo = site.traps.find((t) => t.kind === 'mud');
@@ -2412,7 +2445,7 @@ function scenarioDrills(core) {
 function knockbackDrill(core) {
   const P = core.progression;
   const { catalog, progression: rules } = core.data;
-  const unitId = 'hero-1';
+  const unitId = 'gord';
   const u = P.learnAbility(P.gainJp(P.findUnit(core.data.roster, unitId), 'warrior', 1000), 'warrior', 'knockback', catalog, rules);
   const base = core.start(P.replaceUnit(core.data.roster, u), 'easy', SEED + 3).state;
   const targetId = 'e-warrior-1';
@@ -2437,12 +2470,87 @@ function knockbackDrill(core) {
 }
 
 /**
+ * 時守の4つの行動を確かめる場面（フェーズ2-6）。4つの業を覚えたトウマ（時守）が (4,7) で北を向き、
+ * 正面 (4,6) に敵の戦士A、その左 (3,6) に敵の戦士B（斬り分けで巻き込む）、2マス東 (6,7) に HP の減ったゴード
+ * （前回の手番の始めは満タン。引き戻し・門渡りの相手）、3マス北 (4,4) に敵の弓使い（時送りの相手）がいる。
+ * 予測に出るはずの文言と、core だけで計算した結果を、行動ごとに返す。
+ */
+function timekeeperDrill(core) {
+  const P = core.progression;
+  const { catalog, progression: rules } = core.data;
+  const unitId = 'touma';
+  const t0 = P.findUnit(core.data.roster, unitId);
+  const tp = P.jobProgress(t0, 'timekeeper');
+  const touma = { ...t0, jobId: 'timekeeper', jobs: { ...t0.jobs, timekeeper: { ...tp, jpTotal: 1000, learned: ['sweep', 'rewind', 'gateSwap', 'timeDelay'] } } };
+  const roster = P.replaceUnit(core.data.roster, touma);
+  if (P.validateRoster(roster, catalog, rules).length > 0) throw new Error('時守の場面の部隊が正しくありません');
+  const base = core.start(roster, 'easy', SEED + 7).state;
+  const allyId = 'gord';
+  const gord = base.units.find((u) => u.id === allyId);
+  const state = drillState(base, unitId, {
+    [unitId]: { x: 4, z: 7, facing: 'north' },
+    'e-warrior-1': { x: 4, z: 6, facing: 'south' },
+    'e-warrior-2': { x: 3, z: 6, facing: 'south' },
+    [allyId]: { x: 6, z: 7, hp: gord.hp - 25, turnStartHp: gord.hp },
+    'e-archer-1': { x: 4, z: 4, ct: 80 },
+  });
+  const spots = state.units.map((u) => `${u.x},${u.z}`);
+  if (new Set(spots).size !== spots.length) throw new Error('時守の場面で、ユニットが同じマスにいます');
+  const act = (action) => core.battle.applyAction(state, action).state;
+  const me = state.units.find((u) => u.id === unitId);
+  const sweep = core.combat.previewAttack(state, me, state.units.find((u) => u.id === 'e-warrior-1'), me, me.strikes.find((s) => s.id === 'sweep'));
+  if (sweep.sweep?.length !== 1) throw new Error('斬り分けの場面が想定と違います');
+  const t = core.data.text;
+  const name = (id) => t.unitNames[id] ?? id;
+  // 時送り: 使う前（この手番で行動したものとして）と使った後の行動順で、相手の手番が何番目か
+  const position = (st, id) => core.turnOrder.predictTimeline(st, 30).findIndex((e) => e.kind === 'turn' && e.unitId === id) + 1;
+  const delayAction = { type: 'cast', spellId: 'timeDelay', target: { kind: 'unit', unitId: 'e-archer-1' } };
+  const delayed = act(delayAction);
+  const ct = state.units.find((u) => u.id === 'e-archer-1').ct;
+  const delayCt = Math.min(ct, core.data.spells.find((s) => s.id === 'timeDelay').ctDelay);
+  return {
+    unitId,
+    start: { state, events: [{ type: 'turnStarted', unitId, turnNumber: 1 }] },
+    drills: [
+      {
+        abilityId: 'sweep',
+        targetId: 'e-warrior-1',
+        previewIncludes: [t.preview.sweepLabel, name('e-warrior-2')],
+        expected: act({ type: 'attack', targetId: 'e-warrior-1', abilityId: 'sweep' }),
+        compare: ['e-warrior-1', 'e-warrior-2', unitId],
+      },
+      {
+        abilityId: 'rewind',
+        targetId: allyId,
+        previewIncludes: [t.spellPreview.rewind(gord.hp - 25, gord.hp), t.spellPreview.instant],
+        expected: act({ type: 'cast', spellId: 'rewind', target: { kind: 'unit', unitId: allyId } }),
+        compare: [allyId, unitId],
+      },
+      {
+        abilityId: 'gateSwap',
+        targetId: allyId,
+        previewIncludes: [t.spellPreview.swap],
+        expected: act({ type: 'cast', spellId: 'gateSwap', target: { kind: 'unit', unitId: allyId } }),
+        compare: [allyId, unitId],
+      },
+      {
+        abilityId: 'timeDelay',
+        targetId: 'e-archer-1',
+        previewIncludes: [t.spellPreview.delay(delayCt, position({ ...state, turn: { ...state.turn, acted: true } }, 'e-archer-1'), position(delayed, 'e-archer-1'))],
+        expected: delayed,
+        compare: ['e-archer-1', unitId],
+      },
+    ],
+  };
+}
+
+/**
  * 反撃を確かめる場面。「反撃」を付けた敵の戦士の西隣で、味方の戦士が手番を迎える。
  * 攻撃と反撃の両方が当たる乱数の状態を選ぶ（反撃は当たって生き残った時だけ起きるため）。
  */
 function counterDrill(core) {
   const base = core.start(core.data.roster, 'easy', SEED + 4).state;
-  const unitId = 'hero-1';
+  const unitId = 'gord';
   const targetId = 'e-warrior-1';
   const counter = core.data.passives.find((p) => p.id === 'counter');
   const scene = drillState(base, unitId, {
@@ -2461,14 +2569,14 @@ function counterDrill(core) {
 }
 
 /**
- * 受動的なアビリティの習得と付け替えを確かめる部隊。トウマ（戦士）に戦士の JP を 300（ジョブのレベル 3）持たせる。
+ * 受動的なアビリティの習得と付け替えを確かめる部隊。ゴード（戦士）に戦士の JP を 300（ジョブのレベル 3）持たせる。
  * 「反撃」（ジョブのレベル 3 が必要）は覚えられ、「重装」（ジョブのレベル 4 が必要）は覚えられない。
  * expected は、反撃を覚えてリアクションの枠に付けた後の部隊（core だけで計算）。
  */
 function passiveDrill(core, roster) {
   const P = core.progression;
   const { catalog, progression: rules } = core.data;
-  const unitId = 'hero-1';
+  const unitId = 'gord';
   const jobId = 'warrior';
   const u0 = P.findUnit(roster, unitId);
   const p = P.jobProgress(u0, jobId);

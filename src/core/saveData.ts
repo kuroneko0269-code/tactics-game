@@ -18,13 +18,16 @@
  *   版 2 のデータは、育てた状態をそのまま残し、各ユニットに「今のジョブの最初の装備」を配って付け、最初の所持金を持たせる。
  * - 版 4（フェーズ2-5）: 途中の戦闘（battle。どこの戦闘か（訓練戦の段階か、ダンジョンの何戦目か）と、戦闘の状態）を追加。
  *   版 3 のデータは「途中の戦闘なし」として直す。
+ * - 版 5（フェーズ2-6）: ユニットの id を、人物の変わらない id（例: hero-1 → touma）にした。
+ *   版 4 のデータは、部隊と途中の戦闘の中のユニットの id を付け替え、途中の戦闘のユニットに新しい項目
+ *   （最後に手番が始まった時の HP、「踏みとどまる」を使ったか）を足す。育てた状態（今のジョブを含む）はそのまま残る。
  */
 import type { BattleState, EquipmentDefinition } from './battleTypes';
 import type { DungeonState } from './dungeon';
 import type { Roster } from './progression';
 
 /** 今のセーブデータの版 */
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 
 /** 途中の戦闘が、どこの戦闘か（訓練戦の段階か、ダンジョンの何戦目か） */
 export type BattleOrigin =
@@ -68,6 +71,8 @@ export interface SaveMigrationContext {
   readonly starterEquipment: Readonly<Record<string, readonly string[]>>;
   readonly startingGold: number;
   readonly equipment: readonly Pick<EquipmentDefinition, 'id' | 'slot'>[];
+  /** 版 4 までのユニットの id から、人物の id への対応（版 5） */
+  readonly legacyUnitIds: Readonly<Record<string, string>>;
 }
 
 /**
@@ -108,6 +113,34 @@ export const SAVE_MIGRATIONS: SaveMigrations = {
   },
   /** 版 3 → 4: 途中の戦闘を足す（なし） */
   3: (old) => ({ ...old, version: 4, battle: null }),
+  /** 版 4 → 5: ユニットの id を人物の id に付け替える。途中の戦闘のユニットに新しい項目を足す */
+  4: (old, context) => {
+    const rename = (id: unknown) => (typeof id === 'string' ? (context.legacyUnitIds[id] ?? id) : id);
+    const roster = (old.roster ?? {}) as { units?: unknown };
+    const units = Array.isArray(roster.units)
+      ? roster.units.map((raw: unknown) => {
+          const u = raw as Record<string, unknown>;
+          return typeof u === 'object' && u !== null ? { ...u, id: rename(u.id) } : u;
+        })
+      : roster.units;
+    let battle = old.battle as unknown;
+    if (typeof battle === 'object' && battle !== null) {
+      // 戦闘の状態の中では、ユニットの id は文字列としてだけ現れる（ユニット・手番・狙い先・勝敗条件など）ので、
+      // 古い id の文字列をそのまま付け替える
+      let text = JSON.stringify(battle);
+      for (const [from, to] of Object.entries(context.legacyUnitIds)) text = text.split(JSON.stringify(from)).join(JSON.stringify(to));
+      const b = JSON.parse(text) as { state?: { units?: unknown } };
+      if (b.state && Array.isArray(b.state.units)) {
+        b.state.units = b.state.units.map((raw: unknown) => {
+          const u = raw as Record<string, unknown>;
+          if (typeof u !== 'object' || u === null) return u;
+          return { turnStartHp: u.hp, endureUsed: false, ...u };
+        });
+      }
+      battle = b;
+    }
+    return { ...old, version: 5, roster: { ...roster, units }, battle };
+  },
 };
 
 export function createSaveData(

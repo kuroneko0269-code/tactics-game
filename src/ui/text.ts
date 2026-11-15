@@ -97,6 +97,7 @@ export const TEXT = {
     archer: '弓使い',
     mage: '魔道士',
     healer: '治癒師',
+    timekeeper: '時守',
   } as Readonly<Record<string, string>>,
 
   /** 行動順の欄に出す、ジョブの1文字の略 */
@@ -105,6 +106,7 @@ export const TEXT = {
     archer: '弓',
     mage: '魔',
     healer: '治',
+    timekeeper: '時',
   } as Readonly<Record<string, string>>,
 
   /** ジョブのコマンド（行動アビリティのまとまり）の名前。ジョブの id で引く */
@@ -113,6 +115,7 @@ export const TEXT = {
     archer: '弓術',
     mage: '攻撃魔法',
     healer: '回復魔法',
+    timekeeper: '時の業',
   } as Readonly<Record<string, string>>,
 
   /** アビリティ（行動アビリティと、受動的なアビリティ）の名前。id で引く */
@@ -140,6 +143,12 @@ export const TEXT = {
     thrift: '節約',
     quickStep: '早足',
     lightFoot: '身軽',
+    sweep: '斬り分け',
+    rewind: '引き戻し',
+    gateSwap: '門渡り',
+    timeDelay: '時送り',
+    endure: '踏みとどまる',
+    timekeeperWisdom: '時守の心得',
   } as Readonly<Record<string, string>>,
 
   /** 行動順の欄に出す、詠唱のある魔法・技の1文字の略 */
@@ -180,6 +189,12 @@ export const TEXT = {
     thrift: '消費 MP -25%',
     quickStep: '移動力 +1',
     lightFoot: 'ジャンプ力 +1',
+    sweep: '正面のマスと、その左右のマスにいる敵をまとめて斬る（通常攻撃の 70%。1体ずつ命中を判定）。剣が必要',
+    rewind: '味方ひとりの HP を、その味方の前回の手番が始まった時の値に戻す（今の方が高い時は何も起きない）。射程 3、詠唱なし',
+    gateSwap: '射程 3 の中にいる味方ひとりと、位置を入れ替える。詠唱なし',
+    timeDelay: '敵ひとりの CT を 40 減らし、次の行動を遅らせる。射程 3、詠唱なし',
+    endure: 'HP が 0 になるダメージを受けた時、1戦に1度だけ HP 1 で耐える',
+    timekeeperWisdom: '待機した時に残る CT +20（40 → 60）',
   } as Readonly<Record<string, string>>,
 
   /** 状態変化の名前 */
@@ -187,6 +202,13 @@ export const TEXT = {
     protect: '守り',
     slow: '鈍足',
     silence: '沈黙',
+    attackDown: '攻撃力低下',
+    magicDown: '魔力低下',
+    speedDown: '素早さ低下',
+    maxHpDown: '最大 HP 低下',
+    blind: '目くらまし',
+    stop: '停止',
+    haste: '加速',
   } satisfies Record<StatusId, string>,
 
   /** 頭上に出す、状態変化の1文字の目印 */
@@ -194,13 +216,30 @@ export const TEXT = {
     protect: '守',
     slow: '鈍',
     silence: '沈',
+    attackDown: '攻',
+    magicDown: '魔',
+    speedDown: '速',
+    maxHpDown: '体',
+    blind: '暗',
+    stop: '止',
+    haste: '加',
   } satisfies Record<StatusId, string>,
+  /** 頭上の目印が多い時に、残りの数を出す（「+2」） */
+  statusMore: (n: number) => `+${n}`,
+  statusMoreTitle: '情報の欄ですべて見られます',
 
   /** 状態変化の短い説明（情報の欄） */
   statusHelp: {
     protect: '受けるダメージ -25%',
     slow: '移動力 -2',
     silence: '魔法を使えない',
+    attackDown: '攻撃力 -25%',
+    magicDown: '魔力 -25%',
+    speedDown: '素早さ -25%',
+    maxHpDown: '最大 HP -20%',
+    blind: '武器による攻撃の命中率 -30',
+    stop: '次の手番は何もできない',
+    haste: '素早さ +50%',
   } satisfies Record<StatusId, string>,
 
   /** 受動的なアビリティの枠の名前 */
@@ -224,7 +263,10 @@ export const TEXT = {
     sword: '剣',
     bow: '弓',
     staff: '杖',
+    dagger: '短剣',
   } satisfies Record<WeaponType, string>,
+  /** 武器の枠が空（素手）。アビリティに必要な武器の指定にも使う */
+  unarmed: '素手',
 
   /** 防具の種類（フェーズ2-4） */
   armors: {
@@ -251,6 +293,9 @@ export const TEXT = {
     'staff-1': { name: '樫の杖', help: '魔力を通しやすい木の杖' },
     'staff-2': { name: '水晶の杖', help: '先の水晶が魔力を集める' },
     'staff-3': { name: '星詠みの杖', help: '星の力を宿すという杖' },
+    'dagger-1': { name: '小刀', help: '軽くて扱いやすい短い刃' },
+    'dagger-2': { name: '鋼の短剣', help: 'よく研がれた短剣。身のこなしが軽くなる' },
+    'dagger-3': { name: '影縫いの短剣', help: '影のように素早く振るえる短剣' },
     'heavy-1': { name: '鉄の鎧', help: '重いが頼れる鎧' },
     'heavy-2': { name: '鋼の鎧', help: '厚い鋼の鎧' },
     'heavy-3': { name: '白銀の鎧', help: '軽くて硬い、名工の鎧' },
@@ -294,13 +339,13 @@ export const TEXT = {
     enemy: '敵',
   } satisfies Record<Team, string>,
 
-  /** ユニットの名前。id で引く（hero-1〜5 は最初の部隊の5人） */
+  /** ユニットの名前。id で引く（最初の部隊の5人は人物の id。フェーズ2-6 で物語の確定に合わせて名前を変えた） */
   unitNames: {
-    'hero-1': 'トウマ',
-    'hero-2': 'バルト',
-    'hero-3': 'ミレイ',
-    'hero-4': 'セイル',
-    'hero-5': 'リネ',
+    touma: 'トウマ',
+    gord: 'ゴード',
+    kiri: 'キリ',
+    fen: 'フェン',
+    nono: 'ノノ',
     'e-warrior-1': '敵の戦士A',
     'e-warrior-2': '敵の戦士B',
     'e-archer-1': '敵の弓使い',
@@ -372,6 +417,8 @@ export const TEXT = {
     chooseStrikeTarget: (name: string) => `「${name}」: 赤く光る敵をタップ`,
     chooseSpellTarget: '紫のマスから、狙う場所をタップ',
     chooseReviveTarget: '射程の中の、倒れているユニットをタップ',
+    chooseAllyTarget: '射程の中の味方をタップ',
+    chooseEnemyTarget: '射程の中の敵をタップ',
     chooseTargetKind: 'ユニットを追いかけて狙うか、そのマスに撃つかを選ぶ',
     targetKindHelp: 'ユニット: 動いても追いかける ／ マス: 動かれると外れる',
     charging: (spell: string) => `「${spell}」を詠唱中。「待機」で詠唱を続ける`,
@@ -400,6 +447,17 @@ export const TEXT = {
     reduced: (names: string) => `（${names}で軽減）`,
     /** 向きと高低差の補正が掛かる技（狙い撃ち）の、相手ごとの補正 */
     angle: (side: string, height: string) => `（${side}・高低差 ${height}）`,
+    /** 詠唱のない業（時守。フェーズ2-6） */
+    instant: '詠唱なし（すぐに発動）',
+    rewind: (before: number, after: number) => `HP ${before} → ${after}（前回の手番の始め）`,
+    /** 詠唱のない業の狙い（追いかける必要がないので、相手の名前だけ） */
+    targetInstant: (name: string) => `相手: ${name}`,
+    rewindNone: '今の HP の方が高いので、変わらない',
+    delay: (ct: number, from: number, to: number) => `CT -${ct}（行動順 ${from} → ${to} 番目）`,
+    delayNone: 'CT が 0 なので、変わらない',
+    swap: '位置を入れ替える',
+    /** 踏みとどまるで耐える時 */
+    endures: (name: string) => `（「${name}」で HP 1 残る）`,
   },
 
   /** 行動順の欄の、魔法の発動の説明 */
@@ -441,6 +499,10 @@ export const TEXT = {
   /** 情報の欄の、付けている受動的なアビリティ */
   passiveInfo: (slot: string, name: string) => `${slot}: ${name}`,
   fizzled: '不発',
+  /** 停止で手番が過ぎた（フェーズ2-6） */
+  turnSkipped: '停止中',
+  ctDelayed: (n: number) => `CT -${n}`,
+  swapped: '入れ替わった',
   interrupted: '中断',
 
   /** アビリティのボタンに添える、使えない理由 */
@@ -478,6 +540,11 @@ export const TEXT = {
     counter: '反撃あり',
     counterDetail: (damage: number, hit: number) => `受ける見込み ${damage}（命中 ${hit}%）`,
     counterNote: '当たって相手が倒れなければ',
+    /** 斬り分けで巻き込む敵（フェーズ2-6） */
+    sweepLabel: '巻き込む',
+    sweepTarget: (name: string, damage: number, hit: number) => `${name} ${damage}（命中 ${hit}%）`,
+    blind: (n: number) => `目くらましで命中 -${n}`,
+    endures: (name: string) => `相手の「${name}」で HP 1 残る`,
   },
 
   hp: 'HP',
@@ -668,6 +735,16 @@ export const TEXT = {
     locked: 'まだ就けません',
     unlockNeeds: (job: string, lv: number) => `${job} Lv ${lv} が必要`,
     unlockNeedsMastery: (job: string) => `${job}のマスターが必要`,
+    /** 解放条件と今の達成の具合（フェーズ2-6） */
+    unlockProgress: (job: string, lv: number, now: number) => `${job} Lv ${lv}（今 ${now}）`,
+    unlockMasteryProgress: (job: string, done: boolean) => `${job}をマスター（${done ? '済み' : 'まだ'}）`,
+    lockedTitle: (job: string) => `${job}の解放条件`,
+    lockedNote: '条件をすべて満たすと、このジョブに就けます',
+    /** 専用ジョブの札（特定の人物だけが就ける） */
+    exclusive: '専用',
+    exclusiveNote: (name: string) => `${name}だけが就ける専用ジョブ`,
+    /** 解放条件を満たした瞬間の知らせ */
+    unlockToast: (name: string, job: string) => `${name}が「${job}」に就けるようになった！`,
     changeJobTitle: (job: string) => `${job}に変える`,
     compareNow: '今',
     compareAfter: '変更後',
