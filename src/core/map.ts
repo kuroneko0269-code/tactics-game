@@ -4,7 +4,7 @@
  */
 
 /** 地形の種類。見た目や移動コストの違いは今後ここに紐づける */
-export type Terrain = 'grass' | 'dirt' | 'stone' | 'water';
+export type Terrain = 'grass' | 'dirt' | 'stone' | 'water' | 'wood';
 
 export interface Tile {
   readonly x: number;

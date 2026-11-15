@@ -43,7 +43,8 @@ export const trialWeirBattle: BattleSite = {
       id: 'main',
       reward: { gold: 60, loot: [] },
       units: [
-        enemyUnit({ id: 'trial-guard-1', job: warrior, x: 2, z: 2, level: 1, statBonus: { maxHp: -20 }, equipment: kit(warrior, 1) }),
+        // 倒れない番兵（序章に足りない仕組みの確かめ）: HP は 1 より下がらない
+        { ...enemyUnit({ id: 'trial-guard-1', job: warrior, x: 2, z: 2, level: 1, statBonus: { maxHp: -20 }, equipment: kit(warrior, 1) }), minHp: 1 },
         enemyUnit({ id: 'trial-guard-2', job: archer, x: 5, z: 1, level: 1, statBonus: { maxHp: -16 }, equipment: kit(archer, 1) }),
       ],
     },
@@ -53,6 +54,18 @@ export const trialWeirBattle: BattleSite = {
     { id: 'trial-seam-2', kind: 'seam', x: 5, z: 2, hp: 24 },
   ],
   objectives: { victory: [{ kind: 'destroyObjects', unitIds: ['trial-seam-1', 'trial-seam-2'] }], defeat: [{ kind: 'allDefeated' }] },
+  // 序章に足りない仕組みの確かめ: 背景の人（堰の上の見物人）、人物の名前、見た目、戦闘の後の台本、手ほどき
+  bystanders: [{ id: 'trial-watcher', x: 7, z: 0, facing: 'south', look: 'worker' }],
+  cast: { 番兵: 'trial-guard-1', 見物人: 'trial-watcher' },
+  looks: { 'trial-guard-1': 'guard', 'trial-guard-2': 'guard' },
+  afterVictory: 'trialAfterVictory',
+  tutorial: [
+    { id: 'trial-move', mode: 'main', point: { kind: 'reachToward', x: 3, z: 2 } },
+    { id: 'trial-attack', mode: 'afterMove', point: { kind: 'button', button: 'attack' } },
+    { id: 'trial-target', mode: 'targeting' },
+    { id: 'trial-confirm', mode: 'confirm', point: { kind: 'button', button: 'confirm' } },
+    { id: 'trial-facing', mode: 'facing', point: { kind: 'button', button: 'endTurn' } },
+  ],
   events: [
     { id: 'trial-first-seam', trigger: { kind: 'objectsBroken', unitIds: seams, count: 1 }, effects: [{ kind: 'dialogue', scriptId: 'trialFirstSeam' }] },
     {

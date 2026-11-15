@@ -101,6 +101,13 @@ export interface BattleControllerDeps {
   readonly playDialogue?: (scriptId: string) => Promise<void>;
   /** 開発中の自動テスト用: true の間は、味方の手番も AI が動かす（会話の差し込みや地形の変化を、戦闘を通して確かめるため） */
   readonly autoPlayer?: () => boolean;
+  /**
+   * 操作の段階が変わった時に呼ぶ（手ほどき。序章に足りない仕組み）。modeKey は TutorialStep の mode の名前
+   * （移動した後の main は afterMove）か、入力を待っていない時は busy。playerTurn は、この戦闘で味方の入力を待った手番の数
+   */
+  readonly onModeChange?: (modeKey: string, info: { readonly playerTurn: number; readonly reachable: readonly Coord[] }) => void;
+  /** 出来事に合わせて効果音を鳴らす（序章に足りない仕組み） */
+  readonly sound?: (id: 'attack' | 'hit' | 'miss' | 'magic') => void;
 }
 
 export interface BattleController {
@@ -167,6 +174,18 @@ export function createBattleController(start: ActionResult, deps: BattleControll
   let disposed = false;
   /** この戦闘で知らせた、新しく就けるようになったジョブ（ユニット:ジョブ） */
   const announcedUnlocks = new Set<string>();
+  /** 味方の入力を待った手番の数（手ほどきの段の turn に使う） */
+  let playerTurns = 0;
+  let lastInputTurn = -1;
+  /** 手ほどきに、今の操作の段階を知らせる */
+  const reportMode = () => {
+    if (!deps.onModeChange) return;
+    if (mode.kind === 'busy' || mode.kind === 'ended' || !state.turn) return deps.onModeChange('busy', { playerTurn: playerTurns, reachable: [] });
+    const t = state.turn;
+    const key = mode.kind === 'main' ? (t.moved ? 'afterMove' : 'main') : mode.kind === 'spellTargetKind' ? 'spellTarget' : mode.kind;
+    const reachable = mode.kind === 'main' && !t.moved ? reachableTiles(state, actor()) : [];
+    deps.onModeChange(key, { playerTurn: playerTurns, reachable });
+  };
 
   const turn = () => state.turn;
   const actor = (): UnitState => {
@@ -344,6 +363,10 @@ export function createBattleController(start: ActionResult, deps: BattleControll
 
   /** 今のモードに合わせて、マスの色分け・ボタン・案内文を出し直す */
   const refresh = () => {
+    refreshInner();
+    reportMode();
+  };
+  const refreshInner = () => {
     hud.showPreview(undefined);
     view.showFacingArrows(undefined);
     hud.showFacingPad(undefined);
@@ -371,6 +394,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
         const actions: HudAction[] = [
           {
             label: TEXT.buttons.attack,
+            key: 'attack',
             onClick: () => guard({ kind: 'mode', mode: { kind: 'targeting', abilityId: null } }),
             disabled: t.acted,
             primary: !t.acted && commands.length === 0 && !charging,
@@ -379,12 +403,13 @@ export function createBattleController(start: ActionResult, deps: BattleControll
         for (const { c, i } of commands) {
           actions.push({
             label: TEXT.commands[c.jobId] ?? c.jobId,
+            key: 'ability',
             onClick: () => guard({ kind: 'mode', mode: { kind: 'abilityMenu', command: i } }),
             disabled: t.acted,
             primary: !t.acted && !charging && i === 0,
           });
         }
-        actions.push({ label: TEXT.buttons.wait, onClick: () => setMode(facingMode()), primary: Boolean(charging) });
+        actions.push({ label: TEXT.buttons.wait, key: 'wait', onClick: () => setMode(facingMode()), primary: Boolean(charging) });
         hud.setActions(actions);
         // 移動した直後は「移動をやり直す」を目立つ位置に出す（意図しないマスへ移動した時にすぐ戻せるように）
         // 罠やイベントが起きた移動は取り消せない
@@ -436,7 +461,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
           hud.setHint(
             targets.length === 0 ? TEXT.hints.noTarget : strike ? TEXT.hints.chooseStrikeTarget(abilityName(strike.id)) : TEXT.hints.chooseTarget,
           );
-          hud.setActions([{ label: TEXT.buttons.back, onClick: () => setMode(backFromTargeting()) }]);
+          hud.setActions([{ label: TEXT.buttons.back, key: 'back', onClick: () => setMode(backFromTargeting()) }]);
         } else {
           const target = getUnit(state, mode.targetId);
           const p = previewAttack(state, unit, target, unit, strike);
@@ -447,8 +472,8 @@ export function createBattleController(start: ActionResult, deps: BattleControll
           const action: BattleAction =
             abilityId === null ? { type: 'attack', targetId: target.id } : { type: 'attack', targetId: target.id, abilityId };
           hud.setActions([
-            { label: TEXT.buttons.back, onClick: () => setMode({ kind: 'targeting', abilityId }) },
-            { label: TEXT.buttons.confirm, primary: true, onClick: () => void perform(action) },
+            { label: TEXT.buttons.back, key: 'back', onClick: () => setMode({ kind: 'targeting', abilityId }) },
+            { label: TEXT.buttons.confirm, key: 'confirm', primary: true, onClick: () => void perform(action) },
           ]);
         }
         break;
@@ -458,7 +483,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
         hud.setHint(TEXT.hints.chooseAbility(unit.mp, unit.stats.maxMp));
         const command = unit.commands[mode.command]!;
         hud.setActions([
-          { label: TEXT.buttons.back, onClick: () => setMode({ kind: 'main' }) },
+          { label: TEXT.buttons.back, key: 'back', onClick: () => setMode({ kind: 'main' }) },
           ...command.abilityIds.map((id): HudAction => {
             const isSpell = unit.spells.some((s) => s.id === id);
             return {
@@ -495,7 +520,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
                   : TEXT.hints.chooseSpellTarget,
           );
           hud.setActions([
-            { label: TEXT.buttons.back, onClick: () => setMode({ kind: 'abilityMenu', command: commandIndexOf(unit, spell.id) }) },
+            { label: TEXT.buttons.back, key: 'back', onClick: () => setMode({ kind: 'abilityMenu', command: commandIndexOf(unit, spell.id) }) },
           ]);
           showTurnOrder(spell.instant ? undefined : spell.id);
           break;
@@ -505,7 +530,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
           hud.setHint(`${TEXT.hints.chooseTargetKind}（${TEXT.hints.targetKindHelp}）`);
           const { spellId, x, z, unitId } = mode;
           hud.setActions([
-            { label: TEXT.buttons.back, onClick: () => setMode({ kind: 'spellTarget', spellId }) },
+            { label: TEXT.buttons.back, key: 'back', onClick: () => setMode({ kind: 'spellTarget', spellId }) },
             {
               label: TEXT.buttons.targetTile,
               onClick: () => setMode({ kind: 'spellConfirm', spellId, target: { kind: 'tile', x, z } }),
@@ -611,8 +636,8 @@ export function createBattleController(start: ActionResult, deps: BattleControll
         });
         showTurnOrder(spell.instant ? undefined : spell.id);
         hud.setActions([
-          { label: TEXT.buttons.back, onClick: () => setMode({ kind: 'spellTarget', spellId: spell.id }) },
-          { label: TEXT.buttons.confirm, primary: true, onClick: () => void perform({ type: 'cast', spellId: spell.id, target }) },
+          { label: TEXT.buttons.back, key: 'back', onClick: () => setMode({ kind: 'spellTarget', spellId: spell.id }) },
+          { label: TEXT.buttons.confirm, key: 'confirm', primary: true, onClick: () => void perform({ type: 'cast', spellId: spell.id, target }) },
         ]);
         break;
       }
@@ -630,6 +655,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
         if (!(t.moved && t.acted)) {
           actions.push({
             label: TEXT.buttons.back,
+            key: 'back',
             onClick: () => {
               void view.turnTo(unit.id, unit.facing);
               setMode({ kind: 'main' });
@@ -637,7 +663,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
           });
         }
         const facing = mode.facing;
-        actions.push({ label: TEXT.buttons.endTurn, primary: true, onClick: () => void perform({ type: 'endTurn', facing }) });
+        actions.push({ label: TEXT.buttons.endTurn, key: 'endTurn', primary: true, onClick: () => void perform({ type: 'endTurn', facing }) });
         hud.setActions(actions);
         break;
       }
@@ -681,7 +707,9 @@ export function createBattleController(start: ActionResult, deps: BattleControll
           break;
         case 'attacked': {
           const target = getUnit(state, ev.targetId);
+          deps.sound?.('attack');
           await view.animateAttack(ev, () => {
+            deps.sound?.(ev.hit ? 'hit' : 'miss');
             if (ev.hit) labels.popDamage(ev.targetId, ev.damage);
             else labels.popMiss(ev.targetId);
             labels.setHp(ev.targetId, ev.targetHp, target.stats.maxHp);
@@ -790,6 +818,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
         case 'spellResolved': {
           view.setCharging(ev.casterId, undefined);
           await view.focusTiles([getUnit(state, ev.casterId), ...ev.tiles]);
+          deps.sound?.('magic');
           await view.animateSpell(ev, () => {
             for (const r of ev.results) {
               const u = getUnit(state, r.unitId);
@@ -999,6 +1028,10 @@ export function createBattleController(start: ActionResult, deps: BattleControll
       }
       const unit = actor();
       if (unit.team === 'player' && !deps.autoPlayer?.()) {
+        if (lastInputTurn !== state.turnNumber) {
+          lastInputTurn = state.turnNumber;
+          playerTurns++;
+        }
         // 移動と行動を済ませた後で再開した時は、向きを選ぶところから
         const t = turn()!;
         setMode(t.moved && t.acted ? facingMode() : { kind: 'main' });

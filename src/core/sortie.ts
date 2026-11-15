@@ -11,7 +11,7 @@
  *   （味方1, 敵1, 敵2, 味方2, 味方3, 敵3, ...）。どちらかの陣営を先にまとめると、同じ素早さのユニットどうしでは
  *   常にその陣営が先に動いてしまうため。
  */
-import type { BattleObjectives, BattleSetup, MapEventDefinition, ObjectPlacement, TrapPlacement, UnitPlacement } from './battleTypes';
+import type { BattleObjectives, BattleSetup, BystanderPlacement, MapEventDefinition, ObjectPlacement, TrapPlacement, UnitPlacement } from './battleTypes';
 import type { Direction } from './geometry';
 import type { MapDefinition } from './map';
 import { equippedDefinitions } from './equipment';
@@ -61,7 +61,42 @@ export interface BattleSite {
   readonly traps?: readonly TrapPlacement[];
   /** 対象物（物語の土台） */
   readonly objects?: readonly ObjectPlacement[];
+  /** 戦わない背景の人々（序章に足りない仕組み。対象にならず、行動順にも入らない） */
+  readonly bystanders?: readonly BystanderPlacement[];
+  /**
+   * 台本に書く人物の名前 → この戦場のユニットか背景の人の id（序章に足りない仕組み）。
+   * 戦闘中の会話と戦闘の後の台本で、仕草・向き・カメラ・光の相手を名前で指す時に使う。
+   * 部隊の人物（トウマなど）は、ここに書かなくても名前で指せる
+   */
+  readonly cast?: Readonly<Record<string, string>>;
+  /** ユニットの id → 人物の見た目の名前（src/data/story/looks.ts。物語の相手。省くとジョブの形と陣営の色） */
+  readonly looks?: Readonly<Record<string, string>>;
+  /** 勝った後に、戦闘のマップの上で流す台本の id（帰りの門の光・人物が消える、など。戦闘の結果は変えない） */
+  readonly afterVictory?: string;
+  /** 戦闘の手ほどき（序章に足りない仕組み。マスやボタンを指し示し、短い説明を出して、その操作を待つ） */
+  readonly tutorial?: readonly TutorialStep[];
 }
+
+/**
+ * 戦闘の手ほどきの1段（序章に足りない仕組み）。味方の手番で、画面の操作が mode になった時に出し、
+ * その操作が済んだら（操作の段階が mode から変わったら）次の段へ進む。文は src/ui/text.ts の tutorial に id で引く。
+ * - point: 指し示す物（マス・ユニット・ボタン）。ボタンは操作の種類の名前（攻撃・待機・確定・手番を終える・戻る など）
+ * - turn: その段を出してよい、味方の何回目の手番からか（省くと最初の手番から）
+ */
+export interface TutorialStep {
+  readonly id: string;
+  readonly mode: 'main' | 'afterMove' | 'targeting' | 'confirm' | 'facing' | 'abilityMenu' | 'spellTarget' | 'spellConfirm';
+  readonly point?:
+    | { readonly kind: 'tile'; readonly x: number; readonly z: number }
+    | { readonly kind: 'unit'; readonly unitId: string }
+    | { readonly kind: 'button'; readonly button: TutorialButton }
+    /** 移動できるマスのうち、mode の操作で選ぶとよい目標に近いマス（味方の位置によって変わるため） */
+    | { readonly kind: 'reachToward'; readonly x: number; readonly z: number };
+  readonly turn?: number;
+}
+
+/** 手ほどきで指し示せるボタン */
+export type TutorialButton = 'attack' | 'ability' | 'wait' | 'confirm' | 'endTurn' | 'back' | 'undoMove';
 
 /**
  * 部隊と選んだ段階から、1戦ぶんの定義を作る。
@@ -108,6 +143,7 @@ export function buildSortie(
     events: site.events,
     traps: site.traps,
     ...(site.objects ? { objects: site.objects } : {}),
+    ...(site.bystanders ? { bystanders: site.bystanders } : {}),
     ...(progression ? { progression } : {}),
   };
 }

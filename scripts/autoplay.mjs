@@ -2199,18 +2199,25 @@ async function storyRun(browser, baseUrl, name, core) {
   const press = async (n) => page.getByRole('button', { name: n, exact: true }).click();
   const T = (fn, arg) => page.evaluate(fn, arg);
   const status = () => T(() => window.__tactics.dialogue());
-  const screen = () => T(() => window.__tactics.screen());
-  const stats = { lines: 0, holds: 0, walks: 0, skips: 0, reloads: 0, dialoguesInBattle: 0, terrain: 0 };
+  const stats = { lines: 0, holds: 0, walks: 0, skips: 0, reloads: 0, dialoguesInBattle: 0, terrain: 0, titles: 0 };
   const open = async () => {
     await page.goto(`${baseUrl}?seed=${SEED}&speed=${SPEED}`);
     await until(() => window.__tactics?.screen() === 'title');
   };
-  /** 会話が待っている状態（台詞・操作）になるか、会話が終わるまで待つ */
-  const settle = () =>
-    until(() => {
-      const d = window.__tactics.dialogue();
-      return !d || d.waiting === 'line' || d.waiting === 'hold' || d.waiting === 'walk';
-    });
+  /** 会話が待っている状態（台詞・操作）になるか、会話が終わるまで待つ。章の題が出たら、タップして閉じる */
+  const settle = async () => {
+    for (let guard = 0; guard < 10; guard++) {
+      await until(() => {
+        const d = window.__tactics.dialogue();
+        return !d || d.waiting === 'line' || d.waiting === 'hold' || d.waiting === 'walk' || d.waiting === 'title';
+      });
+      if ((await status())?.waiting !== 'title') return;
+      stats.titles++;
+      await page.waitForTimeout(750);
+      await page.locator('.chapter-title-card').click();
+      await until(() => window.__tactics.dialogue()?.waiting !== 'title');
+    }
+  };
   const tapLine = async () => {
     const before = await status();
     await page.locator('.dialogue-body').click();
@@ -2319,7 +2326,14 @@ async function storyRun(browser, baseUrl, name, core) {
   await waitScene(1);
   log('会話（語り・ルビ・仕草・物の出し入れ・暗転・読み返し・早送り）✔');
   // 場面2: 操作の場面。押し続ける（途中で離すと止まる）→ 読み込み直し → 「これまで」から再開 → 最初から操作する
+  let sawMelody = false;
   await drive(async (d) => {
+    if (d.text.includes('鼻歌が聞こえる')) {
+      // 旋律が鳴っている間は、音がなくても分かるように印が出る（序章に足りない仕組み）
+      const m = await T(() => ({ melody: window.__tactics.sound().melody, mark: document.querySelector('.sound-mark:not([hidden])')?.textContent ?? '' }));
+      check(m.melody?.melody === '試しの節' && m.mark.includes('鼻歌'), `旋律の印が出ていません（${JSON.stringify(m)}）`);
+      sawMelody = true;
+    }
     if (d.waiting !== 'hold') return false;
     check(await T(() => document.querySelector('.dialogue-hint') !== null), '初めての押し続けるで、操作の手引きが出ません');
     await doHold(true);
@@ -2340,7 +2354,9 @@ async function storyRun(browser, baseUrl, name, core) {
     return false;
   });
   await waitScene(2);
-  log('操作の場面（押し続ける・歩かせる・初めての時の手引き）、会話の途中での読み込み直しと「これまで」✔');
+  check(sawMelody && stats.titles >= 1, '章の題と旋律の印を確かめられませんでした');
+  check((await T(() => window.__tactics.sound().recent)).includes('chime'), '台本の効果音（石の音）が鳴っていません');
+  log('操作の場面（押し続ける・歩かせる・初めての時の手引き）、章の題・旋律の印・効果音、会話の途中での読み込み直しと「これまで」✔');
   // 場面3: 戦闘の前の会話
   await drive();
   // 場面4: 戦闘（物を2つ壊すと勝利）。味方も AI に任せる。最初の戦闘中の会話で読み込み直す
@@ -2348,6 +2364,15 @@ async function storyRun(browser, baseUrl, name, core) {
   await press(text.objectives.close);
   await press(text.deploy.start);
   await until(() => window.__tactics.screen() === 'battle' && window.__tactics.state() !== null);
+  // 手ほどき（序章に足りない仕組み）: 味方の最初の手番で、移動の段が出る。倒れない番兵の情報の欄。手ほどきを飛ばす
+  await until(() => window.__tactics.tutorial()?.step === 'trial-move', undefined, 120000);
+  const guard = await T(() => window.__tactics.unitScreen('trial-guard-1'));
+  await page.mouse.click(guard.x, guard.y);
+  await until(() => document.querySelector('.info-unbreakable') !== null, undefined, 10000);
+  await press(text.tutorial.skip);
+  await until(() => window.__tactics.tutorial()?.done === true);
+  check((await T(() => window.__tactics.settings().seenTutorials)).includes('trial-weir'), '手ほどきを見たことが設定に残っていません');
+  log('手ほどき（移動の段・飛ばす・見たことを残す）と、倒れない敵の情報の欄 ✔');
   await T(() => window.__tactics.setAutoPlayer(true));
   await until(() => window.__tactics.dialogue()?.waiting === 'line', undefined, 240000);
   stats.dialoguesInBattle++;
@@ -2366,18 +2391,23 @@ async function storyRun(browser, baseUrl, name, core) {
   // 読み込み直した時点の途中保存から、core だけで最後まで進めた結果
   const expected = core.ai.runAutoBattle(saved.state, 3000, { player: core.data.ai, enemy: core.data.ai }).state;
   let last;
+  let afterVictory = 0;
   for (let guard = 0; guard < 400; guard++) {
-    const s = await T(() => ({ screen: window.__tactics.screen(), d: window.__tactics.dialogue(), state: window.__tactics.state() }));
+    const s = await T(() => ({ screen: window.__tactics.screen(), d: window.__tactics.dialogue(), state: window.__tactics.state(), scene: window.__tactics.story().trial?.scene }));
     if (s.state) last = s.state;
-    if (s.screen === 'result') break;
+    // 章のために決めた部隊で戦う物語の戦闘は、結果の画面を出さず、勝った後の台本の後に次の場面へ進む
+    if (s.scene === 4) break;
     if (s.d?.waiting === 'line') {
-      if (s.d.text !== firstLine) stats.dialoguesInBattle++;
+      if (last?.winner) afterVictory++;
+      else if (s.d.text !== firstLine) stats.dialoguesInBattle++;
       await tapLine();
       continue;
     }
     await page.waitForTimeout(100);
   }
-  check((await screen()) === 'result', '試しの戦闘が終わりません');
+  check((await sceneId()) === 4, '試しの戦闘が終わりません');
+  check(afterVictory >= 3, `勝った後の台本が、戦闘のマップの上で流れていません（${afterVictory}行）`);
+  check((await T(() => window.__tactics.sound().recent)).includes('gate'), '勝った後の台本の効果音（門）が鳴っていません');
   check(last?.winner === 'player', '試しの戦闘に勝てませんでした');
   check(last.units.filter((u) => u.team === 'neutral').every((u) => u.retired), '物が壊れていません');
   stats.terrain = last.map.tiles.filter((t) => t.terrain === 'water').length;
@@ -2386,10 +2416,7 @@ async function storyRun(browser, baseUrl, name, core) {
     expected.winner === last.winner && expected.turnNumber === last.turnNumber && JSON.stringify(expected.units.map((u) => u.hp)) === JSON.stringify(last.units.map((u) => u.hp)),
     `途中保存から再開した戦闘が、core だけの計算と一致しません（画面 ${last.turnNumber}手番・core ${expected.turnNumber}手番）`,
   );
-  log(`戦闘（物を2つ壊すと勝利・戦闘中の会話 ${stats.dialoguesInBattle}回・地形の変化 ${stats.terrain}マス・会話の途中での読み込み直しと再開・core との一致）✔`);
-  await until(() => document.querySelector('.report-screen[data-done="true"]') !== null);
-  await press(text.story.next);
-  await waitScene(4);
+  log(`戦闘（物を2つ壊すと勝利・戦闘中の会話 ${stats.dialoguesInBattle}回・地形の変化 ${stats.terrain}マス・会話の途中での読み込み直しと再開・core との一致・勝った後の台本 ${afterVictory}行）✔`);
   // 場面5: 最後の会話はスキップ
   await skip();
   await until(() => window.__tactics.screen() === 'story-end');
@@ -2409,8 +2436,9 @@ async function storyRun(browser, baseUrl, name, core) {
   await press(text.deploy.start);
   await until(() => ['main', 'ended'].includes(window.__tactics.mode()), undefined, 120000);
   await T(() => window.__tactics.finishBattle('player'));
-  await until(() => document.querySelector('.report-screen[data-done="true"]') !== null);
-  await press(text.story.next);
+  // 勝った後の台本もスキップする
+  await until(() => window.__tactics.dialogue()?.waiting === 'line');
+  await skip();
   await waitScene(4);
   await skip();
   await until(() => window.__tactics.screen() === 'story-end');
@@ -2624,6 +2652,11 @@ async function checkLayouts(browser, baseUrl, name, core) {
   await page.goto(`${baseUrl}?seed=${SEED}&speed=${SPEED}`);
   await screenIs('title');
   await inspect('title');
+  // 設定の欄（序章に足りない仕組み）
+  await press(text.settings.open);
+  await until(() => document.querySelector('.sheet[data-sheet="settings"]') !== null);
+  await inspect('settings');
+  await press(text.settings.close);
   await press(text.title.trial);
   await screenIs('scene');
   const lineReady = () =>
@@ -2648,7 +2681,11 @@ async function checkLayouts(browser, baseUrl, name, core) {
   await inspect('dialogue-skip-confirm');
   await press(text.dialogue.skipYes);
   // 操作の場面: 押し続ける（初めての時の手引きつき）と、歩かせる
-  await until(() => window.__tactics.story().trial?.scene === 1 && window.__tactics.dialogue() !== null);
+  await until(() => window.__tactics.story().trial?.scene === 1 && window.__tactics.dialogue()?.waiting === 'title');
+  // 章の題（序章に足りない仕組み）
+  await inspect('chapter-title');
+  await page.waitForTimeout(750);
+  await page.locator('.chapter-title-card').click();
   await lineReady();
   while ((await page.evaluate(() => window.__tactics.dialogue().waiting)) === 'line') await tapLine();
   await inspect('interactive-hold');
@@ -2677,6 +2714,9 @@ async function checkLayouts(browser, baseUrl, name, core) {
   await press(text.dialogue.skipYes);
   // 対象物のある戦闘（配置の画面と、戦闘中の物の情報の欄）
   await startFromDeploy();
+  // 手ほどき（序章に足りない仕組み）
+  await until(() => window.__tactics.tutorial()?.step === 'trial-move', undefined, 120000);
+  await inspect('battle-tutorial');
   const seam = await page.evaluate(() => window.__tactics.unitScreen('trial-seam-1'));
   await page.mouse.click(seam.x, seam.y);
   await inspect('battle-objects');

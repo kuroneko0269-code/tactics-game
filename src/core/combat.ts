@@ -23,7 +23,7 @@ import type {
 import { blindPenalty, chargingPercentOf, damageTaken, enduredDamage, hasStatus, passiveEffect, passiveIdOf } from './effects';
 import { directionToward, manhattan, relativeSide, type Coord, type Direction, type RelativeSide } from './geometry';
 import { getTile, type BattleMap } from './map';
-import { isAlive, isOnMap } from './movement';
+import { isAlive, isBystanderTile, isOnMap } from './movement';
 
 function heightAt(map: BattleMap, c: Coord): number {
   const tile = getTile(map, c.x, c.z);
@@ -270,7 +270,7 @@ export function knockbackOutcome(state: BattleState, attackerId: string, from: C
   if (!tile) return blocked('edge');
   // 戦闘不能のユニットがいるマスにも押し出せない（止まれないため）
   const occupant = state.units.find((u) => isOnMap(u) && u.id !== attackerId && u.id !== target.id && u.x === to.x && u.z === to.z);
-  if (occupant) return blocked('unit');
+  if (occupant || isBystanderTile(state, to)) return blocked('unit');
   const rise = tile.height - heightAt(state.map, target);
   if (rise > target.stats.jump) return blocked('cliff');
   const fall = Math.max(0, -rise);
@@ -314,7 +314,8 @@ export function previewAttack(
   // 「踏みとどまる」: HP が 0 になるダメージなら、HP 1 で耐える（1戦に1度）
   const full = damageTaken(rules, target, raw);
   const hitResult = enduredDamage(target, full);
-  const damage = hitResult.endured ? hitResult.damage : full;
+  // 倒れないユニット（序章に足りない仕組み）は、HP の下限で止める
+  const damage = hitResult.endured || target.minHp ? hitResult.damage : full;
   const attackerFacing = directionToward(from, target, attacker.facing);
   const adjacent = manhattan(from, target) === 1;
   const survives = target.hp - damage > 0;

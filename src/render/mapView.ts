@@ -42,12 +42,14 @@ const TOP_COLORS: Record<Terrain, number> = {
   dirt: 0xb8925a,
   stone: 0x9a9a9a,
   water: 0x3f8fd8,
+  wood: 0xa8784a,
 };
 const SIDE_COLORS: Record<Terrain, number> = {
   grass: 0x7a5a3a,
   dirt: 0x8a6a40,
   stone: 0x6e6e72,
   water: 0x3a6a9a,
+  wood: 0x6a4a2a,
 };
 
 /** マスの色分けの種類（spellRange: 魔法の射程、spellArea: 魔法の範囲、push: 突き飛ばしで押し出す先） */

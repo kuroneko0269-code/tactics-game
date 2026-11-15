@@ -1,20 +1,18 @@
 import * as THREE from 'three';
-import type { ActorState, StageState } from '../core/dialogue';
+import type { ActorState, LightState, StageState } from '../core/dialogue';
 import type { Coord, Direction } from '../core/geometry';
 import type { MapView, TileCoord } from './mapView';
+import { createLightPillar, playGesture, type GestureMotion, type LightPillar } from './motion';
 import { createPropModel } from './props';
 import { createPuppet, YAW_OF, type Puppet, type PuppetLook, type PuppetPose } from './puppet';
-import { createTweens, easeInOut } from './tweens';
+import { createTweens } from './tweens';
+
+export type { GestureMotion } from './motion';
 
 /**
  * 会話の場面の舞台（物語の土台）: 戦闘をしない小さなマップの上に、人物の人形と物を置いて動かす。
  * 舞台の様子は core（dialogue.ts）が計算した StageState をそのまま見せるだけにし、ここでは動きの見せ方だけを持つ。
  */
-export interface GestureMotion {
-  readonly seconds: number;
-  readonly frames: readonly (PuppetPose & { readonly t: number; readonly turn?: number })[];
-}
-
 export interface SceneView {
   /** 舞台の様子に、すべての人形と物を即座にそろえる（スキップの後や、場面の始め） */
   sync(stage: StageState): void;
@@ -27,6 +25,12 @@ export interface SceneView {
   putProp(name: string, kind: string, c: Coord): Promise<void>;
   removeProp(name: string): Promise<void>;
   changeProp(name: string, kind: string): Promise<void>;
+  /** 持ち物を付け替える（ActorState の items と同じ形） */
+  setItems(name: string, items: ActorState['items']): void;
+  /** 続く姿勢（座る など）。undefined で立つ */
+  setPosture(name: string, posture: string | undefined): Promise<void>;
+  /** 光を立てる・消す */
+  setLight(name: string, light: LightState | undefined): Promise<void>;
   /** 人物の頭上のあたりの位置（カメラを向ける先） */
   actorPoint(name: string): THREE.Vector3 | undefined;
   /** 歩かせる時に、進めるマスを色分けする（空なら消す） */
@@ -53,12 +57,44 @@ export function createSceneView(options: {
   lookOf: (name: string) => PuppetLook;
   /** 物の種類の名前（台本の名前）→ 見た目の id */
   propModelOf: (kind: string) => string;
+  /** 続く姿勢の名前 → 姿勢 */
+  postureOf: (name: string) => PuppetPose | undefined;
+  /** 光の色の名前 → 色 */
+  lightColorOf: (name: string) => number;
 }): SceneView {
   const { scene, mapView } = options;
   const tweens = createTweens();
   let speed = 1;
-  const actors = new Map<string, { puppet: Puppet; coord: Coord }>();
+  const actors = new Map<string, { puppet: Puppet; coord: Coord; posture: PuppetPose }>();
   const props = new Map<string, { model: Puppet; kind: string; coord: Coord }>();
+  const lights = new Map<string, { pillar: LightPillar; light: LightState }>();
+  /** 台本の持ち物（物の種類の名前）を、見た目の id にして人形に付ける */
+  const applyItems = (puppet: Puppet, items: ActorState['items']) => {
+    const models: Record<string, string> = {};
+    for (const [slot, kind] of Object.entries(items ?? {})) models[slot] = kind ? options.propModelOf(kind) : '';
+    puppet.setItems?.(models);
+  };
+  const postureOf = (name: string | undefined): PuppetPose => (name ? (options.postureOf(name) ?? {}) : {});
+  const placeLight = (entry: { pillar: LightPillar; light: LightState }) => {
+    const l = entry.light;
+    const a = l.actor ? actors.get(l.actor) : undefined;
+    const c = a ? a.coord : l.x !== undefined && l.z !== undefined ? { x: l.x, z: l.z } : undefined;
+    if (c) entry.pillar.group.position.copy(mapView.tileTop(c.x, c.z));
+    entry.pillar.group.visible = c !== undefined;
+  };
+  const dropLight = (name: string) => {
+    lights.get(name)?.pillar.dispose();
+    lights.delete(name);
+  };
+  const makeLight = (name: string, light: LightState) => {
+    dropLight(name);
+    const pillar = createLightPillar(options.lightColorOf(light.color));
+    scene.add(pillar.group);
+    const entry = { pillar, light };
+    lights.set(name, entry);
+    placeLight(entry);
+    return entry;
+  };
 
   const place = (obj: THREE.Object3D, c: Coord) => {
     obj.position.copy(mapView.tileTop(c.x, c.z));
@@ -69,7 +105,10 @@ export function createSceneView(options: {
     scene.add(puppet.group);
     place(puppet.group, a);
     puppet.setFacing(a.facing);
-    actors.set(name, { puppet, coord: { x: a.x, z: a.z } });
+    applyItems(puppet, a.items);
+    const posture = postureOf(a.posture);
+    puppet.setPose?.(posture);
+    actors.set(name, { puppet, coord: { x: a.x, z: a.z }, posture });
     return puppet;
   };
   const makeProp = (name: string, kind: string, c: Coord) => {
@@ -108,8 +147,18 @@ export function createSceneView(options: {
         place(puppet.group, a);
         puppet.setFacing(a.facing);
         puppet.setOpacity(1);
-        puppet.setPose?.({});
-        actors.set(name, { puppet, coord: { x: a.x, z: a.z } });
+        applyItems(puppet, a.items);
+        const posture = postureOf(a.posture);
+        puppet.setPose?.(posture);
+        actors.set(name, { puppet, coord: { x: a.x, z: a.z }, posture });
+      }
+      for (const name of [...lights.keys()]) if (!stage.lights?.[name]) dropLight(name);
+      for (const [name, l] of Object.entries(stage.lights ?? {})) {
+        const entry = lights.get(name);
+        if (entry && entry.light.color === l.color) {
+          entry.light = l;
+          placeLight(entry);
+        } else makeLight(name, l);
       }
       for (const name of [...props.keys()]) {
         const want = stage.props[name];
@@ -169,33 +218,7 @@ export function createSceneView(options: {
     async gesture(name, motion) {
       const a = actors.get(name);
       if (!a) return;
-      const frames = motion.frames;
-      const baseYaw = a.puppet.yaw;
-      const value = (key: keyof PuppetPose | 'turn', t: number) => {
-        let prev = frames[0]!;
-        for (const f of frames) {
-          if (f.t <= t) prev = f;
-          else {
-            const span = f.t - prev.t || 1;
-            const k = easeInOut((t - prev.t) / span);
-            return (prev[key] ?? 0) + ((f[key] ?? 0) - (prev[key] ?? 0)) * k;
-          }
-        }
-        return prev[key] ?? 0;
-      };
-      await play(motion.seconds, (t) => {
-        a.puppet.setPose?.({
-          bow: value('bow', t),
-          head: value('head', t),
-          headTurn: value('headTurn', t),
-          armL: value('armL', t),
-          armR: value('armR', t),
-          drop: value('drop', t),
-          lift: value('lift', t),
-        });
-        a.puppet.setYaw(baseYaw + value('turn', t));
-      });
-      a.puppet.setPose?.({});
+      await playGesture(tweens, a.puppet, motion, a.posture, speed);
     },
     async putProp(name, kind, c) {
       dropProp(name);
@@ -219,6 +242,35 @@ export function createSceneView(options: {
       const glow = new THREE.Color(0xffffff);
       await play(0.35, (t) => model.setGlow(glow, 1 - t));
       model.setGlow(glow, 0);
+    },
+    setItems(name, items) {
+      const a = actors.get(name);
+      if (a) applyItems(a.puppet, items);
+    },
+    async setPosture(name, posture) {
+      const a = actors.get(name);
+      if (!a) return;
+      const from = a.posture;
+      const to = postureOf(posture);
+      a.posture = to;
+      await play(0.4, (t) => {
+        const mix: Record<string, number> = {};
+        for (const k of new Set([...Object.keys(from), ...Object.keys(to)]) as Set<keyof PuppetPose>) {
+          mix[k] = (from[k] ?? 0) + ((to[k] ?? 0) - (from[k] ?? 0)) * t;
+        }
+        a.puppet.setPose?.(mix);
+      });
+    },
+    async setLight(name, light) {
+      if (!light) {
+        const entry = lights.get(name);
+        if (!entry) return;
+        await play(0.5, (t) => entry.pillar.setOpacity(1 - t));
+        dropLight(name);
+        return;
+      }
+      const entry = makeLight(name, light);
+      await play(0.6, (t) => entry.pillar.setOpacity(t));
     },
     actorPoint(name) {
       const a = actors.get(name);
@@ -249,8 +301,13 @@ export function createSceneView(options: {
     update(dt, elapsed) {
       tweens.update(dt);
       for (const a of actors.values()) a.puppet.update(elapsed);
+      for (const l of lights.values()) {
+        if (l.light.actor) placeLight(l);
+        l.pillar.update(elapsed);
+      }
     },
     dispose() {
+      for (const name of [...lights.keys()]) dropLight(name);
       for (const name of [...actors.keys()]) dropActor(name);
       for (const name of [...props.keys()]) dropProp(name);
       mapView.setMarks([]);

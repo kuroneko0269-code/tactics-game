@@ -7,16 +7,23 @@
  * - 再開した時に出す「これまで」は、章のデータに3行以内で書く。
  */
 
-/** 場面 */
-export type SceneDefinition =
+/**
+ * 場面。recap を書くと、その場面から再開した時の「これまで」になる（後の場面で recap を書くまで続く。
+ * 章の中で recap を書いた場面がまだなければ、章の recap）
+ */
+export type SceneDefinition = (
   /** 会話（戦闘をしない小さなマップの上で、台本を進める） */
   | { readonly kind: 'dialogue'; readonly id: string; readonly scriptId: string; readonly stageId: string }
   /** 操作の場面（台本の中に、押し続ける・歩かせる の段がある会話。見せ方は会話と同じ） */
   | { readonly kind: 'interactive'; readonly id: string; readonly scriptId: string; readonly stageId: string }
-  /** 戦闘（出撃前の配置から） */
-  | { readonly kind: 'battle'; readonly id: string; readonly battleId: string }
+  /**
+   * 戦闘（出撃前の配置から）。partyId を書くと、部隊の代わりに、その章のために決めた部隊（ジョブと装備）で戦う
+   * （育てた部隊の強さに左右されない。戦闘の結果は部隊に入れない）
+   */
+  | { readonly kind: 'battle'; readonly id: string; readonly battleId: string; readonly partyId?: string }
   /** 拠点（編成と店。「物語を進める」で次の場面へ） */
-  | { readonly kind: 'base'; readonly id: string };
+  | { readonly kind: 'base'; readonly id: string }
+) & { readonly recap?: readonly string[] };
 
 export interface ChapterDefinition {
   readonly id: string;
@@ -51,6 +58,7 @@ export function validateBook(book: BookDefinition): string[] {
     if (c.scenes.length === 0) errors.push(`章 ${c.id}: 場面がありません`);
     if (c.recap.length > RECAP_MAX_LINES) errors.push(`章 ${c.id}: 「これまで」は ${RECAP_MAX_LINES} 行以内にします`);
     for (const s of c.scenes) {
+      if (s.recap && s.recap.length > RECAP_MAX_LINES) errors.push(`場面 ${c.id}/${s.id}: 「これまで」は ${RECAP_MAX_LINES} 行以内にします`);
       const key = `${c.id}/${s.id}`;
       if (ids.has(key)) errors.push(`場面 ${key} が重複しています`);
       ids.add(key);
@@ -83,6 +91,22 @@ export function advanceScene(book: BookDefinition, progress: StoryProgress): Sto
  */
 export function recapFor(book: BookDefinition, progress: StoryProgress): readonly string[] {
   if (progress.finished || (progress.chapter === 0 && progress.scene === 0)) return [];
+  const chapter = book.chapters[progress.chapter];
+  if (!chapter) return [];
+  // 今の場面か、それより前で recap を書いた最後の場面（なければ章の recap）
+  for (let i = Math.min(progress.scene, chapter.scenes.length - 1); i >= 0; i--) {
+    const r = chapter.scenes[i]!.recap;
+    if (r) return r.slice(0, RECAP_MAX_LINES);
+  }
+  return chapter.recap.slice(0, RECAP_MAX_LINES);
+}
+
+/**
+ * 章の冒頭に出す「これまで」（序章の回答 4: 章の冒頭と、再開した時の両方で出す）。
+ * 本の最初の章には、それまでの話がないので出さない。章の recap を出す
+ */
+export function chapterStartRecap(book: BookDefinition, progress: StoryProgress): readonly string[] {
+  if (progress.finished || progress.scene !== 0 || progress.chapter === 0) return [];
   return (book.chapters[progress.chapter]?.recap ?? []).slice(0, RECAP_MAX_LINES);
 }
 

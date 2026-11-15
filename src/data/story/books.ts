@@ -19,7 +19,7 @@ export const trialBook: BookDefinition = {
         { kind: 'dialogue', id: 'opening', scriptId: 'trialOpening', stageId: 'stage-room' },
         { kind: 'interactive', id: 'hands', scriptId: 'trialHands', stageId: 'stage-room' },
         { kind: 'dialogue', id: 'battle-intro', scriptId: 'trialBattleIntro', stageId: 'stage-yard' },
-        { kind: 'battle', id: 'weir', battleId: 'trial-weir' },
+        { kind: 'battle', id: 'weir', battleId: 'trial-weir', partyId: 'trial', recap: ['試しの場面の途中です。', '堰の合わせ目を壊す戦闘から続けます。'] },
         { kind: 'dialogue', id: 'closing', scriptId: 'trialClosing', stageId: 'stage-room' },
       ],
     },

@@ -263,7 +263,9 @@ export function suspendedBattleFits(
   story: Readonly<Record<string, StoryProgress>> = {},
 ): boolean {
   const players = battle.state.units.filter((u) => u.team === 'player' && u.progress);
-  if (players.length === 0) return false;
+  // 物語の章のために決めた部隊で戦う戦闘（序章など）は、育てた部隊と関係がない（味方は経験値と JP を得ない）
+  const fixedParty = battle.origin.kind === 'story' && players.length === 0 && battle.state.units.some((u) => u.team === 'player');
+  if (players.length === 0 && !fixedParty) return false;
   const fits = players.every((u) => roster.units.some((r) => r.id === u.id && r.jobId === u.jobId));
   if (!fits) return false;
   // 物語の戦闘なら、物語の今の場面の戦闘であること

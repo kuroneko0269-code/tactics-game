@@ -23,7 +23,7 @@ import type {
 } from './battleTypes';
 import { manhattan, type Coord } from './geometry';
 import { getTile } from './map';
-import { isAlive, occupantAt } from './movement';
+import { isAlive, isBystanderTile, occupantAt } from './movement';
 
 /** 勝敗条件を省いた時の決まり（今までの訓練戦と同じ） */
 export const DEFAULT_OBJECTIVES: BattleObjectives = {
@@ -206,7 +206,7 @@ export function stateTriggerDue(event: MapEventState, state: BattleState): boole
  * taken は、同時に出す増援がすでに使ったマス。空いたマスがなければ undefined。
  */
 export function spawnTile(state: BattleState, wanted: Coord, taken: readonly Coord[] = []): Coord | undefined {
-  const free = (c: Coord) => !occupantAt(state, c.x, c.z) && !onTiles(taken, c);
+  const free = (c: Coord) => !occupantAt(state, c.x, c.z) && !onTiles(taken, c) && !isBystanderTile(state, c);
   if (getTile(state.map, wanted.x, wanted.z) && free(wanted)) return { x: wanted.x, z: wanted.z };
   const base = getTile(state.map, wanted.x, wanted.z)?.height ?? 0;
   let best: { c: Coord; score: number[] } | undefined;

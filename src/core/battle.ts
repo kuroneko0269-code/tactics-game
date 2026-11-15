@@ -169,6 +169,13 @@ export function startBattle(
   for (const t of setup.traps ?? []) {
     if (!getTile(map, t.x, t.z)) throw new Error(`罠 (${t.x}, ${t.z}) がマップ外です`);
   }
+  // 戦わない背景の人々: マップの中の、ユニットと重ならないマスに立つ
+  for (const b of setup.bystanders ?? []) {
+    if (ids.has(b.id)) throw new Error(`背景の人 id ${b.id} が重複しています`);
+    ids.add(b.id);
+    if (!getTile(map, b.x, b.z)) throw new Error(`背景の人 ${b.id}: 配置 (${b.x}, ${b.z}) がマップ外です`);
+    if (units.some((u) => u.x === b.x && u.z === b.z)) throw new Error(`背景の人 ${b.id}: (${b.x}, ${b.z}) にはユニットがいます`);
+  }
   const scenario: ScenarioState = {
     objectives,
     events,
@@ -188,6 +195,7 @@ export function startBattle(
     lastAggressionTurn: 0,
     scenario,
     lastActivityTurn: 0,
+    ...(setup.bystanders && setup.bystanders.length > 0 ? { bystanders: setup.bystanders.map((b) => ({ ...b })) } : {}),
   };
   const out: BattleEvent[] = [];
   return { state: beginNextTurn(state, out), events: out };
@@ -281,7 +289,14 @@ function buildUnit(
     movedLastTurn: false,
     turnStartHp: stats.maxHp,
     endureUsed: false,
+    ...(p.minHp !== undefined ? { minHp: validMinHp(p) } : {}),
   };
+}
+
+/** 倒れないユニットの HP の下限を確かめる（1 以上の整数） */
+function validMinHp(p: UnitPlacement): number {
+  if (!Number.isInteger(p.minHp) || p.minHp! < 1) throw new Error(`ユニット ${p.id}: minHp は 1 以上の整数にしてください`);
+  return p.minHp!;
 }
 
 /**
