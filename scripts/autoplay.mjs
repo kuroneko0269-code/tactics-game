@@ -2255,10 +2255,13 @@ async function storyRun(browser, baseUrl, name, core) {
   };
   /** 会話を最後まで進める。hook(status) が true を返したら、そこで止める */
   const drive = async (hook) => {
+    // 今の場面の会話だけを進める（次の場面の会話に入ったら止める）
+    const start = await T(() => window.__tactics.story().trial?.scene ?? -1);
     for (let guard = 0; guard < 200; guard++) {
       await settle();
       const d = await status();
       if (!d) return 'ended';
+      if ((await T(() => window.__tactics.story().trial?.scene ?? -1)) !== start) return 'ended';
       if (hook && (await hook(d))) return 'stopped';
       if (d.waiting === 'line') await tapLine();
       else if (d.waiting === 'hold') await doHold(false);
