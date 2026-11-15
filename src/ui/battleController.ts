@@ -887,6 +887,10 @@ export function createBattleController(start: ActionResult, deps: BattleControll
     // ユニットの体をタップした時は、候補はそのユニットのマスだけになっている（tapJudge.ts）。
     // 戦闘不能のユニットも、タップすると情報の欄に残りのカウントが出る
     const occupied = first ? occupantAt(state, first.x, first.z) : undefined;
+    // 移動を選ぶ時に倒れたユニット（体が低いので、マスの上面に触れたと判定されやすい）を押したら、情報を見せるだけにする。
+    // 近くの選べるマスへ逃がすと、見るつもりで押しただけなのに隣のマスへ移動してしまうため。
+    // （魔法の狙いでは、倒れたユニットのマスも範囲の中心に選べる）
+    if (mode.kind === 'main' && occupied && isKnockedOut(occupied)) return hud.setUnitInfo(occupied, state.turnNumber);
     // 今の操作で選べるマスがあれば、候補の先頭から順に探してそれを選ぶ
     if (mode.kind === 'main' && !turn()!.moved) {
       const reachable = reachableTiles(state, actor());

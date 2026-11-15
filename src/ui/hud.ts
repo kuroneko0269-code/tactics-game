@@ -210,8 +210,38 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
     const assigned = assignFacingSlots(center, dirs);
     // ユニットが画面の端にいる時は、4つのボタンをまとめて内側へずらす（1つずつ端に寄せると重なるため）
     const reach = FACING_RADIUS_PX * Math.SQRT1_2 + 30;
-    const cx = clampNum(center.x, reach, Math.max(reach, window.innerWidth - reach));
-    const cy = clampNum(center.y, reach, Math.max(reach, window.innerHeight - reach));
+    const cx0 = clampNum(center.x, reach, Math.max(reach, window.innerWidth - reach));
+    const cy0 = clampNum(center.y, reach, Math.max(reach, window.innerHeight - reach));
+    // ほかの表示に重なる時は、近い所から空いている位置を探して、4つをまとめてずらす（フェーズ2-5）。
+    // 押せる物（勝敗条件の帯・カメラのボタン・行動のボタン）に重なると、そちらが押されたり、向きのボタンが隠れて押せなかったりするので必ず避ける。
+    // 行動順・情報の欄・案内文は、重なっても押せる（タップは下へ通る）が見えにくいので、空きがあれば避ける
+    const rectsOf = (els: readonly HTMLElement[]) =>
+      els.filter((e) => !e.hidden).map((e) => e.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0);
+    // 行動のボタンの欄は横に広い（右に寄せて並べる）ので、ボタンそのものの四角で数える
+    const pressable = rectsOf([objectiveBar, camera, ...actions.querySelectorAll<HTMLElement>('button'), ...undoArea.querySelectorAll<HTMLElement>('button')]);
+    const visual = [...pressable, ...rectsOf([order, info, hint])];
+    const half = FACING_BUTTON_PX / 2 + 4;
+    const fits = (cx: number, cy: number, obstacles: readonly DOMRect[]) =>
+      FACING_SLOTS.every((slot) => {
+        const x = cx + Math.cos(SLOT_ANGLES[slot]) * FACING_RADIUS_PX;
+        const y = cy + Math.sin(SLOT_ANGLES[slot]) * FACING_RADIUS_PX;
+        if (x - half < 0 || y - half < 0 || x + half > window.innerWidth || y + half > window.innerHeight) return false;
+        return obstacles.every((r) => x + half <= r.left || x - half >= r.right || y + half <= r.top || y - half >= r.bottom);
+      });
+    const nearestFit = (obstacles: readonly DOMRect[]): { x: number; y: number } | undefined => {
+      if (fits(cx0, cy0, obstacles)) return { x: cx0, y: cy0 };
+      for (let d = 8; d <= 480; d += 8) {
+        for (let k = 0; k < 16; k++) {
+          const a = (k * Math.PI) / 8;
+          const p = { x: cx0 + Math.cos(a) * d, y: cy0 + Math.sin(a) * d };
+          if (fits(p.x, p.y, obstacles)) return p;
+        }
+      }
+      return undefined;
+    };
+    const spot = nearestFit(visual) ?? nearestFit(pressable) ?? { x: cx0, y: cy0 };
+    const cx = spot.x;
+    const cy = spot.y;
     for (const f of facingButtons) {
       const a = assigned.find((x) => x.slot === f.slot)!;
       const angle = SLOT_ANGLES[f.slot];
@@ -552,6 +582,8 @@ const SLOT_ANGLES: Record<FacingSlot, number> = {
  * 48px のボタンどうしが重ならない（以前の 3D の矢印は、見る角度によって重なって押しにくかった）。
  */
 const FACING_RADIUS_PX = 64;
+/** 向きのボタンの大きさ（px。style.css の .facing-button と同じ） */
+const FACING_BUTTON_PX = 52;
 const ARROW_SVG =
   '<svg viewBox="-12 -12 24 24" width="26" height="26" aria-hidden="true"><path d="M11 0 L0 -9 L0 -4 L-10 -4 L-10 4 L0 4 L0 9 Z" fill="currentColor"/></svg>';
 

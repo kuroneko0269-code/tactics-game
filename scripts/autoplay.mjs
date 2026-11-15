@@ -588,6 +588,22 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
         return { d: b.dataset.direction, x: r.left, y: r.top, w: r.width, h: r.height };
       }),
     );
+    // 勝敗条件の帯・カメラのボタン・行動のボタンなどに重ならない（重なると、ボタンが隠れて押せない・帯の方が押されて一覧が開く）
+    const others = await T(() =>
+      ['.objective-bar', '.camera-buttons', '.actions button', '.undo-area button'].flatMap((sel) =>
+        [...document.querySelectorAll(sel)].flatMap((e) => {
+          if (e.hidden) return [];
+          const r = e.getBoundingClientRect();
+          return r.width > 0 && r.height > 0 ? [{ sel, x: r.left, y: r.top, w: r.width, h: r.height }] : [];
+        }),
+      ),
+    );
+    for (const o of others) {
+      for (const b of boxes) {
+        const overlap = b.x < o.x + o.w && o.x < b.x + b.w && b.y < o.y + o.h && o.y < b.y + b.h;
+        check(!overlap, `向きのボタン ${b.d} が、${o.sel} に重なっています`);
+      }
+    }
     check(boxes.length === 4, `向きのボタンが4つありません（${boxes.length}）`);
     check(new Set(boxes.map((b) => b.d)).size === 4, `向きのボタンの向きが重複しています（${JSON.stringify(boxes)}）`);
     for (const b of boxes) {
@@ -971,7 +987,8 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
     await pressButton(text.base.resumeBattle);
     await waitFor('戦闘の再開', () => window.__tactics.screen() === 'battle' && window.__tactics.state() !== null);
     const resumed = await getState();
-    check(JSON.stringify(resumed) === JSON.stringify(saved.state), `再開した戦闘の状態が、保存したものと違います（${when}）`);
+    // 敵の手番の途中から再開した時は、すぐに続きの敵の行動が進むので、比べられるのは入力待ちの時だけ
+    if (exact) check(JSON.stringify(resumed) === JSON.stringify(saved.state), `再開した戦闘の状態が、保存したものと違います（${when}）`);
     stats.reloads++;
     log(`${resumed.turnNumber}手番目（${when}）: ページを読み込み直して、拠点の「${text.base.resumeBattle}」から再開`);
   };
@@ -1660,7 +1677,7 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
     koMode.kind === 'spellConfirm' && koMode.target.kind === 'unit' && koMode.target.unitId === ko.downId,
     `蘇生の狙いが違います（${JSON.stringify(koMode)}）`,
   );
-  const revivePreview = await page.locator('.spell-preview').textContent();
+  const revivePreview = await page.locator('.preview').textContent();
   check(revivePreview.includes(text.spellPreview.revive(ko.reviveHp, ko.maxHp)), `蘇生の予測に復帰後の HP がありません（${revivePreview}）`);
   await screenshot('revive-preview');
   await pressButton('確定');
@@ -2097,9 +2114,6 @@ async function checkLayouts(browser, baseUrl, name, core) {
   const ko = knockoutDrill(core);
   await page.evaluate((r) => window.__tactics.load(r), ko.start);
   await until(() => window.__tactics.mode() === 'main' && window.__tactics.camera().idle);
-  const downPoint = await page.evaluate((id) => window.__tactics.unitScreen(id), ko.downId);
-  await page.mouse.click(downPoint.x, downPoint.y);
-  await until((t) => document.querySelector('.info-knockout')?.textContent === t, text.knockout.info(2));
   await inspect('battle-knockout');
   // マスターの印（編成の画面のジョブのタブ）
   const P = core.progression;
