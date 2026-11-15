@@ -180,26 +180,26 @@ describe('マップ上のイベント', () => {
   it('「手番」のきっかけ: 戦闘の開始時（0）と、規定の手番数が経過した時にメッセージを出す', () => {
     const { state, events } = begin({
       events: [
-        { id: 'intro', trigger: { kind: 'turn', turn: 0 }, effects: [{ kind: 'message', messageId: 'hello' }] },
-        { id: 'later', trigger: { kind: 'turn', turn: 2 }, effects: [{ kind: 'message', messageId: 'later' }] },
+        { id: 'intro', trigger: { kind: 'turn', turn: 0 }, effects: [{ kind: 'dialogue', scriptId: 'hello' }] },
+        { id: 'later', trigger: { kind: 'turn', turn: 2 }, effects: [{ kind: 'dialogue', scriptId: 'later' }] },
       ],
     });
-    expect(events.filter((e) => e.type === 'message')).toEqual([{ type: 'message', messageId: 'hello' }]);
+    expect(events.filter((e) => e.type === 'dialogue')).toEqual([{ type: 'dialogue', scriptId: 'hello' }]);
     const one = wait(state);
-    expect(one.events.some((e) => e.type === 'message')).toBe(false);
+    expect(one.events.some((e) => e.type === 'dialogue')).toBe(false);
     const two = wait(one.state);
-    expect(two.events.filter((e) => e.type === 'message')).toEqual([{ type: 'message', messageId: 'later' }]);
+    expect(two.events.filter((e) => e.type === 'dialogue')).toEqual([{ type: 'dialogue', scriptId: 'later' }]);
     // 1回だけ
-    expect(waitTurns(two.state, 4).events.some((e) => e.type === 'message')).toBe(false);
+    expect(waitTurns(two.state, 4).events.some((e) => e.type === 'dialogue')).toBe(false);
   });
 
   it('every で繰り返し、times の回数で止まる', () => {
     const { state } = begin({
-      events: [{ id: 'tick', trigger: { kind: 'turn', turn: 1, every: 2 }, effects: [{ kind: 'message', messageId: 't' }], times: 3 }],
+      events: [{ id: 'tick', trigger: { kind: 'turn', turn: 1, every: 2 }, effects: [{ kind: 'dialogue', scriptId: 't' }], times: 3 }],
     });
     const r = waitTurns(state, 10);
     // 1, 3, 5 手番の後（3回まで）
-    expect(r.events.filter((e) => e.type === 'message')).toHaveLength(3);
+    expect(r.events.filter((e) => e.type === 'dialogue')).toHaveLength(3);
   });
 
   it('「マスに入る」のきっかけ: 指定の陣営のユニットがマスに入った時だけ起き、その移動は取り消せない', () => {
@@ -213,16 +213,16 @@ describe('マップ上のイベント', () => {
     const event = {
       id: 'step',
       trigger: { kind: 'enterTile' as const, tiles: [{ x: 2, z: 0 }], team: 'player' as const },
-      effects: [{ kind: 'message' as const, messageId: 'step' }],
+      effects: [{ kind: 'dialogue' as const, scriptId: 'step' }],
       times: 1,
       fired: 0,
     };
     const state = makeState({ ...base, scenario: { events: [event] } });
     const elsewhere = applyAction(state, { type: 'move', x: 1, z: 0 });
-    expect(elsewhere.events.some((e) => e.type === 'message')).toBe(false);
+    expect(elsewhere.events.some((e) => e.type === 'dialogue')).toBe(false);
     expect(() => applyAction(elsewhere.state, { type: 'undoMove' })).not.toThrow();
     const r = applyAction(state, { type: 'move', x: 2, z: 0 });
-    expect(r.events.filter((e) => e.type === 'message')).toEqual([{ type: 'message', messageId: 'step' }]);
+    expect(r.events.filter((e) => e.type === 'dialogue')).toEqual([{ type: 'dialogue', scriptId: 'step' }]);
     expect(r.state.scenario.events[0]!.fired).toBe(1);
     expect(() => applyAction(r.state, { type: 'undoMove' })).toThrow();
     // 敵が入っても起きない
@@ -232,7 +232,7 @@ describe('マップ上のイベント', () => {
       x: 2,
       z: 0,
     });
-    expect(moved.events.some((e) => e.type === 'message')).toBe(false);
+    expect(moved.events.some((e) => e.type === 'dialogue')).toBe(false);
   });
 
   it('「HP が一定以下」と「撃破」のきっかけは、HP が減った時に1回だけ起きる', () => {
@@ -245,8 +245,8 @@ describe('マップ上のイベント', () => {
       ],
       scenario: {
         events: [
-          { id: 'hurt', trigger: { kind: 'hpBelow', unitId: 'e', percent: 50 }, effects: [{ kind: 'message', messageId: 'hurt' }], times: 1, fired: 0 },
-          { id: 'down', trigger: { kind: 'unitDefeated', unitId: 'e' }, effects: [{ kind: 'message', messageId: 'down' }], times: 1, fired: 0 },
+          { id: 'hurt', trigger: { kind: 'hpBelow', unitId: 'e', percent: 50 }, effects: [{ kind: 'dialogue', scriptId: 'hurt' }], times: 1, fired: 0 },
+          { id: 'down', trigger: { kind: 'unitDefeated', unitId: 'e' }, effects: [{ kind: 'dialogue', scriptId: 'down' }], times: 1, fired: 0 },
         ],
       },
     });
@@ -254,13 +254,13 @@ describe('マップ上のイベント', () => {
     const hurt = applyAction(state, { type: 'attack', targetId: 'e' });
     const hit = hurt.events.find((e) => e.type === 'attacked');
     expect(hit && hit.type === 'attacked' && hit.hit).toBe(true);
-    expect(hurt.events.filter((e) => e.type === 'message')).toEqual([{ type: 'message', messageId: 'hurt' }]);
+    expect(hurt.events.filter((e) => e.type === 'dialogue')).toEqual([{ type: 'dialogue', scriptId: 'hurt' }]);
     // 次の攻撃で倒すと「撃破」だけが起きる（「HP が一定以下」は起き直さない）
     const again = applyAction(
       { ...hurt.state, turn: { ...hurt.state.turn!, acted: false, unitId: 'p' }, winner: null },
       { type: 'attack', targetId: 'e' },
     );
-    expect(again.events.filter((e) => e.type === 'message')).toEqual([{ type: 'message', messageId: 'down' }]);
+    expect(again.events.filter((e) => e.type === 'dialogue')).toEqual([{ type: 'dialogue', scriptId: 'down' }]);
   });
 
   it('増援: きっかけの時点で予告し、delay 手番後の区切りで現れる', () => {

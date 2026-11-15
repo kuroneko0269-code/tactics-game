@@ -323,10 +323,10 @@ const timeMagic = (
   id: string,
   rest: Pick<SpellDefinition, 'effect' | 'mpCost' | 'castSpeed'> & Partial<SpellDefinition>,
 ): SpellDefinition => ({ id, kind: 'magic', element: 'none', power: 0, range: 4, areaRadius: 0, heightTolerance: 0, ...rest });
-/** 加速: 中心と上下左右の5マスの、味方だけに加速（素早さ +50%）を付ける */
-export const haste = timeMagic('haste', { effect: 'status', inflicts: 'haste', affects: 'allies', areaRadius: 1, heightTolerance: 2, mpCost: 8, castSpeed: 50 });
-/** 減速: 中心と上下左右の5マスの、敵だけに素早さ低下を付ける */
-export const decelerate = timeMagic('decelerate', { effect: 'status', inflicts: 'speedDown', affects: 'enemies', areaRadius: 1, heightTolerance: 2, mpCost: 8, castSpeed: 50 });
+/** 加速: 中心と上下左右の5マスにいる全員（敵も味方も）に加速（素早さ +50%）を付ける（PR #18 の回答。区別できるのは召喚士だけ） */
+export const haste = timeMagic('haste', { effect: 'status', inflicts: 'haste', areaRadius: 1, heightTolerance: 2, mpCost: 8, castSpeed: 50 });
+/** 減速: 中心と上下左右の5マスにいる全員（敵も味方も）に素早さ低下を付ける */
+export const decelerate = timeMagic('decelerate', { effect: 'status', inflicts: 'speedDown', areaRadius: 1, heightTolerance: 2, mpCost: 8, castSpeed: 50 });
 /** 停止: 停止（次の手番が何もできずに過ぎる）を付ける。詠唱は長い */
 export const stop = timeMagic('stop', { effect: 'status', inflicts: 'stop', mpCost: 14, castSpeed: 34 });
 /** 早送り: 味方ひとり（自分以外）の CT を満たし、すぐに行動させる。詠唱あり。消費 MP が大きい */

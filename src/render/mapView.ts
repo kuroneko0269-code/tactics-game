@@ -27,6 +27,8 @@ export interface MapView {
    * 目印はタップの判定に関わらない
    */
   setOverlays(tiles: readonly OverlayTile[]): void;
+  /** マスの高さや種類が変わった（地形の変化。物語の土台）: マスの柱を作り直し、目印の位置を合わせる */
+  setMap(map: BattleMap): void;
   /** マップの見た目をシーンから外す時に、使っていた部品を片付ける */
   dispose(): void;
   update(elapsedSeconds: number): void;
@@ -104,7 +106,8 @@ const RESERVED_OPACITY = 0.3;
 
 const COORD_KEY = 'tileCoord';
 
-export function createMapView(map: BattleMap): MapView {
+export function createMapView(initialMap: BattleMap): MapView {
+  let map = initialMap;
   const group = new THREE.Group();
   const offsetX = -map.width / 2 + 0.5;
   const offsetZ = -map.depth / 2 + 0.5;
@@ -119,6 +122,9 @@ export function createMapView(map: BattleMap): MapView {
     return new THREE.Vector3(x + offsetX, h * HEIGHT_STEP, z + offsetZ);
   };
 
+  const tileGroup = new THREE.Group();
+  group.add(tileGroup);
+  const buildTiles = () => {
   for (const tile of map.tiles) {
     const columnHeight = tile.height * HEIGHT_STEP + BASE_THICKNESS;
     let geometry = geometryCache.get(tile.height);
@@ -135,8 +141,10 @@ export function createMapView(map: BattleMap): MapView {
 
     const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geometry), edgeMaterial);
     mesh.add(edges);
-    group.add(mesh);
+    tileGroup.add(mesh);
   }
+  };
+  buildTiles();
 
   // 色分け表示：マスの上面に重ねる半透明の板と枠。マスごとに1枚ずつ用意して、表示を切り替える
   const markGeometry = new THREE.PlaneGeometry(0.94, 0.94).rotateX(-Math.PI / 2);
@@ -228,6 +236,22 @@ export function createMapView(map: BattleMap): MapView {
         if (t.frame !== undefined) m.frameMaterial.color.setHex(t.frame);
         else m.frameMaterial.color.setHex(t.color).offsetHSL(0, 0, 0.15);
         m.plate.visible = true;
+      }
+    },
+    setMap(next) {
+      map = next;
+      for (const child of [...tileGroup.children]) {
+        tileGroup.remove(child);
+        const mesh = child as THREE.Mesh;
+        for (const m of mesh.material as THREE.Material[]) m.dispose();
+        for (const e of mesh.children) (e as THREE.LineSegments).geometry.dispose();
+      }
+      buildTiles();
+      for (const tile of map.tiles) {
+        const top = tileTop(tile.x, tile.z);
+        const i = tile.z * map.width + tile.x;
+        markMeshes[i]?.plate.position.set(top.x, top.y + 0.012, top.z);
+        reservedMeshes[i]?.plate.position.set(top.x, top.y + 0.006, top.z);
       }
     },
     setOverlays(tiles) {

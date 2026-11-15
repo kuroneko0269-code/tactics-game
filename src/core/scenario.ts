@@ -15,6 +15,7 @@ import type {
   BattleState,
   DefeatCondition,
   MapEventState,
+  Side,
   Team,
   TrapState,
   UnitState,
@@ -33,7 +34,7 @@ export const DEFAULT_OBJECTIVES: BattleObjectives = {
 export type OutcomeReason = VictoryCondition['kind'] | DefeatCondition['kind'] | 'stalemate';
 
 export interface Outcome {
-  readonly winner: Team;
+  readonly winner: Side;
   readonly reason: OutcomeReason;
 }
 
@@ -53,6 +54,8 @@ export function judgeOutcome(state: BattleState): Outcome | null {
   if (!alive('enemy')) return { winner: 'player', reason: 'defeatAll' };
   for (const c of victory) {
     if (c.kind === 'defeatUnit' && isDown(c.unitId)) return { winner: 'player', reason: c.kind };
+    if (c.kind === 'destroyObjects' && c.unitIds.every((id) => isDown(id))) return { winner: 'player', reason: c.kind };
+    if (c.kind === 'hitUnit' && tallyOf(state, c.id) >= c.times) return { winner: 'player', reason: c.kind };
     if (c.kind === 'reachTile' && state.units.some((u) => u.team === 'player' && isAlive(u) && onTiles(c.tiles, u))) {
       return { winner: 'player', reason: c.kind };
     }
@@ -134,6 +137,21 @@ export function goalTiles(objectives: BattleObjectives): Coord[] {
   return objectives.victory.flatMap((c) => (c.kind === 'reachTile' ? c.tiles.map((t) => ({ x: t.x, z: t.z })) : []));
 }
 
+/** 数えた回数（hitUnit の勝利条件。物語の土台） */
+export function tallyOf(state: BattleState, id: string): number {
+  return state.scenario.tallies?.[id] ?? 0;
+}
+
+/** 壊すと勝利になる対象物の id（物語の土台） */
+export function objectiveObjectIds(objectives: BattleObjectives): string[] {
+  return objectives.victory.flatMap((c) => (c.kind === 'destroyObjects' ? [...c.unitIds] : []));
+}
+
+/** 攻撃を当てる回数を数える対象のユニットの id（hitUnit の勝利条件） */
+export function hitTargetIds(objectives: BattleObjectives): string[] {
+  return objectives.victory.flatMap((c) => (c.kind === 'hitUnit' ? [c.unitId] : []));
+}
+
 /** 撃破の対象になっている敵の id */
 export function targetUnitIds(objectives: BattleObjectives): string[] {
   return objectives.victory.flatMap((c) => (c.kind === 'defeatUnit' ? [c.unitId] : []));
@@ -173,6 +191,8 @@ export function enterTriggerDue(event: MapEventState, unit: UnitState, c: Coord)
 export function stateTriggerDue(event: MapEventState, state: BattleState): boolean {
   const t = event.trigger;
   if (event.fired >= event.times) return false;
+  if (t.kind === 'tally') return tallyOf(state, t.id) >= t.count;
+  if (t.kind === 'objectsBroken') return t.unitIds.filter((id) => (state.units.find((u) => u.id === id)?.hp ?? 1) <= 0).length >= t.count;
   if (t.kind !== 'hpBelow' && t.kind !== 'unitDefeated') return false;
   const unit = state.units.find((u) => u.id === t.unitId);
   if (!unit) return false;

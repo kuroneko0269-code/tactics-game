@@ -36,6 +36,11 @@ export interface CameraRig {
    * カメラが止まったら解決する Promise を返す（動かす必要がなければすぐに解決する）。
    */
   focusOn(points: readonly THREE.Vector3[]): Promise<void>;
+  /**
+   * 指定した点を画面の中央にし、拡大率を zoomScale 倍（その画面の形の最初の拡大率を 1 として）にして、滑らかに寄せる（会話の場面のカメラ。物語の土台）。
+   * カメラが止まったら解決する
+   */
+  lookAt(point: THREE.Vector3, zoomScale?: number): Promise<void>;
   /** カメラが動いていないか */
   readonly idle: boolean;
   /** 毎フレーム呼ぶ。経過秒を渡す */
@@ -248,6 +253,21 @@ export function createCameraRig(initial: CameraRigOptions): CameraRig {
         const onGround = center.addScaledVector(forward, t);
         clampPan(goalPan.set(onGround.x - options.target.x, onGround.z - options.target.z));
       }
+      return new Promise<void>((resolve) => {
+        waiters.push(resolve);
+        flushWaiters();
+      });
+    },
+    lookAt(point, zoomScale) {
+      const forward = new THREE.Vector3(
+        -Math.cos(goalElevation) * Math.sin(toAzimuth),
+        -Math.sin(goalElevation),
+        -Math.cos(goalElevation) * Math.cos(toAzimuth),
+      );
+      const t = (options.target.y - point.y) / forward.y;
+      const onGround = point.clone().addScaledVector(forward, t);
+      clampPan(goalPan.set(onGround.x - options.target.x, onGround.z - options.target.z));
+      if (zoomScale !== undefined) goalZoom = clampZoom(initialZoom() * zoomScale);
       return new Promise<void>((resolve) => {
         waiters.push(resolve);
         flushWaiters();

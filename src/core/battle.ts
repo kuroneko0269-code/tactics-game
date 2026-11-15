@@ -44,6 +44,7 @@ import type {
   BattleSetup,
   BattleState,
   JobDefinition,
+  ObjectPlacement,
   MapEventState,
   PassiveDefinition,
   PendingReinforcement,
@@ -53,6 +54,7 @@ import type {
   StatusId,
   StrikeDefinition,
   Team,
+  TileChange,
   TrapKind,
   TurnState,
   UnitCommand,
@@ -75,7 +77,7 @@ import {
   statusBlocker,
   tickStatuses,
 } from './effects';
-import { DIRECTIONS, directionToward, manhattan, type Coord } from './geometry';
+import { DIRECTIONS, directionToward, manhattan, type Coord, type RelativeSide } from './geometry';
 import { hasMpFor, isValidSpellTarget, previewSpellAt, spellOf, targetCenter } from './magic';
 import {
   actionExp,
@@ -86,7 +88,7 @@ import {
   subtractGrowth,
   ZERO_GROWTH,
 } from './progression';
-import { createMap, getTile } from './map';
+import { createMap, getTile, type Tile } from './map';
 import { canStep, isAlive, isOnMap, reachableTiles, unitAt } from './movement';
 import { createRng, restoreRng } from './rng';
 import {
@@ -126,6 +128,14 @@ export function startBattle(
     if (!getTile(map, p.x, p.z)) throw new Error(`ユニット ${p.id}: 配置 (${p.x}, ${p.z}) がマップ外です`);
     return build(p);
   });
+  // 対象物（物語の土台）: どちらの陣営でもない、行動しない「物」。ユニットと同じ一覧に入れる
+  for (const o of setup.objects ?? []) {
+    if (ids.has(o.id)) throw new Error(`対象物 id ${o.id} が重複しています`);
+    ids.add(o.id);
+    if (!getTile(map, o.x, o.z)) throw new Error(`対象物 ${o.id}: 配置 (${o.x}, ${o.z}) がマップ外です`);
+    if (!Number.isInteger(o.hp) || o.hp < 1) throw new Error(`対象物 ${o.id}: HP は 1 以上の整数にしてください`);
+    units.push(buildObject(o, rules));
+  }
   const objectives = setup.objectives ?? DEFAULT_OBJECTIVES;
   const known = (id: string) => ids.has(id);
   const events: MapEventState[] = (setup.events ?? []).map((e) => {
@@ -142,13 +152,18 @@ export function startBattle(
       };
     });
     // HP と撃破のきっかけは1回だけ（状態で決まるので、繰り返すと同じ時点で何度も起きてしまう）
-    const once = e.trigger.kind === 'hpBelow' || e.trigger.kind === 'unitDefeated';
+    const once = e.trigger.kind === 'hpBelow' || e.trigger.kind === 'unitDefeated' || e.trigger.kind === 'tally' || e.trigger.kind === 'objectsBroken';
     const times = once ? 1 : (e.times ?? 1);
     return { id: e.id, trigger: e.trigger, effects, times, fired: 0 };
   });
   for (const c of [...objectives.victory, ...objectives.defeat]) {
-    if ((c.kind === 'defeatUnit' || c.kind === 'unitDefeated') && !known(c.unitId)) {
+    if ((c.kind === 'defeatUnit' || c.kind === 'unitDefeated' || c.kind === 'hitUnit') && !known(c.unitId)) {
       throw new Error(`勝敗条件のユニット ${c.unitId} がいません`);
+    }
+    if (c.kind === 'destroyObjects') {
+      for (const id of c.unitIds) {
+        if (!units.some((u) => u.id === id && u.object)) throw new Error(`勝敗条件の対象物 ${id} がいません`);
+      }
     }
   }
   for (const t of setup.traps ?? []) {
@@ -159,6 +174,7 @@ export function startBattle(
     events,
     traps: (setup.traps ?? []).map((t) => ({ x: t.x, z: t.z, kind: t.kind, revealed: false })),
     reinforcements: [],
+    tallies: {},
   };
   const state: BattleState = {
     map,
@@ -265,6 +281,50 @@ function buildUnit(
     movedLastTurn: false,
     turnStartHp: stats.maxHp,
     endureUsed: false,
+  };
+}
+
+/**
+ * 対象物（物語の土台）を、戦闘中のユニットの形に組み立てる。陣営は neutral、能力値は HP だけ（素早さ 0 なので手番は来ない）。
+ * 状態変化・受動的なアビリティ・装備は持たない
+ */
+function buildObject(o: ObjectPlacement, rules: BattleRules): UnitState {
+  const stats: UnitStats = { maxHp: o.hp, attack: 0, speed: 0, move: 0, jump: 0, maxMp: 0, magic: 0 };
+  return {
+    id: o.id,
+    team: 'neutral',
+    // ジョブの定義はない。画面で名前を引くため、ジョブの欄は「object:種類」にする
+    jobId: `object:${o.kind}`,
+    x: o.x,
+    z: o.z,
+    facing: 'south',
+    hp: o.hp,
+    ct: 0,
+    knockoutCount: 0,
+    retired: false,
+    stats,
+    attack: rules.unarmedAttack,
+    mp: 0,
+    level: o.level ?? 1,
+    levelDrops: 0,
+    baseStats: stats,
+    growth: ZERO_GROWTH,
+    growthRates: ZERO_GROWTH,
+    statBonus: {},
+    equipment: [],
+    progress: null,
+    weapon: null,
+    commands: [],
+    spells: [],
+    strikes: [],
+    passives: [],
+    statuses: [],
+    actionCount: 0,
+    charging: null,
+    movedLastTurn: false,
+    turnStartHp: o.hp,
+    endureUsed: false,
+    object: { kind: o.kind },
   };
 }
 
@@ -534,6 +594,11 @@ function validateBeforeInterrupt(state: BattleState, action: BattleAction): void
  * ユニットを戦闘不能にする（倒れた姿でマスに残り、カウントが始まる）。詠唱中だった魔法は不発になり、状態変化は消える
  */
 function defeat(state: BattleState, unitId: string, events: BattleEvent[]): BattleState {
+  // 対象物は、戦闘不能にならずに壊れて消える（物語の土台）
+  if (getUnit(state, unitId).object) {
+    events.push({ type: 'objectBroken', unitId });
+    return updateUnit(state, unitId, { hp: 0, retired: true });
+  }
   const count = state.rules.knockout.count;
   events.push({ type: 'defeated', unitId, count });
   const unit = getUnit(state, unitId);
@@ -562,6 +627,8 @@ function interruptCharge(
  */
 function inflict(state: BattleState, unitId: string, status: StatusId, events: BattleEvent[]): BattleState {
   const unit = getUnit(state, unitId);
+  // 対象物には状態変化が付かない
+  if (unit.object) return state;
   const blocker = statusBlocker(unit, status);
   if (blocker) {
     events.push({ type: 'statusBlocked', unitId, status, itemId: blocker.id });
@@ -645,6 +712,7 @@ function resolveWeaponAttack(
   let next = updateUnit(state, attackerId, { facing: preview.attackerFacing });
   next = { ...updateUnit(next, targetId, { hp: targetHp }), rngState: rng.getState() };
   if (hit && preview.endures) next = markEndured(next, targetId, events);
+  if (hit) next = tallyHit(next, attacker, targetId, preview.side, events);
   if (!hit) {
     if (preview.evadePenalty > 0) events.push({ type: 'reaction', unitId: targetId, abilityId: passiveIdOf(target, 'evade')! });
     return next;
@@ -652,7 +720,7 @@ function resolveWeaponAttack(
   if (targetHp === 0) return defeat(next, targetId, events);
 
   // 突き飛ばし: 詠唱を中断させ、1マス押し出す（押し出せなければ、その場で追加のダメージ）
-  if (strike?.knockback && manhattan(attacker, target) === 1) {
+  if (strike?.knockback && manhattan(attacker, target) === 1 && !target.object) {
     next = interruptCharge(next, targetId, 'knockedBack', events);
     const t = getUnit(next, targetId);
     const kb = knockbackOutcome(next, attackerId, attacker, t);
@@ -728,6 +796,11 @@ function resolveSteal(state: BattleState, thiefId: string, targetId: string, str
   let next: BattleState = { ...updateUnit(state, thiefId, { facing: p.attackerFacing }), rngState: rng.getState() };
   const kind = strike.steal!;
   const mine = thief.team === 'player';
+  // 対象物からは盗めない（物語の土台）
+  if (target.object) {
+    events.push({ type: 'stole', thiefId, targetId, kind, success: false, percent: 0 });
+    return next;
+  }
   const stolen = next.stolen ?? { gold: 0, items: [] };
   if (!success) {
     events.push({ type: 'stole', thiefId, targetId, kind, success: false, percent: p.hitPercent });
@@ -951,8 +1024,10 @@ function fireEvent(state: BattleState, index: number, events: BattleEvent[]): Ba
   };
   events.push({ type: 'eventFired', eventId: event.id });
   for (const effect of event.effects) {
-    if (effect.kind === 'message') {
-      events.push({ type: 'message', messageId: effect.messageId });
+    if (effect.kind === 'dialogue') {
+      events.push({ type: 'dialogue', scriptId: effect.scriptId });
+    } else if (effect.kind === 'terrain') {
+      next = changeTerrain(next, effect.tiles, events);
     } else if (effect.kind === 'trap') {
       for (const t of effect.tiles) {
         const occupant = unitAt(next, t.x, t.z);
@@ -976,6 +1051,40 @@ function fireEvent(state: BattleState, index: number, events: BattleEvent[]): Ba
     }
   }
   return next;
+}
+
+/**
+ * 味方の武器による攻撃が当たった: 数える勝利条件（hitUnit）の相手で、向きが合えば回数を 1 増やす（物語の土台）。
+ * 向きを省いた条件は、正面以外（側面と背面）から当てた時だけ数える
+ */
+function tallyHit(state: BattleState, attacker: UnitState, targetId: string, side: RelativeSide, events: BattleEvent[]): BattleState {
+  if (attacker.team !== 'player') return state;
+  let next = state;
+  for (const c of state.scenario.objectives.victory) {
+    if (c.kind !== 'hitUnit' || c.unitId !== targetId) continue;
+    if (!(c.sides ?? ['side', 'back']).includes(side)) continue;
+    const count = (next.scenario.tallies?.[c.id] ?? 0) + 1;
+    events.push({ type: 'tallied', id: c.id, count, times: c.times });
+    next = { ...next, scenario: { ...next.scenario, tallies: { ...next.scenario.tallies, [c.id]: count } } };
+  }
+  return next;
+}
+
+/** 地形を変える（イベント。物語の土台）。マップの外のマスは無視する */
+function changeTerrain(state: BattleState, changes: readonly TileChange[], events: BattleEvent[]): BattleState {
+  const tiles = [...state.map.tiles];
+  const changed: Tile[] = [];
+  for (const c of changes) {
+    const index = c.z * state.map.width + c.x;
+    const old = getTile(state.map, c.x, c.z);
+    if (!old) continue;
+    if (c.height !== undefined && (!Number.isInteger(c.height) || c.height < 0)) throw new Error(`地形の変化 (${c.x}, ${c.z}) の高さが不正です`);
+    const tile: Tile = { ...old, height: c.height ?? old.height, terrain: c.terrain ?? old.terrain };
+    tiles[index] = tile;
+    changed.push(tile);
+  }
+  events.push({ type: 'terrainChanged', tiles: changed });
+  return { ...state, map: { ...state.map, tiles } };
 }
 
 /** 状態で決まるきっかけ（HP が一定以下・撃破）のイベントを、起きなくなるまで起こす */

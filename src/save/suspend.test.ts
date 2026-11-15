@@ -40,7 +40,7 @@ function play(state: BattleState, stop: (s: BattleState, last: BattleAction | un
   for (let i = 0; i < limit && current.turn && !current.winner; i++) {
     if (stop(current, last)) return { state: current, stopped: true };
     const unit = current.units.find((u) => u.id === current.turn!.unitId)!;
-    last = decideNextAction(current, configs[unit.team]);
+    last = decideNextAction(current, configs[unit.team as 'player' | 'enemy']);
     current = applyAction(current, last).state;
   }
   return { state: current, stopped: false };

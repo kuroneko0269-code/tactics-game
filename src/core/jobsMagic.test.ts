@@ -64,6 +64,49 @@ describe('時魔道士', () => {
     expect(skipped).toBe(true);
   });
 
+  it('加速・減速は、範囲（中心と上下左右の5マス）にいる全員に効く（敵と味方を区別しない。PR #18 の回答）', () => {
+    const state = makeState({
+      heights: flat(6, 3),
+      units: [
+        { id: 't', team: 'player', job: caster, x: 0, z: 0, commands: [{ jobId: 'caster', abilityIds: ['haste', 'decelerate'] }] },
+        { id: 'a', team: 'player', x: 2, z: 1, ct: 10 },
+        { id: 'e', team: 'enemy', x: 3, z: 1, ct: 10 },
+      ],
+    });
+    const t = getUnit(state, 't');
+    const haste = t.spells.find((s) => s.id === 'haste')!;
+    expect(previewSpellAt(state, t, haste, { x: 2, z: 1 }).results.map((r) => r.unitId).sort()).toEqual(['a', 'e']);
+    const slow = t.spells.find((s) => s.id === 'decelerate')!;
+    expect(previewSpellAt(state, t, slow, { x: 3, z: 1 }).results.map((r) => r.unitId).sort()).toEqual(['a', 'e']);
+  });
+
+  it('AI: 加速・減速は、付けたい側の数 − 付けたくない側の数 が 1 以上の場所に使う', () => {
+    const state = makeState({
+      heights: flat(7, 3),
+      units: [
+        { id: 't', team: 'player', job: caster, x: 0, z: 0, commands: [{ jobId: 'caster', abilityIds: ['decelerate'] }] },
+        { id: 'a', team: 'player', x: 2, z: 1, ct: 10 },
+        { id: 'e', team: 'enemy', x: 3, z: 1, ct: 10 },
+        { id: 'f', team: 'enemy', x: 4, z: 0, ct: 10 },
+      ],
+    });
+    const moved = { ...state, turn: { ...state.turn!, moved: true } };
+    const plan = chooseStatusSpell(moved, getUnit(moved, 't'), false, { ...testAi, sealMaxDanger: 9 })!;
+    expect(plan).toBeDefined();
+    const t = getUnit(moved, 't');
+    const center = plan.target.kind === 'tile' ? plan.target : { x: -1, z: -1 };
+    const hit = previewSpellAt(moved, t, t.spells[0]!, center).results.map((r) => r.unitId);
+    // 味方の a を巻き込まずに、敵の e と f の両方に付ける場所（中心 (4, 1)）
+    expect(hit.sort()).toEqual(['e', 'f']);
+    // 敵と味方が1体ずつしかいなければ、差が 0 なので使わない
+    const even = { ...moved, units: moved.units.filter((u) => u.id !== 'f') };
+    const evenPlan = chooseStatusSpell(even, getUnit(even, 't'), false, { ...testAi, sealMaxDanger: 9 });
+    if (evenPlan?.target.kind === 'tile') {
+      const r = previewSpellAt(even, t, t.spells[0]!, evenPlan.target).results.map((x) => getUnit(even, x.unitId).team);
+      expect(r.filter((x) => x === 'enemy').length).toBeGreaterThan(r.filter((x) => x === 'player').length);
+    }
+  });
+
   it('早送り: 発動すると味方の CT が満ち、次に行動する', () => {
     const cast = applyAction(scene(), { type: 'cast', spellId: 'quicken', target: { kind: 'unit', unitId: 'a' } }).state;
     const r = wait(cast);

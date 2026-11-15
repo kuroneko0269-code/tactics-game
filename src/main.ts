@@ -58,6 +58,18 @@ import { itemName } from './ui/equipmentText';
 import { showVersion } from './ui/version';
 import { TEXT, unitName } from './ui/text';
 import { createUnitLabels, type UnitLabels } from './ui/unitLabels';
+import { applyDirective, walkPath, type StageState } from './core/dialogue';
+import { parseScriptOrThrow, type Directive, type Script } from './core/script';
+import { advanceScene, currentScene, normalizeProgress, recapFor, STORY_START, type BookDefinition, type StoryProgress } from './core/story';
+import { books } from './data/story/books';
+import { scriptTexts } from './data/story/scripts';
+import { ACTOR_LOOKS as ACTOR_LOOK_IDS, GESTURES, PROP_KINDS, scriptCatalog } from './data/story/stageDefs';
+import { stages } from './data/story/stages';
+import { trialWeirBattle } from './data/battles/trialWeir';
+import { ACTOR_LOOKS, DEFAULT_ACTOR_LOOK } from './render/actorLooks';
+import { createSceneView, type SceneView } from './render/sceneView';
+import { runDialogue, type DialogueRun, type StagePort } from './ui/dialogue';
+import { showRecapScreen, showStoryEndScreen, showTitleScreen } from './ui/titleScreen';
 
 /**
  * 入口。定義データ（data）を戦闘ルールと育成の計算（core）に渡し、
@@ -71,7 +83,12 @@ import { createUnitLabels, type UnitLabels } from './ui/unitLabels';
  * 途中の戦闘があれば、拠点で「戦闘を再開」と「撤退する」だけを出す（再開するまで、編成と店は使えない。部隊と戦闘の食い違いを防ぐため）。
  * 戦闘に勝つと、戦場の段階ごとの報酬（ゴールドと戦利品の抽選）を部隊に入れる（フェーズ2-4）。
  */
-type ScreenName = 'base' | 'roster' | 'shop' | 'deploy' | 'battle' | 'result';
+type ScreenName = 'title' | 'base' | 'roster' | 'shop' | 'deploy' | 'battle' | 'result' | 'scene' | 'recap' | 'story-end';
+
+/** 物語の戦闘の戦場（場面の battleId で引く） */
+const storySites: readonly BattleSite[] = [trialWeirBattle];
+/** 会話の場面のカメラの寄り（その画面の形の最初の拡大率を 1 として） */
+const SCENE_ZOOM = { far: 0.85, mid: 1.25, near: 1.9 } as const;
 
 interface ActiveBattle {
   readonly view: BattleView;
@@ -89,8 +106,10 @@ function main(): void {
   const labelsEl = document.getElementById('labels');
   const screenEl = document.getElementById('screen');
   const metaEl = document.getElementById('meta');
-  if (!stageEl || !hudEl || !labelsEl || !screenEl || !metaEl) {
-    throw new Error('#stage / #hud / #labels / #screen / #meta が見つかりません');
+  const dialogueEl = document.getElementById('dialogue');
+  const fadeEl = document.getElementById('fade');
+  if (!stageEl || !hudEl || !labelsEl || !screenEl || !metaEl || !dialogueEl || !fadeEl) {
+    throw new Error('#stage / #hud / #labels / #screen / #meta / #dialogue / #fade が見つかりません');
   }
   document.title = TEXT.appTitle;
 
@@ -108,7 +127,11 @@ function main(): void {
   let records: GameRecords = loaded?.records ?? EMPTY_RECORDS;
   /** 途中の戦闘（行動がひとつ確定するたびに保存する。決着したら消す） */
   let suspended: SuspendedBattle | null = loaded?.battle ?? null;
-  const persist = () => store.save({ roster, dungeon: dungeonState, records, battle: suspended });
+  /** 物語の進み具合（本ごと。物語の土台） */
+  let story: Readonly<Record<string, StoryProgress>> = loaded?.story ?? {};
+  /** 出したことのある操作の手引き（初めての時だけ出す） */
+  let seenHints: readonly string[] = loaded?.seenHints ?? [];
+  const persist = () => store.save({ roster, dungeon: dungeonState, records, battle: suspended, story, seenHints });
   /** 戦闘の状態が変わった（行動がひとつ確定した）: 途中の戦闘として保存する */
   const saveBattle = (origin: BattleOrigin, state: BattleState) => {
     suspended = { origin, state };
@@ -171,7 +194,8 @@ function main(): void {
     const inBattle = name === 'battle' || name === 'deploy';
     hudEl.hidden = !inBattle;
     labelsEl.hidden = !inBattle;
-    if (inBattle) {
+    if (name !== 'scene') endScene();
+    if (inBattle || name === 'scene') {
       screenEl.hidden = true;
       screenEl.innerHTML = '';
     }
@@ -220,8 +244,14 @@ function main(): void {
       roster = initialRoster;
       dungeonState = EMPTY_DUNGEON_STATE;
       records = EMPTY_RECORDS;
+      story = {};
+      seenHints = [];
     },
+    onTitle: () => showTitle(),
+    storyNext: () => storyBaseNext,
   });
+  /** 物語の拠点の場面の「物語を進める」（物語の拠点の場面の間だけある） */
+  let storyBaseNext: (() => void) | null = null;
   const shopScreen = createShopScreen(screenEl, {
     catalog,
     shop,
@@ -247,6 +277,7 @@ function main(): void {
   });
   const showBase = () => {
     endBattle();
+    storyBaseNext = null;
     setScreen('base');
     base.show();
   };
@@ -414,11 +445,25 @@ function main(): void {
   /** 途中の戦闘の題（拠点の「戦闘を再開」に添える） */
   const suspendedTitle = (origin: BattleOrigin) => {
     if (origin.kind === 'training') return TEXT.base.suspendedTraining(TEXT.tiers[origin.tierId]?.name ?? origin.tierId);
+    if (origin.kind === 'story') return TEXT.base.suspendedStory(TEXT.books[origin.bookId] ?? origin.bookId);
     const t = battleTitle(origin.battle);
     return TEXT.base.suspendedDungeon(TEXT.dungeons[origin.dungeonId] ?? origin.dungeonId, t.n, t.mapName);
   };
   const finisherOf = (origin: BattleOrigin) =>
-    origin.kind === 'training' ? (state: BattleState) => finishBattle(origin.tierId, state) : finishDungeonBattle;
+    origin.kind === 'training'
+      ? (state: BattleState) => finishBattle(origin.tierId, state)
+      : origin.kind === 'story'
+        ? (state: BattleState) => finishStoryBattle(origin.bookId, state)
+        : finishDungeonBattle;
+  /** 途中の戦闘の戦場 */
+  const siteOf = (origin: BattleOrigin): BattleSite => {
+    if (origin.kind === 'training') return site;
+    if (origin.kind === 'dungeon') return ruinsDungeon.battles[origin.battle]!;
+    const scene = bookOf(origin.bookId).chapters[origin.chapter]?.scenes[origin.scene];
+    const found = scene?.kind === 'battle' ? storySites.find((x) => x.id === scene.battleId) : undefined;
+    if (!found) throw new Error('物語の戦闘の戦場が見つかりません');
+    return found;
+  };
 
   /**
    * 途中の戦闘を再開する（最後に保存した状態から）。敵の手番の途中で閉じていた時は、続きの敵の行動を AI がもう一度決めて再生する
@@ -428,13 +473,17 @@ function main(): void {
     const s = suspended;
     if (!s) return showBase();
     endBattle();
-    const def = s.origin.kind === 'training' ? site : ruinsDungeon.battles[s.origin.battle]!;
+    const def = siteOf(s.origin);
     const onFinished = finisherOf(s.origin);
     if (s.state.winner) return onFinished(s.state);
     useMap(def.map);
     setScreen('battle');
     rig.reset();
-    battle = createActiveBattle({ state: s.state, events: [] }, onFinished, (st) => saveBattle(s.origin, st));
+    // 戦闘中の会話の途中で閉じていたら、その会話をもう一度出してから続ける（物語の土台）
+    const pending = s.dialogue ? [{ type: 'dialogue' as const, scriptId: s.dialogue }] : [];
+    battle = createActiveBattle({ state: s.state, events: pending }, onFinished, (st) => saveBattle(s.origin, st));
+    // 再開した戦闘の地形が、マップの定義から変わっていれば（地形の変化の後）、見た目を合わせる
+    void battle.view.updateMap(s.state.map);
     currentFinish = onFinished;
   };
 
@@ -451,11 +500,12 @@ function main(): void {
     // 撤退した時は、盗んだ物は持ち帰れない（PR #17 の回答）
     roster = result.roster;
     if (s.origin.kind === 'dungeon') dungeonState = retreat(dungeonState);
+    const fromStory = s.origin.kind === 'story';
     suspended = null;
     persist();
     endBattle();
     setScreen('result');
-    showReportScreen(screenEl, result.report, jobOf, canLearn, [{ label: TEXT.report.toBase, onClick: showBase, primary: true }], {
+    showReportScreen(screenEl, result.report, jobOf, canLearn, [{ label: fromStory ? TEXT.title.toTitle : TEXT.report.toBase, onClick: fromStory ? showTitle : showBase, primary: true }], {
       heading: suspendedTitle(s.origin),
       title: TEXT.report.retreatTitle,
       unlocks,
@@ -464,7 +514,13 @@ function main(): void {
   };
 
   /** 出撃: 出撃前の配置の画面を出し、「戦闘開始」で戦闘を始める */
-  const startSortie = (target: BattleSite, tierId: string, origin: BattleOrigin, onFinished: (state: BattleState) => void) => {
+  const startSortie = (
+    target: BattleSite,
+    tierId: string,
+    origin: BattleOrigin,
+    onFinished: (state: BattleState) => void,
+    onBack: () => void = showBase,
+  ) => {
     endBattle();
     const seed = nextSeed;
     nextSeed = randomSeed();
@@ -482,7 +538,7 @@ function main(): void {
       view: { sync: (st) => shell.view.sync(st), setMarks: (m) => setMarks(shell.view, m), setOverlays: (t) => setOverlays(shell.view, t) },
       hud: shell.hud,
       labels: shell.labels,
-      onBack: () => showBase(),
+      onBack: () => onBack(),
       onStart: (final) => {
         active.deploy = undefined;
         setScreen('battle');
@@ -554,6 +610,8 @@ function main(): void {
       onFinished,
       onStateChanged,
       unlockedJobs: unlockedInBattle,
+      playDialogue: (scriptId) => playBattleDialogue(scriptId),
+      ...(import.meta.env.DEV ? { autoPlayer: () => devAutoPlayer } : {}),
     });
   };
 
@@ -566,13 +624,273 @@ function main(): void {
     return { ...shell, controller: createController(shell, start, onFinished, onStateChanged) };
   };
 
+  // ---- 物語（物語の土台）: 題名の画面、章と場面の流れ、会話の場面、戦闘中の会話 ----
+
+  const bookOf = (id: string): BookDefinition => {
+    const b = books.find((x) => x.id === id);
+    if (!b) throw new Error(`物語の本 ${id} が見つかりません`);
+    return b;
+  };
+  /** 読み込んだ台本（台本の id ごとに1回だけ読む） */
+  const scriptCache = new Map<string, Script>();
+  const scriptOf = (id: string): Script => {
+    let script = scriptCache.get(id);
+    if (!script) {
+      const text = scriptTexts[id];
+      if (text === undefined) throw new Error(`台本 ${id} が見つかりません`);
+      script = parseScriptOrThrow(id, text, scriptCatalog);
+      scriptCache.set(id, script);
+    }
+    return script;
+  };
+  /** 会話の場面の舞台（会話の場面の間だけある） */
+  let sceneView: SceneView | undefined;
+  /** 進めている会話（会話の間だけある） */
+  let dialogueRun: DialogueRun | undefined;
+  function endScene() {
+    sceneView?.dispose();
+    sceneView = undefined;
+  }
+  /** 暗転（画面を暗くする）と明転 */
+  const setDark = (dark: boolean, ms: number) =>
+    new Promise<void>((resolve) => {
+      fadeEl.style.transitionDuration = `${ms}ms`;
+      fadeEl.classList.toggle('dark', dark);
+      fadeEl.dataset.dark = String(dark);
+      window.setTimeout(resolve, ms);
+    });
+  const zoomOf = (d: Extract<Directive, { kind: 'camera' }>) => (d.zoom ? SCENE_ZOOM[d.zoom] : undefined);
+  /** 台本を進める（終わるか飛ばすと解決する） */
+  const playScript = async (scriptId: string, port: StagePort) => {
+    const run = runDialogue(scriptOf(scriptId), {
+      root: dialogueEl,
+      port,
+      hintSeen: (id) => seenHints.includes(id),
+      markHint: (id) => {
+        seenHints = [...seenHints, id];
+        persist();
+      },
+      setDark,
+      ...(import.meta.env.DEV ? { autoAdvance: () => devAutoDialogue } : {}),
+    });
+    dialogueRun = run;
+    try {
+      return await run.done;
+    } finally {
+      if (dialogueRun === run) dialogueRun = undefined;
+      await setDark(false, 0);
+    }
+  };
+
+  /** 会話の場面の舞台を動かす口 */
+  const scenePort = (view: SceneView): StagePort => ({
+    sync: (st) => view.sync(st),
+    async run(d, before, fast) {
+      view.setSpeed(fast ? 4 : 1);
+      const after: StageState = applyDirective(before, d);
+      switch (d.kind) {
+        case 'enter':
+          return view.enter(d.actor, after.actors[d.actor]!);
+        case 'exit':
+          return view.exit(d.actor);
+        case 'place':
+          return view.sync(after);
+        case 'walk': {
+          const a = before.actors[d.actor];
+          return a ? view.walk(d.actor, walkPath(a, d)) : undefined;
+        }
+        case 'face': {
+          const a = after.actors[d.actor];
+          return a ? view.turn(d.actor, a.facing) : undefined;
+        }
+        case 'gesture': {
+          const g = GESTURES[d.gesture];
+          return g ? view.gesture(d.actor, g) : undefined;
+        }
+        case 'camera': {
+          const point = d.actor ? view.actorPoint(d.actor) : mapView.tileTop(d.x ?? 0, d.z ?? 0);
+          if (point) await rig.lookAt(point, zoomOf(d));
+          return;
+        }
+        case 'propPut':
+          return view.putProp(d.name, d.prop, d);
+        case 'propRemove':
+          return view.removeProp(d.name);
+        case 'propChange':
+          return view.changeProp(d.name, d.prop);
+        default:
+          return;
+      }
+    },
+    setWalkTargets: (tiles, goal) => {
+      view.setWalkTargets(tiles, goal);
+      // 歩かせる人物と次のマスが見えるように、カメラを寄せる
+      const next = tiles[0];
+      if (next) void rig.focusOn([mapView.tileTop(next.x, next.z), mapView.tileTop(next.x, next.z).add(new THREE.Vector3(0, 1, 0))]);
+    },
+    step: async (actor, from, to) => {
+      await view.walk(actor, [from, to]);
+    },
+  });
+
+  /** 戦闘中の会話の舞台（人形は戦闘のユニットなので、カメラだけを動かす） */
+  const battlePort: StagePort = {
+    sync: () => {},
+    async run(d) {
+      if (d.kind === 'camera' && d.x !== undefined && d.z !== undefined) await rig.lookAt(mapView.tileTop(d.x, d.z), zoomOf(d));
+    },
+  };
+
+  /** 戦闘中の会話（マップ上のイベントの「会話」）。出している間は、途中の戦闘にその会話の id を残す（閉じても、再開でもう一度出す） */
+  const playBattleDialogue = async (scriptId: string) => {
+    if (!scriptTexts[scriptId]) return;
+    if (suspended) {
+      suspended = { ...suspended, dialogue: scriptId };
+      persist();
+    }
+    await playScript(scriptId, battlePort);
+    if (suspended?.dialogue) {
+      const { dialogue: _done, ...rest } = suspended;
+      void _done;
+      suspended = rest;
+      persist();
+    }
+  };
+
+  /** 題名の画面 */
+  const showTitle = () => {
+    endBattle();
+    storyBaseNext = null;
+    setScreen('title');
+    showTitleScreen(screenEl, {
+      story: () => ({ available: bookOf('main').chapters.length > 0, inProgress: story.main !== undefined && !story.main.finished }),
+      trial: () => ({ inProgress: story.trial !== undefined && !story.trial.finished && !(story.trial.chapter === 0 && story.trial.scene === 0) }),
+      onStory: () => playBook('main', false),
+      onPlay: () => showBase(),
+      onTrial: (fresh) => playBook('trial', fresh),
+    });
+  };
+
+  /**
+   * 物語の本を始める・続ける。続きからの時は、まず「これまで」を出す。途中の戦闘があれば、それを再開する
+   */
+  const playBook = (bookId: string, fresh: boolean) => {
+    const book = bookOf(bookId);
+    if (fresh || !story[bookId] || story[bookId]!.finished) {
+      // 最初から: この本の途中の戦闘は捨てる
+      if (suspended?.origin.kind === 'story' && suspended.origin.bookId === bookId) suspended = null;
+      story = { ...story, [bookId]: STORY_START };
+      persist();
+      return runScene(bookId);
+    }
+    const progress = normalizeProgress(book, story[bookId]);
+    story = { ...story, [bookId]: progress };
+    const go = () => {
+      if (suspended?.origin.kind === 'story' && suspended.origin.bookId === bookId) return resumeBattle();
+      runScene(bookId);
+    };
+    const recap = recapFor(book, progress);
+    if (recap.length === 0) return go();
+    endBattle();
+    setScreen('recap');
+    showRecapScreen(screenEl, recap, go);
+  };
+
+  /** 今の場面を始める */
+  const runScene = (bookId: string) => {
+    const book = bookOf(bookId);
+    const progress = story[bookId] ?? STORY_START;
+    const now = currentScene(book, progress);
+    if (!now) {
+      setScreen('story-end');
+      return showStoryEndScreen(screenEl, TEXT.books[bookId] ?? bookId, showTitle);
+    }
+    const scene = now.scene;
+    if (scene.kind === 'dialogue' || scene.kind === 'interactive') {
+      endBattle();
+      endScene();
+      const stageDef = stages.find((st) => st.id === scene.stageId);
+      if (!stageDef) throw new Error(`会話の場面のマップ ${scene.stageId} が見つかりません`);
+      useMap(stageDef.map);
+      setScreen('scene');
+      rig.reset();
+      const view = createSceneView({
+        scene: stage.scene,
+        mapView,
+        camera: () => rig.camera,
+        canvas: stage.renderer.domElement,
+        lookOf: (name) => ACTOR_LOOKS[ACTOR_LOOK_IDS[name] ?? ''] ?? DEFAULT_ACTOR_LOOK,
+        propModelOf: (kind) => PROP_KINDS[kind] ?? 'box',
+      });
+      sceneView = view;
+      void playScript(scene.scriptId, scenePort(view)).then(() => {
+        if (sceneView === view) completeScene(bookId);
+      });
+      return;
+    }
+    if (scene.kind === 'battle') {
+      const target = storySites.find((x) => x.id === scene.battleId);
+      if (!target) throw new Error(`物語の戦闘 ${scene.battleId} が見つかりません`);
+      const origin: BattleOrigin = { kind: 'story', bookId, chapter: progress.chapter, scene: progress.scene };
+      return startSortie(target, 'main', origin, (state) => finishStoryBattle(bookId, state), showTitle);
+    }
+    // 拠点: 編成と店を使い、「物語を進める」で次へ
+    showBase();
+    storyBaseNext = () => completeScene(bookId);
+    base.show();
+  };
+
+  /** 今の場面を終えた: 進み具合を進めて保存し、次の場面へ */
+  const completeScene = (bookId: string) => {
+    story = { ...story, [bookId]: advanceScene(bookOf(bookId), story[bookId] ?? STORY_START) };
+    persist();
+    runScene(bookId);
+  };
+
+  /** 物語の戦闘が終わった: 経験値と JP（勝てばゴールドと戦利品）を部隊に入れ、勝てば次の場面へ。負ければやり直すかタイトルへ */
+  const finishStoryBattle = (bookId: string, state: BattleState) => {
+    const before = roster;
+    const origin = suspended?.origin;
+    const target = origin?.kind === 'story' ? siteOf(origin) : undefined;
+    const result = applyBattleResult(roster, state, catalog, progressionRules);
+    const spoils = takeSpoils(result.roster, target?.tiers[0]?.reward, state);
+    suspended = null;
+    updateRoster(spoils.roster);
+    afterResultPause(() => {
+      setScreen('result');
+      const won = result.report.victory;
+      showReportScreen(
+        screenEl,
+        result.report,
+        jobOf,
+        canLearn,
+        won
+          ? [{ label: TEXT.story.next, onClick: () => completeScene(bookId), primary: true }]
+          : [
+              { label: TEXT.story.retry, onClick: () => runScene(bookId), primary: true },
+              { label: TEXT.title.toTitle, onClick: showTitle },
+            ],
+        { heading: TEXT.books[bookId] ?? bookId, spoils: spoils.view, unlocks: unlockNotes(before, roster) },
+      );
+    });
+  };
+
   const canvas = stage.renderer.domElement;
   /** 開発中だけ: 最近のタップの記録（自動プレイで失敗した時の調査用） */
   const tapLog: { x: number; y: number; coords: readonly { x: number; z: number }[]; mode: string }[] = [];
-  const pick = createPicker(canvas, () => rig.camera, () => battle?.view.pickTargets() ?? [mapView.group]);
+  const pick = createPicker(canvas, () => rig.camera, () => sceneView?.pickTargets() ?? battle?.view.pickTargets() ?? [mapView.group]);
   const candidatesAt = (x: number, y: number) =>
     battle ? battle.view.tapCandidates(pick, x, y) : { coords: [] as { x: number; z: number }[] };
   attachCameraInput(canvas, rig, (x, y) => {
+    // 会話の場面の「歩かせる」: タップしたマス（人形を押した時はそのマス）を渡す
+    if (sceneView && dialogueRun) {
+      const coords = pick(x, y).flatMap((h) => {
+        const c = sceneView?.coordOf(h.object);
+        return c ? [c] : [];
+      });
+      dialogueRun.onTap(coords);
+      return;
+    }
     if (!battle) return;
     const { coords } = candidatesAt(x, y);
     if (import.meta.env.DEV) tapLog.push({ x, y, coords, mode: battle.controller?.mode ?? 'deploy' });
@@ -593,6 +911,10 @@ function main(): void {
   // 開発中だけ、自動プレイ（npm run autoplay）から状態と画面座標を読めるようにする。
   // 開発中は URL に ?speed=4 と付けると、動きの表示を4倍速にできる（戦闘の結果は変わらない）
   let speed = 1;
+  /** 開発中だけ: 味方の手番も AI が動かす（自動プレイで、物語の戦闘を通して確かめるため） */
+  let devAutoPlayer = false;
+  /** 開発中だけ: URL に ?autodialogue=1 と付けると、会話の台詞をタップを待たずに進める（今までの自動プレイの確認のため） */
+  const devAutoDialogue = import.meta.env.DEV && new URLSearchParams(location.search).get('autodialogue') === '1';
   if (import.meta.env.DEV) {
     const speedParam = Number(new URLSearchParams(location.search).get('speed'));
     if (speedParam > 0) speed = Math.min(speedParam, 20);
@@ -601,8 +923,24 @@ function main(): void {
       return battle.view;
     };
     (window as unknown as Record<string, unknown>).__tactics = {
-      /** 今の画面（base / roster / battle / result） */
+      /** 今の画面（title / base / roster / battle / result / scene など） */
       screen: () => screen,
+      /** 味方の手番も AI に任せる（true）か、タップで操作する（false）か */
+      setAutoPlayer: (on: boolean) => {
+        devAutoPlayer = on;
+        // 味方の入力を待っている時に切り替えたら、その手番から AI で進める
+        const c = battle?.controller;
+        if (on && c && c.mode !== 'busy' && c.mode !== 'ended') c.resumeAuto?.();
+      },
+      /** 今の会話の様子（会話がなければ null。物語の土台） */
+      dialogue: () => dialogueRun?.status() ?? null,
+      /** 物語の進み具合 */
+      story: () => story,
+      /** 暗転しているか */
+      dark: () => fadeEl.classList.contains('dark'),
+      /** 会話の場面の人物とマスの画面座標 */
+      actorScreen: (name: string) => sceneView?.actorScreen(name) ?? null,
+      sceneTileScreen: (x: number, z: number) => sceneView?.tileScreen(x, z) ?? null,
       /** 部隊の状態 */
       roster: () => roster,
       /** ダンジョンの進み具合とクリアの記録 */
@@ -672,6 +1010,7 @@ function main(): void {
     rig.update(dt);
     mapView.update(elapsed);
     if (battle) battle.view.update(dt, elapsed);
+    sceneView?.update(dt, elapsed);
     stage.renderer.render(stage.scene, rig.camera);
     if (battle) {
       battle.labels.setPositions(battle.view.unitAnchors());
@@ -679,12 +1018,14 @@ function main(): void {
     }
   });
 
-  showBase();
+  // 開発中だけ: URL に ?start=base と付けると、題名の画面を飛ばして拠点から始める（自動プレイの今までの確認のため）
+  if (import.meta.env.DEV && new URLSearchParams(location.search).get('start') === 'base') showBase();
+  else showTitle();
 }
 
 /** マップの id から、マップの定義を探す（自動プレイで、別のマップの戦闘を用意する時に使う） */
 function mapDefinitionOf(id: string): MapDefinition {
-  const def = [twinHillsBattle, ...ruinsDungeon.battles].find((b) => b.map.id === id)?.map;
+  const def = [twinHillsBattle, ...ruinsDungeon.battles, ...storySites, ...stages].find((b) => b.map.id === id)?.map;
   if (!def) throw new Error(`マップ ${id} が見つかりません`);
   return def;
 }

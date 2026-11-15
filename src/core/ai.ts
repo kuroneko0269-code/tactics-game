@@ -48,6 +48,7 @@ import type {
   BattleEvent,
   BattleState,
   SpellTarget,
+  Side,
   Team,
   UnitState,
 } from './battleTypes';
@@ -57,7 +58,7 @@ import { DIRECTION_VECTORS, DIRECTIONS, directionToward, manhattan, type Coord, 
 import { canCast, chargeArea, hasMpFor, previewSpellAt, spellRangeTiles } from './magic';
 import { getTile } from './map';
 import { canStep, isAlive, isKnockedOut, reachableTiles, unitAt } from './movement';
-import { goalTiles, isKnownTrap, targetUnitIds } from './scenario';
+import { goalTiles, hitTargetIds, isKnownTrap, objectiveObjectIds, targetUnitIds } from './scenario';
 
 /** AI の設定（数値は src/data に置く） */
 export interface AiConfig {
@@ -97,7 +98,19 @@ export interface AiConfig {
 }
 
 /** 陣営ごとの AI の設定 */
-export type AiConfigs = Readonly<Record<Team, AiConfig>>;
+export type AiConfigs = Readonly<Record<Side, AiConfig>>;
+
+/**
+ * unit から見て、攻撃する相手か（物語の土台）。対象物（neutral）は、味方の AI から見た「壊すと勝利になる物」だけを相手にする。
+ * 敵の AI は対象物を攻撃しない（守る側のため）
+ */
+function isFoe(state: BattleState, unit: UnitState, u: UnitState): boolean {
+  if (u.team === 'neutral') return unit.team === 'player' && objectiveObjectIds(state.scenario.objectives).includes(u.id);
+  return u.team !== unit.team;
+}
+
+/** unit が攻撃できる相手（対象物は isFoe の決まりで選ぶ） */
+const foesInReach = (state: BattleState, unit: UnitState, pos: Coord) => attackableTargets(state, unit, pos).filter((t) => isFoe(state, unit, t));
 
 const SIDE_RANK: Readonly<Record<RelativeSide, number>> = { back: 0, side: 1, front: 2 };
 
@@ -135,7 +148,8 @@ function candidatePositions(state: BattleState, unit: UnitState, canMove: boolea
   }
   // 撃破の対象は前に出ない: 最も近い相手との距離が縮まる位置へは動かない
   if (isObjectiveTarget(state, unit)) {
-    const gap = (c: Coord) => Math.min(1000, ...state.units.filter((u) => u.team !== unit.team && isAlive(u)).map((u) => manhattan(c, u)));
+    const gap = (c: Coord) =>
+      Math.min(1000, ...state.units.filter((u) => u.team !== unit.team && u.team !== 'neutral' && isAlive(u)).map((u) => manhattan(c, u)));
     moves = moves.filter((t) => gap(t) >= gap(here));
   }
   return [here, ...moves.map((t) => ({ x: t.x, z: t.z, steps: t.path.length - 1 }))];
@@ -147,7 +161,9 @@ const isObjectiveTarget = (state: BattleState, unit: UnitState) =>
 
 /** unit から見て、撃破を狙う相手（味方の AI が、撃破の対象の敵を狙う） */
 const priorityTargetIds = (state: BattleState, unit: UnitState): readonly string[] =>
-  unit.team === 'player' ? targetUnitIds(state.scenario.objectives) : [];
+  unit.team === 'player'
+    ? [...targetUnitIds(state.scenario.objectives), ...objectiveObjectIds(state.scenario.objectives), ...hitTargetIds(state.scenario.objectives)]
+    : [];
 
 function heightOf(state: BattleState, c: Coord): number {
   return getTile(state.map, c.x, c.z)?.height ?? 0;
@@ -162,7 +178,8 @@ const keyOf = (state: BattleState, c: Coord) => c.z * state.map.width + c.x;
 export function threatMap(state: BattleState, team: Team): Map<number, number> {
   const counts = new Map<number, number>();
   for (const o of state.units) {
-    if (!isAlive(o) || o.team === team) continue;
+    // 対象物は攻撃しないので、数えない
+    if (!isAlive(o) || o.team === team || o.team === 'neutral') continue;
     const covered = new Set<number>();
     const positions: Coord[] = [{ x: o.x, z: o.z }, ...reachableTiles(state, o)];
     for (const p of positions) for (const t of attackRangeTiles(state, o, p)) covered.add(keyOf(state, t));
@@ -204,7 +221,7 @@ export function chooseAttack(
     const danger = threat.get(keyOf(state, pos)) ?? 0;
     if (safeOnly && danger > 0) continue;
     const inReserved = reserved.has(keyOf(state, pos)) ? 1 : 0;
-    for (const target of attackableTargets(state, unit, pos)) {
+    for (const target of foesInReach(state, unit, pos)) {
       const preview = previewAttack(state, unit, target, pos);
       // 反撃で倒されてしまう攻撃は避ける（その攻撃で相手を倒せる時を除く）
       const lethalCounter = preview.counter && preview.counter.damage >= unit.hp && preview.damage < target.hp ? 1 : 0;
@@ -243,8 +260,8 @@ export function chooseKnockback(state: BattleState, unit: UnitState, canMove: bo
   let best: { plan: AttackPlan; score: number[] } | undefined;
   for (const pos of candidatePositions(state, unit, canMove)) {
     const danger = threat.get(keyOf(state, pos)) ?? 0;
-    for (const target of attackableTargets(state, unit, pos)) {
-      if (manhattan(pos, target) !== 1) continue;
+    for (const target of foesInReach(state, unit, pos)) {
+      if (target.object || manhattan(pos, target) !== 1) continue;
       if (previewAttack(state, unit, target, pos).damage >= target.hp) continue;
       const p = previewAttack(state, unit, target, pos, strike);
       const fall = p.knockback?.to && p.knockback.damage > 0 ? p.knockback.damage : 0;
@@ -343,6 +360,11 @@ function damageSpellChoice(
         let objective = 0;
         for (const r of preview.results) {
           const u = r.unitId === unit.id ? self : state.units.find((x) => x.id === r.unitId)!;
+          // 対象物: 壊したい物なら相手として数え、守る物なら味方と同じく巻き込まないようにする。ほかの物は数えない
+          if (u.team === 'neutral' && !isFoe(state, unit, u)) {
+            if (objectiveObjectIds(state.scenario.objectives).includes(u.id)) net--;
+            continue;
+          }
           if (u.team === unit.team) {
             net--;
             damage -= r.amount;
@@ -535,24 +557,35 @@ export function chooseStatusSpell(state: BattleState, unit: UnitState, canMove: 
   // 停止を先に考える（相手の手番をまるごと奪えるので、最も値打ちが高い）
   const stopPlan = chooseSingleStatusSpell(state, unit, canMove, config, spells.filter((s) => s.areaRadius === 0 && s.inflicts === 'stop'));
   if (stopPlan) return stopPlan;
-  // 範囲に、敵だけ・味方だけに付けるもの（加速・減速。フェーズ2-6）: 付く相手が最も多い場所に（1体以上）
-  const area = spells.filter((s) => s.areaRadius > 0 && s.affects);
+  // 範囲に付けるもの（加速・減速。PR #18 の回答で、範囲内の全員に効く）: 付けたい側の数 − 付けたくない側の数 が最も大きい場所に（差が 1 以上）。
+  // 敵だけ・味方だけに付ける魔法（affects）なら、付けたくない側は数えない
+  const area = spells.filter((s) => s.areaRadius > 0);
   if (area.length > 0) {
     const threat = threatMap(state, unit.team);
     let best: { plan: SpellPlan; score: number[] } | undefined;
     for (const spell of area) {
       const status = spell.inflicts!;
+      const helpsAllies = !state.rules.status[status].harmful;
       for (const pos of candidatePositions(state, unit, canMove)) {
         const reach = threat.get(keyOf(state, pos)) ?? 0;
         if (reach > (config.sealMaxDanger ?? 0)) continue;
         const self = { ...unit, x: pos.x, z: pos.z };
         for (const center of spellRangeTiles(state.map, spell, pos)) {
-          const fresh = previewSpellAt(state, unit, spell, center, self).results.filter((r) => {
+          let good = 0;
+          let bad = 0;
+          for (const r of previewSpellAt(state, unit, spell, center, self).results) {
             const u = r.unitId === unit.id ? self : state.units.find((x) => x.id === r.unitId)!;
-            return !hasStatus(u, status) && !statusBlocker(u, status) && !(spell.affects === 'allies' && isHealer(u));
-          }).length;
-          if (fresh === 0) continue;
-          const score = [-fresh, reach, pos.steps, tieBreak(state, pos.x, pos.z, center.x, center.z)];
+            if (u.team === 'neutral') continue;
+            const ally = u.team === unit.team;
+            const wanted = helpsAllies ? ally : !ally;
+            // 加速を治癒師に付けても値打ちが低いので、良い方には数えない（悪い方には数える）
+            if (wanted && (hasStatus(u, status) || statusBlocker(u, status) || (helpsAllies && isHealer(u)))) continue;
+            if (wanted) good++;
+            else if (!statusBlocker(u, status)) bad++;
+          }
+          const net = good - bad;
+          if (net < 1) continue;
+          const score = [-net, -good, reach, pos.steps, tieBreak(state, pos.x, pos.z, center.x, center.z)];
           if (!best || compareScores(score, best.score) < 0) {
             best = { plan: { position: { x: pos.x, z: pos.z }, spellId: spell.id, target: { kind: 'tile', x: center.x, z: center.z } }, score };
           }
@@ -581,6 +614,7 @@ function chooseSingleStatusSpell(
     const targets = state.units.filter(
       (u) =>
         isAlive(u) &&
+        !u.object &&
         (harmful ? u.team !== unit.team : u.team === unit.team && !isHealer(u)) &&
         !hasStatus(u, status) &&
         !statusBlocker(u, status) &&
@@ -825,11 +859,15 @@ export function chooseApproach(state: BattleState, unit: UnitState, config: AiCo
   const distances = walkingDistances(state, aim, unit.stats.jump);
   const distanceTo = (c: Coord) => distances.get(keyOf(state, c)) ?? 1000 + Math.min(...aim.map((a) => manhattan(c, a)));
   // 敵は、到達するマスまでの歩数が、どの味方よりも近い位置に留まる（道をふさぐ）
-  const guarded = unit.team === 'enemy' ? goalTiles(state.scenario.objectives) : [];
+  // 壊されると負ける対象物も、その場所を守る（物語の土台）
+  const guardedObjects = objectiveObjectIds(state.scenario.objectives)
+    .map((id) => state.units.find((u) => u.id === id))
+    .filter((u): u is UnitState => u !== undefined && isAlive(u));
+  const guarded = unit.team === 'enemy' ? [...goalTiles(state.scenario.objectives), ...guardedObjects] : [];
   const guard = guarded.length > 0 ? walkingDistances(state, guarded, unit.stats.jump) : undefined;
   const guardOf = (c: Coord) => guard?.get(keyOf(state, c)) ?? 1000;
   const guardLimit = guard
-    ? Math.min(...state.units.filter((u) => u.team !== unit.team && isAlive(u)).map((u) => guardOf(u))) - 1
+    ? Math.min(1000, ...state.units.filter((u) => u.team === 'player' && isAlive(u)).map((u) => guardOf(u))) - 1
     : 0;
   // 治癒師と撃破の対象は前に出ない。ただし治癒師しか残っていなければ、攻撃に切り替えて前進する（フェーズ2-5）
   const attackMode = isHealer(unit) && onlyHealersLeft(state, unit);
@@ -1005,7 +1043,7 @@ export function runAutoBattle(
   const events: BattleEvent[] = [];
   while (current.turn && current.turnNumber <= maxTurns) {
     const unit = activeUnit(current)!;
-    const result = playAiTurn(current, configs[unit.team]);
+    const result = playAiTurn(current, configs[unit.team as Side]);
     actions.push(...result.actions);
     events.push(...result.events);
     current = result.state;
@@ -1016,7 +1054,7 @@ export function runAutoBattle(
 function nearestOpponent(state: BattleState, unit: UnitState, from: Coord): UnitState | undefined {
   let best: UnitState | undefined;
   for (const u of state.units) {
-    if (!isAlive(u) || u.team === unit.team) continue;
+    if (!isAlive(u) || !isFoe(state, unit, u)) continue;
     if (!best) {
       best = u;
       continue;

@@ -90,12 +90,12 @@ export const ruinsAltar: BattleSite = {
   ],
   objectives: { victory: [{ kind: 'defeatUnit', unitId: 'r3-boss' }], defeat: [{ kind: 'allDefeated' }] },
   events: [
-    { id: 'r3-intro', trigger: { kind: 'turn', turn: 0 }, effects: [{ kind: 'message', messageId: 'ruinsAltarIntro' }] },
+    { id: 'r3-intro', trigger: { kind: 'turn', turn: 0 }, effects: [{ kind: 'dialogue', scriptId: 'ruinsAltarIntro' }] },
     {
       id: 'r3-rage',
       trigger: { kind: 'hpBelow', unitId: 'r3-boss', percent: 50 },
       effects: [
-        { kind: 'message', messageId: 'ruinsAltarRage' },
+        { kind: 'dialogue', scriptId: 'ruinsAltarRage' },
         {
           kind: 'reinforce',
           delay: 2,

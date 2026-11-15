@@ -16,6 +16,7 @@ import {
 } from '../core/saveData';
 import { validateRoster, type GameCatalog, type ProgressionRules, type Roster } from '../core/progression';
 import type { DungeonState } from '../core/dungeon';
+import type { StoryProgress } from '../core/story';
 
 /** 保存先。文字列を1つ読み書きできればよい */
 export interface SaveBackend {
@@ -33,6 +34,10 @@ export interface GameSave {
   readonly dungeon: DungeonState;
   readonly records: GameRecords;
   readonly battle: SuspendedBattle | null;
+  /** 物語の進み具合（本の id ごと。物語の土台）。省くと「まだ始めていない」 */
+  readonly story?: Readonly<Record<string, StoryProgress>>;
+  /** 出したことのある操作の手引き */
+  readonly seenHints?: readonly string[];
 }
 
 export interface SaveStore {
@@ -106,13 +111,13 @@ export function createSaveStore(
         onLoadFailure('invalidRoster');
         return undefined;
       }
-      const { roster, dungeon, records } = result.data;
-      // 途中の戦闘が部隊やダンジョンの進み具合と合わなければ、その戦闘だけ捨てる
-      const battle = result.data.battle && suspendedBattleFits(result.data.battle, roster, dungeon) ? result.data.battle : null;
-      return { roster, dungeon, records, battle };
+      const { roster, dungeon, records, story } = result.data;
+      // 途中の戦闘が部隊・ダンジョン・物語の進み具合と合わなければ、その戦闘だけ捨てる
+      const battle = result.data.battle && suspendedBattleFits(result.data.battle, roster, dungeon, story) ? result.data.battle : null;
+      return { roster, dungeon, records, battle, story, ...(result.data.seenHints ? { seenHints: result.data.seenHints } : {}) };
     },
-    save({ roster, dungeon, records, battle }) {
-      backend.write(JSON.stringify(createSaveData(roster, dungeon, records, battle)));
+    save({ roster, dungeon, records, battle, story, seenHints }) {
+      backend.write(JSON.stringify(createSaveData(roster, dungeon, records, battle, story ?? {}, seenHints ?? [])));
     },
     clear() {
       backend.remove();

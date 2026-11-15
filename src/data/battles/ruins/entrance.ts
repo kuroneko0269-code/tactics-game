@@ -59,5 +59,5 @@ export const ruinsEntrance: BattleSite = {
     },
   ],
   objectives: { victory: [{ kind: 'defeatAll' }], defeat: [{ kind: 'allDefeated' }] },
-  events: [{ id: 'r1-intro', trigger: { kind: 'turn', turn: 0 }, effects: [{ kind: 'message', messageId: 'ruinsEntranceIntro' }] }],
+  events: [{ id: 'r1-intro', trigger: { kind: 'turn', turn: 0 }, effects: [{ kind: 'dialogue', scriptId: 'ruinsEntranceIntro' }] }],
 };
