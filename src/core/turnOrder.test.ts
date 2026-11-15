@@ -42,17 +42,20 @@ describe('行動順（CT 方式）', () => {
     expect(advanceToNextTurn(onlyAB, testRules).unitId).toBe('a');
   });
 
-  it('戦闘不能のユニットは CT が増えず、行動しない', () => {
+  it('戦闘不能のユニットは行動しないが CT は溜まり、手番が来るはずだった時に「カウントが減る番」が来る。退場したユニットは数えない', () => {
     const state = makeState({
       heights: flat(3, 3),
       units: [
-        { id: 'dead', team: 'player', x: 0, z: 0, ct: 120, hp: 0 },
+        { id: 'down', team: 'player', x: 0, z: 0, ct: 95, hp: 0 },
+        { id: 'gone', team: 'player', x: 2, z: 0, ct: 99, hp: 0, retired: true },
         { id: 'alive', team: 'enemy', x: 1, z: 0 },
       ],
     });
-    const next = advanceToNextTurn(state.units, testRules);
-    expect(next.unitId).toBe('alive');
-    expect(next.units[0]!.ct).toBe(120);
+    const first = nextTimelineEntry(state.units, testRules);
+    expect(first.entry).toEqual({ kind: 'knockout', unitId: 'down' });
+    expect(first.units[1]!.ct).toBe(99);
+    // カウントが減る番は、行動順の予測には出ない
+    expect(predictTimeline({ ...state, turn: { unitId: 'alive', moved: false, acted: false, origin: { x: 1, z: 0, facing: 'south' }, chargingAtStart: false } }, 4).every((e) => e.kind === 'turn' && e.unitId === 'alive')).toBe(true);
   });
 
   it('手番の後の CT: 移動と行動の両方で 0、片方だけで 20、待機で 40', () => {

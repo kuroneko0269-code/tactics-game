@@ -2,26 +2,32 @@
  * コンピューターが操作するユニットの思考（敵 AI）。
  *
  * - 詠唱中に手番が来たら、待機して詠唱を続ける。
- * - 癒し手（回復魔法を持つ）: HP が一定の割合以下の味方がいれば回復する。
- * - 魔術師（攻撃魔法を持つ）: 巻き込む敵の数 − 巻き込む味方の数 が最も大きい場所に撃つ（1 以上の時だけ）。
+ * - 治癒師（回復魔法を持つ）: HP が一定の割合以下の味方がいれば回復する。
+ * - 魔道士（攻撃魔法を持つ）: 巻き込む敵の数 − 巻き込む味方の数 が最も大きい場所に撃つ（1 以上の時だけ）。
  *   相手の攻撃が届かない位置から撃つことを優先する。同じなら、詠唱中の相手や前の手番で動かなかった相手を多く巻き込む場所を選ぶ。
  * - 通常攻撃できる相手がいれば攻撃する。詠唱中の相手を最優先し、次に 背面 → 側面 → 正面、
  *   同じなら高い位置、それも同じなら反撃を受けにくい位置（届く相手が少ない）、次に移動の少ない位置、
  *   さらに同じなら HP の少ない相手を選ぶ。技（強打など）を使えるなら、通常攻撃と比べて
  *   「命中率 × 与えるダメージ（相手の残り HP まで）」が大きい方で攻撃する。
- * - 役割（癒し手として振る舞うか）は、主コマンド（今のジョブ）で決める。副コマンドの回復魔法では癒し手にならない。
+ * - 役割（治癒師として振る舞うか）は、主コマンド（今のジョブ）で決める。副コマンドの回復魔法では治癒師にならない。
  * - 武器が合わないアビリティと、MP が足りない魔法は使わない。
  * - 攻撃も魔法もできない手番は、最も近い相手に近づくが、敵の攻撃が届く位置へ単独では踏み込まず、
  *   届かないぎりぎりの位置で止まる（味方と足並みを揃えるため）。近くに味方が十分いれば踏み込む（supportRange）。
  *   ただし、どちらの軍も一定の手番数のあいだ攻撃や魔法を行っていなければ、前進に切り替える（にらみ合いを防ぐ）。
- * - 癒し手は、攻撃が届かない位置を保つ（にらみ合いの時も前に出ない。ただし癒し手しか残っていなければ前進する）。
+ * - 治癒師は、攻撃が届かない位置を保つ（にらみ合いの時も前に出ない。ただし治癒師しか残っていなければ前進する）。
  * - 攻撃や魔法の後には移動しない。最後は、最も近い相手の方を向いて手番を終える。
  * - 突き飛ばし: 落下ダメージが見込める時と、詠唱中の相手を中断できる時に優先する（通常攻撃で倒せる相手は除く）。
  * - 足止めの矢: 鈍足の付いていない相手には、鈍足の値打ち（slowValue）を足して通常攻撃と比べる。
- * - 封じ（魔術師）: 魔法を使う相手（詠唱中なら最優先）に、相手の攻撃が届かない位置から使う。
+ * - 封じ（魔道士）: 魔法を使う相手（詠唱中なら最優先）に、相手の攻撃が届かない位置から使う。
  *   2体以上を巻き込める攻撃魔法がある時は、そちらを優先する。
- * - 守りの祈り（癒し手）: 回復が要らない時、相手の攻撃が届く位置にいる味方を2体以上（protectMinAllies）守れるなら使う。
+ * - 守りの祈り（治癒師）: 回復が要らない時、相手の攻撃が届く位置にいる味方を2体以上（protectMinAllies）守れるなら使う。
  * - 反撃を付けた相手には、反撃で倒されてしまう攻撃はしない（その攻撃で相手を倒せる時を除く）。
+ *
+ * 戦闘不能と蘇生（フェーズ2-5）:
+ * - 治癒師（治癒師）は、蘇生できる味方（戦闘不能で、退場より先に蘇生が間に合う）がいれば、回復より蘇生を優先する。
+ * - 味方に攻撃できるユニット（治癒師以外）が1体も立っていない治癒師は、回復と守りの祈りをやめ、杖で攻撃しに前へ出る
+ *   （治癒師以外の味方の蘇生だけは続ける）。回復役だけが残って決着がつかなくなるのを防ぐため。
+ * - 通常攻撃の相手は、向きと高さが同じなら、蘇生役の治癒師（回復魔法か蘇生を持つ）を優先する（反撃の受けにくさ・移動の少なさ・HP より先）。
  *
  * 予約された範囲（フェーズ2-2）: 相手の詠唱中の攻撃魔法の範囲には、なるべく留まらない（攻撃・魔法・回復の位置と、近づく先）。
  *
@@ -46,22 +52,22 @@ import type {
   UnitState,
 } from './battleTypes';
 import { attackableTargets, attackRangeTiles, previewAttack, weaponFits } from './combat';
-import { hasStatus, statusBlocker, statusTurns } from './effects';
+import { castSpeedOf, hasStatus, statusBlocker, statusTurns } from './effects';
 import { DIRECTION_VECTORS, DIRECTIONS, directionToward, manhattan, type Coord, type Direction, type RelativeSide } from './geometry';
 import { canCast, chargeArea, hasMpFor, previewSpellAt, spellRangeTiles } from './magic';
 import { getTile } from './map';
-import { canStep, isAlive, reachableTiles, unitAt } from './movement';
+import { canStep, isAlive, isKnockedOut, reachableTiles, unitAt } from './movement';
 import { goalTiles, isKnownTrap, targetUnitIds } from './scenario';
 
 /** AI の設定（数値は src/data に置く） */
 export interface AiConfig {
   /** どちらの軍もこの手番数のあいだ攻撃や魔法を行わなければ、前進に切り替える */
   readonly advanceAfterIdleTurns: number;
-  /** 癒し手は、HP がこの割合（%）以下の味方がいれば回復する */
+  /** 治癒師は、HP がこの割合（%）以下の味方がいれば回復する */
   readonly healBelowPercent: number;
   /**
    * 攻撃できない手番に、相手の攻撃が届くマスへ進んでよいかの目安。
-   * そのマスから range 歩以内にいる味方（癒し手を除く）の数が、そのマスに攻撃を届かせられる相手の数以上なら、
+   * そのマスから range 歩以内にいる味方（治癒師を除く）の数が、そのマスに攻撃を届かせられる相手の数以上なら、
    * 単独ではないとみなして進む。
    */
   readonly supportRange: number;
@@ -202,6 +208,7 @@ export function chooseAttack(
         target.charging ? 0 : 1,
         SIDE_RANK[preview.side],
         -heightOf(state, pos),
+        isSupportCaster(target) ? 0 : 1,
         danger,
         pos.steps,
         target.hp,
@@ -329,7 +336,7 @@ function damageSpellChoice(
           }
         }
         if (enemies === 0 || net < 1) continue;
-        // 相手の攻撃が届く位置からは、2体以上を差し引きで巻き込める時だけ撃つ（魔術師は打たれ弱いため）
+        // 相手の攻撃が届く位置からは、2体以上を差し引きで巻き込める時だけ撃つ（魔道士は打たれ弱いため）
         if (danger && net < 2) continue;
         // 1体だけを狙うなら、詠唱の速い魔法の方が逃げられにくい。
         // 留まりやすい相手なら、単体の魔法のうちダメージの大きい方（範囲の魔法は1体には使わない方を優先）
@@ -455,6 +462,59 @@ export function chooseProtectSpell(
   return best?.plan;
 }
 
+/** 回復か蘇生の魔法を持つ相手か（蘇生役は倒す価値が高い。フェーズ2-5） */
+const isSupportCaster = (u: UnitState) => u.spells.some((s) => s.effect === 'heal' || s.effect === 'revive');
+
+/**
+ * 蘇生が、対象の退場より先に間に合うか。詠唱が満ちるまでの時計の回数が、対象のカウントが 0 になるまでの回数以下なら間に合う
+ * （同じ時点なら、魔法の発動が先）
+ */
+function reviveInTime(state: BattleState, caster: UnitState, spell: UnitState['spells'][number], target: UnitState): boolean {
+  const thr = state.rules.ctThreshold;
+  const cast = Math.ceil(thr / Math.max(1, castSpeedOf(caster, spell)));
+  const speed = Math.max(1, target.stats.speed);
+  const first = Math.max(0, Math.ceil((thr - target.ct) / speed));
+  const period = Math.ceil((thr - state.rules.knockout.ctAfterTick) / speed);
+  return cast <= first + (target.knockoutCount - 1) * period;
+}
+
+/**
+ * 蘇生の位置・魔法・狙い先を選ぶ（フェーズ2-5）。戦闘不能の味方で、退場より先に間に合い、味方の蘇生がまだ向かっていない相手。
+ * nonHealersOnly なら、治癒師以外の味方だけ（攻撃に切り替えた治癒師）。
+ * 攻撃の届かない位置 → 治癒師以外の味方 → レベルの高い味方 → 移動の少ない位置 の順に選ぶ。
+ */
+export function chooseReviveSpell(state: BattleState, unit: UnitState, canMove: boolean, nonHealersOnly = false): SpellPlan | undefined {
+  const spells = unit.spells.filter((s) => s.effect === 'revive' && canCast(unit, s));
+  if (spells.length === 0) return undefined;
+  const pending = new Set<string>();
+  for (const u of state.units) {
+    if (u.team !== unit.team || !u.charging || u.charging.target.kind !== 'unit') continue;
+    if (u.spells.find((x) => x.id === u.charging!.spellId)?.effect === 'revive') pending.add(u.charging.target.unitId);
+  }
+  const downs = state.units.filter(
+    (u) => u.team === unit.team && isKnockedOut(u) && !pending.has(u.id) && !(nonHealersOnly && isHealer(u)),
+  );
+  if (downs.length === 0) return undefined;
+  const threat = threatMap(state, unit.team);
+  const reserved = reservedTiles(state, unit);
+  let best: { plan: SpellPlan; score: number[] } | undefined;
+  for (const pos of candidatePositions(state, unit, canMove)) {
+    const danger = (threat.get(keyOf(state, pos)) ?? 0) > 0 || reserved.has(keyOf(state, pos)) ? 1 : 0;
+    for (const spell of spells) {
+      for (const d of downs) {
+        const dist = manhattan(pos, d);
+        if (dist < (spell.minRange ?? 0) || dist > spell.range) continue;
+        if (!reviveInTime(state, unit, spell, d)) continue;
+        const score = [danger, isHealer(d) ? 1 : 0, -d.level, pos.steps, tieBreak(state, pos.x, pos.z, d.x, d.z)];
+        if (!best || compareScores(score, best.score) < 0) {
+          best = { plan: { position: { x: pos.x, z: pos.z }, spellId: spell.id, target: { kind: 'unit', unitId: d.id } }, score };
+        }
+      }
+    }
+  }
+  return best?.plan;
+}
+
 /** HP が回復の目安以下か */
 function isHurt(unit: UnitState, belowPercent: number): boolean {
   return isAlive(unit) && unit.hp * 100 <= unit.stats.maxHp * belowPercent;
@@ -524,17 +584,17 @@ export function isStalemate(state: BattleState, config: AiConfig): boolean {
   return state.turnNumber - state.lastAggressionTurn >= config.advanceAfterIdleTurns;
 }
 
-/** 癒し手として振る舞うか（主コマンドに回復魔法がある） */
+/** 治癒師として振る舞うか（主コマンドに回復魔法がある） */
 const isHealer = (unit: UnitState) => {
   const main = unit.commands[0];
   return unit.spells.some((s) => s.effect === 'heal' && (!main || main.abilityIds.includes(s.id)));
 };
 
-/** unit の陣営で、生きているのが癒し手だけか */
+/** unit の陣営で、生きているのが治癒師だけか */
 const onlyHealersLeft = (state: BattleState, unit: UnitState) =>
   !state.units.some((u) => u.team === unit.team && isAlive(u) && !isHealer(u));
 
-/** pos から range 歩以内にいる、unit 以外の味方（癒し手を除く）の数 */
+/** pos から range 歩以内にいる、unit 以外の味方（治癒師を除く）の数 */
 function supportersNear(state: BattleState, unit: UnitState, pos: Coord, range: number): number {
   return state.units.filter(
     (u) => u.id !== unit.id && u.team === unit.team && isAlive(u) && !isHealer(u) && manhattan(u, pos) <= range,
@@ -545,7 +605,7 @@ function supportersNear(state: BattleState, unit: UnitState, pos: Coord, range: 
  * 攻撃できない時に、動く先を選ぶ。動かない方が良ければ undefined。
  * 最も近い相手に、崖を避けて実際に歩ける道のりで近づく。ただし前進に切り替える時（にらみ合いなど）以外は、
  * 相手の攻撃が届くマスには単独では入らない（今いるマスが届く範囲なら、届かないマスへ下がる）。
- * 近くの味方の数が、そのマスに届く相手の数以上なら、単独ではないとみなす（癒し手は常に入らない）。
+ * 近くの味方の数が、そのマスに届く相手の数以上なら、単独ではないとみなす（治癒師は常に入らない）。
  * すでに届く範囲にいる時は、今より届く相手が増えないマスへは進んでよい（下がって手番を無駄にしないため）。
  */
 export function chooseApproach(state: BattleState, unit: UnitState, config: AiConfig): Coord | undefined {
@@ -568,17 +628,17 @@ export function chooseApproach(state: BattleState, unit: UnitState, config: AiCo
   const guardLimit = guard
     ? Math.min(...state.units.filter((u) => u.team !== unit.team && isAlive(u)).map((u) => guardOf(u))) - 1
     : 0;
-  // 癒し手と撃破の対象は前に出ない。ただし癒し手しか残っていなければ、にらみ合いの時に前進する
-  const healer = isHealer(unit) || isObjectiveTarget(state, unit);
-  const advance =
-    stance === 'advance' || ((!healer || onlyHealersLeft(state, unit)) && isStalemate(state, config));
+  // 治癒師と撃破の対象は前に出ない。ただし治癒師しか残っていなければ、攻撃に切り替えて前進する（フェーズ2-5）
+  const attackMode = isHealer(unit) && onlyHealersLeft(state, unit);
+  const healer = (isHealer(unit) && !attackMode) || isObjectiveTarget(state, unit);
+  const advance = stance === 'advance' || attackMode || (!healer && isStalemate(state, config));
   const threat = advance ? undefined : threatMap(state, unit.team);
   const hereReach = threat?.get(keyOf(state, unit)) ?? 0;
   const reserved = reservedTiles(state, unit);
 
   let best: { pos: Position; score: number[] } | undefined;
   for (const pos of candidatePositions(state, unit, true)) {
-    // 届く相手の数が、近くにいる味方（癒し手を除く）の数以下なら「単独で踏み込む」ことにはならないとみなす
+    // 届く相手の数が、近くにいる味方（治癒師を除く）の数以下なら「単独で踏み込む」ことにはならないとみなす
     const reach = threat?.get(keyOf(state, pos)) ?? 0;
     let danger = reach > 0 && (healer || reach > supportersNear(state, unit, pos, config.supportRange)) ? reach : 0;
     // すでに届く範囲にいるなら、今より届く相手が増えないマスへは進んでよい（下がって手番を無駄にしないため）
@@ -614,12 +674,18 @@ type Plan =
 /** この手番の行動（攻撃か魔法）と、そのための位置を選ぶ */
 function choosePlan(state: BattleState, unit: UnitState, canMove: boolean, config: AiConfig): Plan | undefined {
   if (isHealer(unit)) {
-    const heal = chooseHealSpell(state, unit, canMove, config);
-    if (heal) return { kind: 'cast', ...heal };
-    const protect = chooseProtectSpell(state, unit, canMove, config);
-    if (protect) return { kind: 'cast', ...protect };
-    // 癒し手は、相手の攻撃が届かない位置からだけ殴る（癒し手しか残っていなければ、どこからでも）
-    const attack = chooseAttack(state, unit, canMove, !onlyHealersLeft(state, unit), config);
+    // 治癒師以外の味方が立っていなければ、回復をやめて攻撃に切り替える（治癒師以外の味方の蘇生だけは続ける）
+    const attackMode = onlyHealersLeft(state, unit);
+    const revive = chooseReviveSpell(state, unit, canMove, attackMode);
+    if (revive) return { kind: 'cast', ...revive };
+    if (!attackMode) {
+      const heal = chooseHealSpell(state, unit, canMove, config);
+      if (heal) return { kind: 'cast', ...heal };
+      const protect = chooseProtectSpell(state, unit, canMove, config);
+      if (protect) return { kind: 'cast', ...protect };
+    }
+    // 治癒師は、相手の攻撃が届かない位置からだけ殴る（攻撃に切り替えた時は、どこからでも）
+    const attack = chooseAttack(state, unit, canMove, !attackMode, config);
     return attack && { kind: 'attack', ...attack };
   }
   // 撃破の対象は、相手の攻撃が届かない位置からだけ行動する（すでに届く位置にいれば、どこからでも）

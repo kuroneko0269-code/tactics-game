@@ -26,6 +26,11 @@ export interface UnitLabels {
   addUnit(unit: LabelUnit): void;
   /** 撃破の対象の敵に、頭上の札（★）を付ける */
   setTargets(ids: readonly string[]): void;
+  /**
+   * 戦闘不能の残りのカウントを頭上に出す（フェーズ2-5）。null で消す（立ち上がった）。
+   * 退場したユニットは、頭上の表示ごと隠す（retired）
+   */
+  setKnockout(id: string, count: number | null, retired?: boolean): void;
 }
 
 export interface LabelUnit {
@@ -39,7 +44,10 @@ export interface LabelUnit {
 
 export function createUnitLabels(root: HTMLElement, units: readonly LabelUnit[]): UnitLabels {
   root.innerHTML = '';
-  const labels = new Map<string, { box: HTMLElement; hp: HTMLElement; mp: HTMLElement; statuses: HTMLElement; team: Team }>();
+  const labels = new Map<
+    string,
+    { box: HTMLElement; hp: HTMLElement; mp: HTMLElement; statuses: HTMLElement; knockout: HTMLElement; team: Team; retired: boolean }
+  >();
   const add = (u: LabelUnit) => {
     if (labels.has(u.id)) return;
     const box = document.createElement('div');
@@ -51,9 +59,13 @@ export function createUnitLabels(root: HTMLElement, units: readonly LabelUnit[])
     const statuses = document.createElement('div');
     statuses.className = 'unit-label-status';
     statuses.hidden = true;
-    box.append(hp, mp, statuses);
+    const knockout = document.createElement('div');
+    knockout.className = 'unit-label-knockout';
+    knockout.hidden = true;
+    knockout.title = TEXT.knockout.badgeTitle;
+    box.append(knockout, hp, mp, statuses);
     root.append(box);
-    labels.set(u.id, { box, hp, mp, statuses, team: u.team });
+    labels.set(u.id, { box, hp, mp, statuses, knockout, team: u.team, retired: false });
   };
 
   const setHp = (id: string, hp: number, maxHp: number) => {
@@ -103,10 +115,20 @@ export function createUnitLabels(root: HTMLElement, units: readonly LabelUnit[])
         const l = labels.get(a.id);
         if (!l) continue;
         l.box.style.transform = `translate(${a.x}px, ${a.y}px)`;
-        l.box.classList.toggle('hidden', !a.visible);
+        l.box.classList.toggle('hidden', !a.visible || l.retired);
       }
     },
     addUnit,
+    setKnockout(id, count, retired = false) {
+      const l = labels.get(id);
+      if (!l) return;
+      l.retired = retired;
+      l.box.classList.toggle('down', count !== null && !retired);
+      l.knockout.hidden = count === null || retired;
+      l.knockout.textContent = count === null ? '' : TEXT.knockout.badge(count);
+      l.knockout.dataset.count = count === null ? '' : String(count);
+      if (retired) l.box.classList.add('hidden');
+    },
     setTargets(ids) {
       for (const [id, l] of labels) {
         let badge = l.box.querySelector<HTMLElement>('.unit-label-target');

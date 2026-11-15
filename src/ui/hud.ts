@@ -342,6 +342,12 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
       ].join(' ・ ');
       info.append(name, job, hp, ...(growthLine ? [growthLine] : []), stats);
       if (infoState.targets.includes(unit.id)) info.append(Object.assign(el('div', 'info-target'), { textContent: TEXT.objectives.targetTag }));
+      // 戦闘不能（フェーズ2-5）: 残りのカウント
+      if (unit.hp <= 0) {
+        const line = el('div', `info-knockout${unit.retired ? ' retired' : ''}`);
+        line.textContent = unit.retired ? TEXT.knockout.retiredInfo : TEXT.knockout.info(unit.knockoutCount);
+        info.append(line);
+      }
       if (unit.charging) {
         const spell = unit.spells.find((sp) => sp.id === unit.charging!.spellId);
         const charging = el('div', `info-charging element-${spell?.element ?? 'fire'}`);
@@ -448,14 +454,16 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
       const list = el('ul', 'spell-results');
       if (p.results.length === 0) {
         const li = el('li', 'nobody');
-        li.textContent = TEXT.spellPreview.nobody;
+        li.textContent = p.effect === 'revive' ? TEXT.spellPreview.reviveNobody : TEXT.spellPreview.nobody;
         list.append(li);
       }
       for (const r of p.results) {
         const li = el('li', `team-text-${r.team}`);
         const sign = p.effect === 'heal' ? '+' : '-';
         const before = p.effect === 'heal' ? r.hp - r.amount : r.hp + r.amount;
-        li.textContent = r.statusText
+        li.textContent = p.effect === 'revive'
+          ? `${r.name}: ${TEXT.spellPreview.revive(r.hp, r.maxHp)}`
+          : r.statusText
           ? `${r.name}: ${r.statusText}${r.note ?? ''}`
           : `${r.name}: ${p.effect === 'heal' ? TEXT.spellPreview.heal : TEXT.spellPreview.damage} ${sign}${r.amount}（${TEXT.hp} ${before} → ${r.hp}）${r.note ?? ''}`;
         list.append(li);

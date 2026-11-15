@@ -38,14 +38,14 @@ describe('出撃', () => {
     const rules = {
       maxLevel: 50, expBase: 100, expPerLevel: 10, expPerAction: 10, expPerSupportAction: 15, expVictory: 20,
       expLevelOffset: 10, expLevelPercentMax: 200, jpPerAction: 20, jpVictoryBonus: 50, jobLevelJp: [100],
-      growthCap: ZERO_GROWTH, growthWeights: ZERO_GROWTH, growthTotalCap: 0,
+      growthCap: ZERO_GROWTH, growthWeights: ZERO_GROWTH, growthTotalCap: 0, masteryGrowthCapPercent: 5,
     };
     const roster: Roster = { gold: 0, items: [], nextItemSeq: 1, units: [unit('a', 'warrior', { exp: 42, jobs: { warrior: { jp: 30, jpTotal: 130, learned: [] } } })] };
     const setup = buildSortie(site, 'easy', roster, { jobs: testJobs, equipment: [] }, rules);
     expect(setup.progression).toBe(rules);
     const { state } = startBattle(setup, testJobs, testRules, 1, testSpells, testStrikes);
     expect(state.progression).toEqual(rules);
-    expect(state.units.find((u) => u.id === 'a')!.progress).toEqual({ exp: 42, jp: 30, jpTotal: 130, gainedExp: 0, gainedJp: 0 });
+    expect(state.units.find((u) => u.id === 'a')!.progress).toEqual({ exp: 42, jp: 30, jpTotal: 130, gainedExp: 0, gainedJp: 0, growthTotalCap: 0, masteryPending: false });
     expect(state.units.find((u) => u.id === 'e1')!.progress).toBeNull();
     // 渡さなければ、戦闘中に経験値と JP は入らない
     expect(startBattle(buildSortie(site, 'easy', roster, { jobs: testJobs, equipment: [] }), testJobs, testRules, 1, testSpells, testStrikes).state.progression).toBeNull();

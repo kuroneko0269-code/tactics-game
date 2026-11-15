@@ -24,7 +24,7 @@ const configs = { player: aiConfig, enemy: aiConfig };
 
 // data のテストは「定義データが core で正しく読めるか」を確かめるため、core の関数を使ってよい。
 describe('ふたつの丘の戦場と最初の部隊', () => {
-  it('最初の部隊は正しく、core で読み込めて、味方5体（戦士2・弓使い1・魔術師1・癒し手1）と敵5体（同じ構成）がいる', () => {
+  it('最初の部隊は正しく、core で読み込めて、味方5体（戦士2・弓使い1・魔道士1・治癒師1）と敵5体（同じ構成）がいる', () => {
     expect(validateRoster(initialRoster, catalog, progressionRules)).toEqual([]);
     const { state } = start(1);
     expect(state.map.width).toBe(10);
@@ -33,7 +33,7 @@ describe('ふたつの丘の戦場と最初の部隊', () => {
       const members = state.units.filter((u) => u.team === team).map((u) => u.jobId).sort();
       expect(members).toEqual(['archer', 'healer', 'mage', 'warrior', 'warrior']);
     }
-    // 今の版でできることがそのままできる: 魔術師は風と炎、癒し手は癒し
+    // 今の版でできることがそのままできる: 魔道士は風と炎、治癒師は癒し
     const mage = state.units.find((u) => u.team === 'player' && u.jobId === 'mage')!;
     expect(mage.spells.map((s) => s.id).sort()).toEqual(['fire', 'wind']);
     expect(mage.mp).toBe(mage.stats.maxMp);
@@ -81,14 +81,14 @@ describe('ふたつの丘の戦場と最初の部隊', () => {
     expect(passiveCount(easy)).toBe(0);
     expect(passiveCount(normal)).toBeGreaterThan(0);
     expect(passiveCount(hard)).toBeGreaterThan(passiveCount(normal));
-    // 装備（フェーズ2-4）: 「やさしい」は1段階目の武器だけで防具なし（癒し手は杖もなし）、
+    // 装備（フェーズ2-4）: 「やさしい」は1段階目の武器だけで防具なし（治癒師は杖もなし）、
     // 「ふつう」は2段階目の武器と防具、「むずかしい」は3段階目の武器と防具と装飾品。能力値の補正は使わない
     const gear = (list: typeof easy) => list!.map((u) => u.equipment.map((e) => e.id));
     expect(gear(easy)).toEqual([['sword-1'], ['sword-1'], ['bow-1'], ['staff-1'], []]);
     expect(gear(normal)!.every((ids) => ids.length === 2 && ids.every((id) => id.endsWith('-2')))).toBe(true);
     expect(gear(hard)!.every((ids) => ids.length === 3 && ids.slice(0, 2).every((id) => id.endsWith('-3')))).toBe(true);
     expect([...easy!, ...normal!, ...hard!].every((u) => Object.keys(u.statBonus).every((k) => u.equipment.some((e) => k in e.stats)))).toBe(true);
-    // 「やさしい」の敵の癒し手は杖を持たないので、素手（武器の種類なし）で、魔力が低い
+    // 「やさしい」の敵の治癒師は杖を持たないので、素手（武器の種類なし）で、魔力が低い
     const healer = easy!.find((u) => u.jobId === 'healer')!;
     expect(healer.weapon).toBeNull();
     expect(healer.stats.magic).toBe(jobs.find((j) => j.id === 'healer')!.stats.magic);

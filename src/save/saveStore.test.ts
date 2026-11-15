@@ -41,9 +41,9 @@ describe('セーブの出入口', () => {
     const roster = changeJobWithEquipment(replaceUnit(initialRoster, u), 'hero-1', 'archer', catalog, progressionRules).roster;
     const dungeon = { run: { dungeonId: 'ruins', battle: 2 }, clears: { ruins: 1 } };
     const records = { trainingWins: { easy: 3, normal: 1 } };
-    store.save({ roster: { ...roster, gold: 1234 }, dungeon, records });
-    expect(JSON.parse(backend.text!).version).toBe(3);
-    expect(store.load()).toEqual({ roster: { ...roster, gold: 1234 }, dungeon, records });
+    store.save({ roster: { ...roster, gold: 1234 }, dungeon, records, battle: null });
+    expect(JSON.parse(backend.text!).version).toBe(4);
+    expect(store.load()).toEqual({ roster: { ...roster, gold: 1234 }, dungeon, records, battle: null });
     store.clear();
     expect(store.load()).toBeUndefined();
   });
@@ -65,7 +65,7 @@ describe('セーブの出入口', () => {
     expect(reasons).toEqual(['invalidJson', 'invalidRoster', 'newerVersion', 'invalidRoster']);
   });
 
-  it('フェーズ2-1a のセーブデータ（版 1）は、版 3 に直して読み込めて、育てた状態が残り、今のジョブの最初の装備が配られる', () => {
+  it('フェーズ2-1a のセーブデータ（版 1）は、版 4 に直して読み込めて、育てた状態が残り、今のジョブの最初の装備が配られる', () => {
     // 2-1a の版が保存した形そのまま（リアクション・サポート・ムーブの枠は空。装備の枠はない）
     const saved21a = {
       version: 1,
@@ -114,8 +114,8 @@ describe('セーブの出入口', () => {
     // 2-1a で貯めた戦士の JP（ジョブのレベル 6）で、戦士の反撃を習得して、弓使いのまま付けられる
     let u = learnAbility(hero, 'warrior', 'counter', catalog, progressionRules);
     u = setPassive(u, 'reaction', 'counter', catalog);
-    store.save({ roster: replaceUnit(loaded.roster, u), dungeon: loaded.dungeon, records: loaded.records });
-    expect(JSON.parse(backend.text!).version).toBe(3);
+    store.save({ roster: replaceUnit(loaded.roster, u), dungeon: loaded.dungeon, records: loaded.records, battle: null });
+    expect(JSON.parse(backend.text!).version).toBe(4);
     expect(findUnit(store.load()!.roster, 'hero-1').slots).toEqual({ secondary: 'warrior', reaction: 'counter', support: null, movement: null });
   });
 
@@ -130,5 +130,14 @@ describe('セーブの出入口', () => {
     const loaded = storeOf(backend).load()!;
     expect(loaded.dungeon).toEqual(v2.dungeon);
     expect(loaded.roster).toEqual(initialRoster);
+    expect(loaded.battle).toBeNull();
+  });
+
+  it('版 3 のデータ（フェーズ2-4）は、育てた状態と記録をそのまま残し、「途中の戦闘なし」として版 4 に直す', () => {
+    const roster = { ...initialRoster, gold: 777 };
+    const v3 = { version: 3, roster, dungeon: { run: { dungeonId: 'ruins', battle: 2 }, clears: { ruins: 1 } }, records: { trainingWins: { normal: 2 } } };
+    const backend = memory();
+    backend.text = JSON.stringify(v3);
+    expect(storeOf(backend).load()).toEqual({ roster, dungeon: v3.dungeon, records: v3.records, battle: null });
   });
 });

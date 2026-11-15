@@ -52,15 +52,16 @@ describe('reachableTiles（移動できる範囲）', () => {
     expect(coords(reachableTiles(state, state.units[0]!))).toEqual(['1,0']);
   });
 
-  it('戦闘不能のユニットは邪魔にならない', () => {
+  it('戦闘不能のユニット（敵味方とも）のマスは通過できるが止まれない。退場したユニットは邪魔にならない', () => {
     const state = makeState({
-      heights: flat(5, 1),
+      heights: flat(6, 1),
       units: [
         { id: 'a', team: 'player', x: 0, z: 0 },
         { id: 'e', team: 'enemy', x: 1, z: 0, hp: 0 },
+        { id: 'f', team: 'player', x: 3, z: 0, hp: 0, retired: true },
       ],
     });
-    expect(coords(reachableTiles(state, state.units[0]!))).toEqual(['1,0', '2,0', '3,0']);
+    expect(coords(reachableTiles(state, state.units[0]!))).toEqual(['2,0', '3,0']);
   });
 
   it('道順は出発地点から1歩ずつ並び、最後が目的地', () => {

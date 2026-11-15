@@ -14,7 +14,7 @@ import type { AttackProfile, BattleRules, BattleState, StatusId, StrikeDefinitio
 import { chargingPercentOf, damageTaken, hasStatus, passiveEffect, passiveIdOf } from './effects';
 import { directionToward, manhattan, relativeSide, type Coord, type Direction, type RelativeSide } from './geometry';
 import { getTile, type BattleMap } from './map';
-import { isAlive } from './movement';
+import { isAlive, isOnMap } from './movement';
 
 function heightAt(map: BattleMap, c: Coord): number {
   const tile = getTile(map, c.x, c.z);
@@ -150,7 +150,7 @@ function weaponHit(
 /**
  * from にいる攻撃側が隣の target を突き飛ばした時の見込み。押し出す向きは、攻撃側から相手への向き。
  * - 押し出した先が低い時は、高さの差 1 につき最大 HP の一定の割合の落下ダメージ。
- * - マップの外・ほかのユニットがいる・ジャンプ力で登れない段差の時は、動かさずに追加のダメージ。
+ * - マップの外・ほかのユニット（戦闘不能のユニットを含む）がいる・ジャンプ力で登れない段差の時は、動かさずに追加のダメージ。
  * ダメージには、守りの補正が掛かる（詠唱は突き飛ばしで中断されるので、詠唱中の倍率は掛からない）。
  * attackerId のユニットは from にいるものとして数える（今いるマスは邪魔にならない）。
  */
@@ -168,7 +168,8 @@ export function knockbackOutcome(state: BattleState, attackerId: string, from: C
   });
   const tile = getTile(state.map, to.x, to.z);
   if (!tile) return blocked('edge');
-  const occupant = state.units.find((u) => isAlive(u) && u.id !== attackerId && u.id !== target.id && u.x === to.x && u.z === to.z);
+  // 戦闘不能のユニットがいるマスにも押し出せない（止まれないため）
+  const occupant = state.units.find((u) => isOnMap(u) && u.id !== attackerId && u.id !== target.id && u.x === to.x && u.z === to.z);
   if (occupant) return blocked('unit');
   const rise = tile.height - heightAt(state.map, target);
   if (rise > target.stats.jump) return blocked('cliff');

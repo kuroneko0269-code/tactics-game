@@ -33,4 +33,9 @@ export const battleRules: BattleRules = {
   trap: { rockfallDamagePercent: 20 },
   /** 武器を装備していない時（素手）の通常攻撃: 隣接マス、高さの差 2 以内（フェーズ2-4） */
   unarmedAttack: { kind: 'melee', maxHeightDiff: 2 },
+  /**
+   * 戦闘不能（フェーズ2-5）: HP が 0 になると、倒れた姿でマスに残る。カウントは 3 から始まり、
+   * そのユニットの手番が来るはずだった時（CT が 100 に達した時）に 1 減って CT は 0 に戻る。0 で退場（マップから消える）
+   */
+  knockout: { count: 3, ctAfterTick: 0 },
 };

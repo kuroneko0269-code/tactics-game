@@ -35,6 +35,7 @@ const rules: ProgressionRules = {
   growthCap: { maxHp: 5000, maxMp: 5000, attack: 1000, magic: 1000, speed: 500 },
   growthWeights: { maxHp: 1, maxMp: 1, attack: 4, magic: 4, speed: 20 },
   growthTotalCap: 900,
+  masteryGrowthCapPercent: 5,
 };
 
 const fresh = (patch: Partial<UnitProgressState> = {}): UnitProgressState => ({
@@ -43,6 +44,8 @@ const fresh = (patch: Partial<UnitProgressState> = {}): UnitProgressState => ({
   jpTotal: 0,
   gainedExp: 0,
   gainedJp: 0,
+  growthTotalCap: 900,
+  masteryPending: false,
   ...patch,
 });
 
@@ -68,7 +71,7 @@ describe('戦闘中の経験値と JP', () => {
       x.events.some((e) => e.type === 'attacked' && e.hit),
     );
     expect(gained(r.events)).toEqual([{ type: 'progressGained', unitId: 'w', exp: 10, jp: 20 }]);
-    expect(getUnit(r.state, 'w').progress).toEqual({ exp: 10, jp: 20, jpTotal: 20, gainedExp: 10, gainedJp: 20 });
+    expect(getUnit(r.state, 'w').progress).toEqual({ exp: 10, jp: 20, jpTotal: 20, gainedExp: 10, gainedJp: 20, growthTotalCap: 900, masteryPending: false });
   });
 
   it('攻撃が外れても、当たった時と同じ量が入る', () => {
@@ -157,7 +160,7 @@ describe('戦闘中の経験値と JP', () => {
 });
 
 describe('詠唱のある魔法の経験値と JP', () => {
-  /** 魔術師 m（味方）。敵 e1（Lv 3）と e2（Lv 6）が隣り合っている */
+  /** 魔道士 m（味方）。敵 e1（Lv 3）と e2（Lv 6）が隣り合っている */
   const mageScene = (progress: UnitProgressState = fresh()) =>
     makeState({
       heights: flat(6, 6),

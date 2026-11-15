@@ -22,7 +22,7 @@ function run(state: BattleState, actions: BattleAction[]): { state: BattleState;
 const wait: BattleAction = { type: 'endTurn', facing: 'north' };
 
 /**
- * 魔術師 m（魔力 10。炎 20 ダメージ・詠唱の速さ 25、風 10 ダメージ・詠唱の速さ 50）と、
+ * 魔道士 m（魔力 10。炎 20 ダメージ・詠唱の速さ 25、風 10 ダメージ・詠唱の速さ 50）と、
  * 素早さ 6 の戦士たち。全員 CT 0 から始め、m が最初の手番。
  */
 function arena(extra: Parameters<typeof makeState>[0]['units'] = [], heights = flat(9, 9)) {
@@ -120,7 +120,7 @@ describe('ユニットを狙う・マスを狙う', () => {
       { type: 'attack', targetId: 'e' },
       wait,
     ]);
-    expect(events).toContainEqual({ type: 'defeated', unitId: 'e' });
+    expect(events).toContainEqual({ type: 'defeated', unitId: 'e', count: 3 });
     expect(events.some((e) => e.type === 'spellFizzled')).toBe(false);
     const resolved = events.find((e) => e.type === 'spellResolved');
     expect(resolved).toMatchObject({ center: { x: 4, z: 5 } });

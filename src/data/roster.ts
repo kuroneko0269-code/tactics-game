@@ -3,7 +3,7 @@ import { startingGold } from './equipment';
 
 /**
  * 最初の部隊（はじめから遊ぶ時の5人）。今の版でできることがそのままできる状態で始める
- * （魔術師は「風」と「炎」、癒し手は「癒し」を習得済み）。名前は src/ui/text.ts に id で引けるようにまとめている。
+ * （魔道士は「風」と「炎」、治癒師は「癒し」を習得済み）。名前は src/ui/text.ts に id で引けるようにまとめている。
  * 装備（フェーズ2-4）: 全員が今のジョブの1段階目の武器と防具（equipment.ts の starterEquipment）を付けて始める。所持金は startingGold。
  */
 const noSlots = { secondary: null, reaction: null, support: null, movement: null };

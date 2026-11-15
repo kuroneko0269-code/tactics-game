@@ -46,13 +46,26 @@ describe('セーブデータ', () => {
   it('保存した形（JSON の文字列）から読み込むと、元の部隊・ダンジョンの記録・訓練戦の記録に戻る', () => {
     const text = JSON.stringify(createSaveData(roster, dungeon, records));
     const loaded = migrateSaveData(JSON.parse(text), context);
-    expect(loaded).toEqual({ ok: true, data: { version: SAVE_VERSION, roster, dungeon, records }, migratedFrom: SAVE_VERSION });
+    expect(loaded).toEqual({ ok: true, data: { version: SAVE_VERSION, roster, dungeon, records, battle: null }, migratedFrom: SAVE_VERSION });
   });
 
-  it('版 1（フェーズ2-1a・2-1b・2-2a）のデータは、版 2 を経て版 3 に直す。ダンジョンは挑戦中なし・クリアなし', () => {
-    expect(SAVE_VERSION).toBe(3);
+  it('版 3 → 4（フェーズ2-5）: 途中の戦闘「なし」を足す。部隊・ダンジョン・記録はそのまま', () => {
+    expect(migrateSaveData({ version: 3, roster, dungeon, records }, context)).toEqual({
+      ok: true,
+      migratedFrom: 3,
+      data: { version: 4, roster, dungeon, records, battle: null },
+    });
+    // 途中の戦闘の形が崩れていれば、その戦闘だけ捨てる
+    expect(migrateSaveData({ version: 4, roster, dungeon, records, battle: { origin: { kind: 'x' }, state: null } }, context)).toMatchObject({
+      ok: true,
+      data: { battle: null },
+    });
+  });
+
+  it('版 1（フェーズ2-1a・2-1b・2-2a）のデータは、版 2・3 を経て版 4 に直す。ダンジョンは挑戦中なし・クリアなし', () => {
+    expect(SAVE_VERSION).toBe(4);
     const loaded = migrateSaveData({ version: 1, roster: { units: [unitV2] } }, context, SAVE_MIGRATIONS);
-    expect(loaded).toMatchObject({ ok: true, migratedFrom: 1, data: { version: 3, dungeon: EMPTY_DUNGEON_STATE, records: EMPTY_RECORDS } });
+    expect(loaded).toMatchObject({ ok: true, migratedFrom: 1, data: { version: 4, dungeon: EMPTY_DUNGEON_STATE, records: EMPTY_RECORDS, battle: null } });
   });
 
   it('版 2 → 3: 育てた状態を残し、各ユニットの今のジョブの最初の装備を配って付け、最初の所持金を持たせる', () => {
@@ -62,9 +75,10 @@ describe('セーブデータ', () => {
       ok: true,
       migratedFrom: 2,
       data: {
-        version: 3,
+        version: 4,
         dungeon,
         records: EMPTY_RECORDS,
+        battle: null,
         roster: {
           units: [
             { ...unitV2, equipment: { weapon: 'i1', armor: 'i2', accessory: null } },
@@ -89,7 +103,7 @@ describe('セーブデータ', () => {
       2: (old) => ({ version: 3, roster: old.team, dungeon: old.dungeon, records: old.records }),
     };
     const v1 = { version: 1, roster };
-    expect(migrateSaveData(v1, context, migrations, 3)).toEqual({ ok: true, data: { version: 3, roster, dungeon, records }, migratedFrom: 1 });
+    expect(migrateSaveData(v1, context, migrations, 3)).toEqual({ ok: true, data: { version: 3, roster, dungeon, records, battle: null }, migratedFrom: 1 });
     expect(migrateSaveData({ version: 2, team: roster, dungeon, records }, context, migrations, 3)).toMatchObject({ ok: true, migratedFrom: 2 });
     // 直す処理が抜けている版は読めない
     expect(migrateSaveData(v1, context, { 2: migrations[2]! }, 3)).toEqual({ ok: false, reason: 'noMigration' });

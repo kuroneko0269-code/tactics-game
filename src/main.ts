@@ -25,7 +25,7 @@ import {
   type DungeonState,
 } from './core/dungeon';
 import { buildSortie, type BattleSite } from './core/sortie';
-import { EMPTY_RECORDS, type GameRecords } from './core/saveData';
+import { EMPTY_RECORDS, type BattleOrigin, type GameRecords, type SuspendedBattle } from './core/saveData';
 import { grantSpoils, recordTrainingWin, rollSpoils, shopStock, type BattleReward } from './core/shop';
 import { strikes, spells } from './data/abilities';
 import { passives } from './data/passives';
@@ -65,7 +65,8 @@ import { createUnitLabels, type UnitLabels } from './ui/unitLabels';
  * ダンジョン: 拠点 →（出撃: 挑む・再開する）→ 配置 → 戦闘 → 戦闘の間（結果・編成）→ 次の戦闘 … → クリアの画面 → 拠点。
  * 負けたら、やり直すか撤退するかを選ぶ。
  * 部隊の状態（所持金・所持品を含む）とダンジョンの進み具合・訓練戦の記録は、戦闘が終わった時と、編成を変えた時・店で売り買いした時に、
- * 端末へ自動で保存する（戦闘の途中は保存しない）。
+ * 端末へ自動で保存する。戦闘の途中の状態も、行動がひとつ確定するたびに保存する（フェーズ2-5）。
+ * 途中の戦闘があれば、拠点で「戦闘を再開」と「撤退する」だけを出す（再開するまで、編成と店は使えない。部隊と戦闘の食い違いを防ぐため）。
  * 戦闘に勝つと、戦場の段階ごとの報酬（ゴールドと戦利品の抽選）を部隊に入れる（フェーズ2-4）。
  */
 type ScreenName = 'base' | 'roster' | 'shop' | 'deploy' | 'battle' | 'result';
@@ -103,7 +104,14 @@ function main(): void {
   let dungeonState: DungeonState = normalizeDungeonState(loaded?.dungeon ?? EMPTY_DUNGEON_STATE, [ruinsDungeon]);
   /** 訓練戦の段階ごとの勝利の回数（店の品ぞろえの条件） */
   let records: GameRecords = loaded?.records ?? EMPTY_RECORDS;
-  const persist = () => store.save({ roster, dungeon: dungeonState, records });
+  /** 途中の戦闘（行動がひとつ確定するたびに保存する。決着したら消す） */
+  let suspended: SuspendedBattle | null = loaded?.battle ?? null;
+  const persist = () => store.save({ roster, dungeon: dungeonState, records, battle: suspended });
+  /** 戦闘の状態が変わった（行動がひとつ確定した）: 途中の戦闘として保存する */
+  const saveBattle = (origin: BattleOrigin, state: BattleState) => {
+    suspended = { origin, state };
+    persist();
+  };
   /** 今の店の品ぞろえ */
   const stock = () => shopStock(shop, { trainingWins: records.trainingWins, dungeonClears: dungeonState.clears });
   const updateRoster = (next: Roster) => {
@@ -191,7 +199,10 @@ function main(): void {
       clears: clearCount(dungeonState, ruinsDungeon.id),
     }),
     gold: () => roster.gold,
-    onSortie: (tierId) => startSortie(site, tierId, (state) => finishBattle(tierId, state)),
+    suspended: () => (suspended ? suspendedTitle(suspended.origin) : null),
+    onResumeBattle: () => resumeBattle(),
+    onRetreatBattle: () => retreatBattle(),
+    onSortie: (tierId) => startSortie(site, tierId, { kind: 'training', tierId }, (state) => finishBattle(tierId, state)),
     onDungeon: (fresh) => {
       if (fresh || dungeonState.run?.dungeonId !== ruinsDungeon.id) updateDungeon(startRun(dungeonState, ruinsDungeon.id));
       playDungeonBattle();
@@ -203,6 +214,7 @@ function main(): void {
     },
     onNewGame: () => {
       store.clear();
+      suspended = null;
       roster = initialRoster;
       dungeonState = EMPTY_DUNGEON_STATE;
       records = EMPTY_RECORDS;
@@ -271,6 +283,7 @@ function main(): void {
     const result = applyBattleResult(roster, state, catalog, progressionRules);
     const spoils = takeSpoils(result.roster, site.tiers.find((t) => t.id === tierId)?.reward, state);
     if (result.report.victory) records = { ...records, trainingWins: recordTrainingWin(records.trainingWins, tierId) };
+    suspended = null;
     updateRoster(spoils.roster);
     afterResultPause(() => {
       setScreen('result');
@@ -284,7 +297,7 @@ function main(): void {
   const playDungeonBattle = () => {
     const run = dungeonState.run;
     if (!run) return showBase();
-    startSortie(ruinsDungeon.battles[run.battle]!, 'main', finishDungeonBattle);
+    startSortie(ruinsDungeon.battles[run.battle]!, 'main', { kind: 'dungeon', dungeonId: run.dungeonId, battle: run.battle }, finishDungeonBattle);
   };
   const battleTitle = (index: number) => {
     const b = ruinsDungeon.battles[index]!;
@@ -307,6 +320,7 @@ function main(): void {
     const spoils = takeSpoils(result.roster, ruinsDungeon.battles[played]!.tiers[0]?.reward, state, bossItems);
     roster = cleared ? grantClearReward(spoils.roster, ruinsDungeon, firstClear) : spoils.roster;
     dungeonState = progress.state;
+    suspended = null;
     persist();
     const outcome = progress.outcome;
     const t = battleTitle(played);
@@ -364,8 +378,57 @@ function main(): void {
     afterResultPause(show);
   };
 
+  /** 途中の戦闘の題（拠点の「戦闘を再開」に添える） */
+  const suspendedTitle = (origin: BattleOrigin) => {
+    if (origin.kind === 'training') return TEXT.base.suspendedTraining(TEXT.tiers[origin.tierId]?.name ?? origin.tierId);
+    const t = battleTitle(origin.battle);
+    return TEXT.base.suspendedDungeon(TEXT.dungeons[origin.dungeonId] ?? origin.dungeonId, t.n, t.mapName);
+  };
+  const finisherOf = (origin: BattleOrigin) =>
+    origin.kind === 'training' ? (state: BattleState) => finishBattle(origin.tierId, state) : finishDungeonBattle;
+
+  /**
+   * 途中の戦闘を再開する（最後に保存した状態から）。敵の手番の途中で閉じていた時は、続きの敵の行動を AI がもう一度決めて再生する
+   * （同じ状態からは必ず同じ行動になる）。決着した直後に閉じていた時は、そのまま結果の画面へ
+   */
+  const resumeBattle = () => {
+    const s = suspended;
+    if (!s) return showBase();
+    endBattle();
+    const def = s.origin.kind === 'training' ? site : ruinsDungeon.battles[s.origin.battle]!;
+    const onFinished = finisherOf(s.origin);
+    if (s.state.winner) return onFinished(s.state);
+    useMap(def.map);
+    setScreen('battle');
+    rig.reset();
+    battle = createActiveBattle({ state: s.state, events: [] }, onFinished, (st) => saveBattle(s.origin, st));
+    currentFinish = onFinished;
+  };
+
+  /**
+   * 途中の戦闘から撤退する: 負けとして、それまでに得た経験値と JP を持ち帰る（ゴールドと戦利品はない）。
+   * ダンジョンの戦闘なら、挑戦もやめる
+   */
+  const retreatBattle = () => {
+    const s = suspended;
+    if (!s) return showBase();
+    const lost: BattleState = { ...s.state, winner: 'enemy', turn: null };
+    const result = applyBattleResult(roster, lost, catalog, progressionRules);
+    roster = result.roster;
+    if (s.origin.kind === 'dungeon') dungeonState = retreat(dungeonState);
+    suspended = null;
+    persist();
+    endBattle();
+    setScreen('result');
+    showReportScreen(screenEl, result.report, jobOf, canLearn, [{ label: TEXT.report.toBase, onClick: showBase, primary: true }], {
+      heading: suspendedTitle(s.origin),
+      title: TEXT.report.retreatTitle,
+      notes: [s.origin.kind === 'dungeon' ? TEXT.report.retreatDungeonNote : TEXT.report.retreatNote],
+    });
+  };
+
   /** 出撃: 出撃前の配置の画面を出し、「戦闘開始」で戦闘を始める */
-  const startSortie = (target: BattleSite, tierId: string, onFinished: (state: BattleState) => void) => {
+  const startSortie = (target: BattleSite, tierId: string, origin: BattleOrigin, onFinished: (state: BattleState) => void) => {
     endBattle();
     const seed = nextSeed;
     nextSeed = randomSeed();
@@ -389,7 +452,9 @@ function main(): void {
         setScreen('battle');
         const start = begin(final);
         shell.view.sync(start.state);
-        active.controller = createController(shell, start, onFinished);
+        // 戦闘が始まった時点で、途中の戦闘として保存する（その後は、行動がひとつ確定するたびに保存し直す）
+        saveBattle(origin, start.state);
+        active.controller = createController(shell, start, onFinished, (st) => saveBattle(origin, st));
         currentFinish = onFinished;
       },
     });
@@ -434,6 +499,7 @@ function main(): void {
     shell: { view: BattleView; hud: BattleHud; labels: UnitLabels },
     start: ActionResult,
     onFinished: (state: BattleState) => void,
+    onStateChanged?: (state: BattleState) => void,
   ): BattleController => {
     const { view } = shell;
     // 手番のユニットなどが画面の外にいる時に、カメラを寄せる（足もとと頭上の両方が見えるように）
@@ -450,12 +516,17 @@ function main(): void {
       labels: shell.labels,
       ai: aiConfig,
       onFinished,
+      onStateChanged,
     });
   };
 
-  const createActiveBattle = (start: ActionResult, onFinished: (state: BattleState) => void): ActiveBattle => {
+  const createActiveBattle = (
+    start: ActionResult,
+    onFinished: (state: BattleState) => void,
+    onStateChanged?: (state: BattleState) => void,
+  ): ActiveBattle => {
     const shell = createBattleShell(start);
-    return { ...shell, controller: createController(shell, start, onFinished) };
+    return { ...shell, controller: createController(shell, start, onFinished, onStateChanged) };
   };
 
   const canvas = stage.renderer.domElement;
@@ -499,6 +570,8 @@ function main(): void {
       roster: () => roster,
       /** ダンジョンの進み具合とクリアの記録 */
       dungeon: () => dungeonState,
+      /** 保存してある途中の戦闘（なければ null） */
+      suspended: () => suspended,
       /** 訓練戦の記録（段階ごとの勝利の回数） */
       records: () => records,
       /** 今の店の品ぞろえ */
@@ -543,8 +616,12 @@ function main(): void {
         endBattle();
         useMap(mapDefinitionOf(result.state.map.id));
         setScreen('battle');
-        // 確認用の場面なので、決着しても部隊には反映しない
+        // 確認用の場面なので、決着しても部隊には反映しない（途中の戦闘としても保存しない。それまでの途中の戦闘は捨てる）
         currentFinish = undefined;
+        if (suspended) {
+          suspended = null;
+          persist();
+        }
         battle = createActiveBattle(result, () => {});
       },
     };

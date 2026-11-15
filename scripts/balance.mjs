@@ -270,7 +270,7 @@ async function main() {
     ];
     console.log('');
     console.log(`■ 装備の段階ごとの勝率（1つの組み合わせにつき ${BATTLES} 戦。Lv ${MID_LEVEL} は今のジョブに ${MID_JP} JP、Lv ${EQUIP_LEVEL} は 5000 JP を足して覚えられるものを覚えた）`);
-    console.log('  （勝率・見込み時間の中央値。平均だと、癒し手どうしだけが残って長引いた戦闘に引きずられるため）');
+    console.log('  （勝率・見込み時間の中央値。平均だと、治癒師どうしだけが残って長引いた戦闘に引きずられるため）');
     console.log(`  ${'部隊'.padEnd(26)}${battles.map((b) => b.label.padStart(14)).join('')}`);
     for (const [label, roster] of parties) {
       const cells = battles.map((b) => {

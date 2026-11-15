@@ -426,7 +426,7 @@ describe('罠', () => {
     const base = trapState('rockfall');
     const state = { ...base, units: base.units.map((u) => (u.id === 'p' ? { ...u, hp: 5 } : u)) };
     const r = applyAction(state, { type: 'move', x: 2, z: 2 });
-    expect(r.events).toContainEqual({ type: 'defeated', unitId: 'p' });
+    expect(r.events).toContainEqual({ type: 'defeated', unitId: 'p', count: 3 });
     // 味方が全滅したので敗北
     expect(r.state.winner).toBe('enemy');
   });
