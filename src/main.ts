@@ -253,14 +253,16 @@ function main(): void {
 
   const jobOf = (id: string) => findUnit(roster, id).jobId;
   /** before から after になって新しく就けるようになったジョブの知らせ（結果の画面に出す。フェーズ2-6） */
-  const unlockNotes = (before: Roster, after: Roster): string[] =>
-    after.units.flatMap((u) => {
+  const unlockNotes = (before: Roster, after: Roster): string[] => {
+    // 1つの札にまとめる（小さめのスマホでも、結果の画面とクリアの画面に収まるように）
+    const parts = after.units.flatMap((u) => {
       const b = before.units.find((x) => x.id === u.id);
       if (!b) return [];
-      return newlyUnlockedJobs(b, u, catalog, progressionRules).map((jobId) =>
-        TEXT.roster.unlockChip(unitName(u.id, u.jobId), TEXT.jobs[jobId] ?? jobId),
-      );
+      const jobIds = newlyUnlockedJobs(b, u, catalog, progressionRules);
+      return jobIds.length === 0 ? [] : [TEXT.roster.unlockPart(unitName(u.id, u.jobId), jobIds.map((j) => TEXT.jobs[j] ?? j).join('・'))];
     });
+    return parts.length === 0 ? [] : [TEXT.roster.unlockChip(parts.join('、'))];
+  };
   /** 戦闘中: そのユニットの jobId の JP の累計が jpTotal になった時に、新しく就けるようになったジョブ */
   const unlockedInBattle = (unitId: string, jobId: string, jpTotal: number): string[] => {
     const u = roster.units.find((x) => x.id === unitId);
@@ -289,8 +291,8 @@ function main(): void {
    */
   const takeSpoils = (base: Roster, reward: BattleReward | undefined, state: BattleState, extraItems: readonly string[] = []) => {
     const spoils = rollSpoils(reward, state.winner === 'player', state.rngState);
-    // 盗賊が盗んだ物（フェーズ2-6）は、勝ち負けに関わらず入る
-    const stolen = state.stolen ?? { gold: 0, items: [] };
+    // 盗賊が盗んだ物（フェーズ2-6）は、戦闘に勝った時だけ持ち帰れる（PR #17 の回答。負けた時・撤退した時はなし）
+    const stolen = state.winner === 'player' ? (state.stolen ?? { gold: 0, items: [] }) : { gold: 0, items: [] };
     const all = { gold: spoils.gold + stolen.gold, itemIds: [...spoils.itemIds, ...extraItems, ...stolen.items] };
     const granted = grantSpoils(base, all);
     return {
@@ -446,8 +448,8 @@ function main(): void {
     const lost: BattleState = { ...s.state, winner: 'enemy', turn: null };
     const result = applyBattleResult(roster, lost, catalog, progressionRules);
     const unlocks = unlockNotes(roster, result.roster);
-    // 撤退しても、盗んだ物は持ち帰る（フェーズ2-6）
-    roster = takeSpoils(result.roster, undefined, lost).roster;
+    // 撤退した時は、盗んだ物は持ち帰れない（PR #17 の回答）
+    roster = result.roster;
     if (s.origin.kind === 'dungeon') dungeonState = retreat(dungeonState);
     suspended = null;
     persist();

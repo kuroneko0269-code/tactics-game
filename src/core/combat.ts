@@ -184,6 +184,12 @@ export interface AttackPreview {
   readonly stealItemId?: string;
 }
 
+/** 反撃の攻撃（倍率が 100% でなければ、その倍率の技として扱う。フェーズ2-6） */
+export function counterStrike(counterer: UnitState): StrikeDefinition | undefined {
+  const percent = passiveEffect(counterer, 'counter')?.damagePercent;
+  return percent === undefined || percent === 100 ? undefined : { id: 'counter', damagePercent: percent, hitBonus: 0 };
+}
+
 /**
  * 「かばう」（フェーズ2-6）: target の隣にいる、かばうを付けた味方（target 以外・攻撃側以外・立っている）。
  * target の HP が最大 HP の半分以下の時だけ。複数いれば並び順で先のユニット
@@ -300,7 +306,9 @@ export function previewAttack(
   // 背水: 背面からのダメージの補正を受けない。不意打ち: 背面からの時だけ倍率が上がる
   const damageSide = side === 'back' && passiveEffect(target, 'backGuard') ? 'side' : side;
   const abilityPercent = side === 'back' && strike?.backDamagePercent !== undefined ? strike.backDamagePercent : (strike?.damagePercent ?? 100);
-  const raw = computeDamage(rules, attacker.stats.attack, damageSide, heightPercent, 100, abilityPercent);
+  // 魔法剣（フェーズ2-6）: ダメージの元は攻撃力と魔力の合計
+  const power = strike?.magicBlend ? attacker.stats.attack + attacker.stats.magic : attacker.stats.attack;
+  const raw = computeDamage(rules, power, damageSide, heightPercent, 100, abilityPercent);
   // 「踏みとどまる」: HP が 0 になるダメージなら、HP 1 で耐える（1戦に1度）
   const full = damageTaken(rules, target, raw);
   const hitResult = enduredDamage(target, full);
@@ -326,7 +334,7 @@ export function previewAttack(
     const self: UnitState = { ...attacker, x: from.x, z: from.z, facing: attackerFacing, charging: null };
     const counterer: UnitState = { ...target, hp: after };
     if (canReach(state.map, counterer.attack, counterer, self)) {
-      const p = previewAttack(state, counterer, self, counterer, undefined, { counter: true });
+      const p = previewAttack(state, counterer, self, counterer, counterStrike(counterer), { counter: true });
       counter = { abilityId: counterId, hitPercent: p.hitPercent, damage: p.damage };
     }
   }

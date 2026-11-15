@@ -57,6 +57,7 @@ export const testRules: BattleRules = {
   unarmedAttack: { kind: 'melee', maxHeightDiff: 1 },
   knockout: { count: 3, ctAfterTick: 0 },
   steal: { percent: { front: 30, side: 55, back: 80 }, goldBase: 20, goldPerLevel: 10 },
+  stalemate: { turns: 30, warnTurns: 10 },
 };
 
 export const testWarrior: JobDefinition = {
@@ -253,6 +254,28 @@ export const testEarthWave: SpellDefinition = {
   mpCost: 0,
 };
 
+/** 時魔道士・召喚士・魔法剣士・魔道士の追加（フェーズ2-6） */
+const single = { kind: 'magic', element: 'none', power: 0, range: 4, areaRadius: 0, heightTolerance: 0 } as const;
+export const testHaste: SpellDefinition = { ...single, id: 'haste', effect: 'status', inflicts: 'haste', mpCost: 0, castSpeed: 50 };
+export const testDecelerate: SpellDefinition = { ...single, id: 'decelerate', effect: 'status', inflicts: 'speedDown', mpCost: 0, castSpeed: 50 };
+export const testStop: SpellDefinition = { ...single, id: 'stop', effect: 'status', inflicts: 'stop', mpCost: 0, castSpeed: 15 };
+export const testQuicken: SpellDefinition = { ...single, id: 'quicken', effect: 'quicken', targets: 'ally', mpCost: 0, castSpeed: 34 };
+export const testEarth: SpellDefinition = { ...single, id: 'earth', element: 'earth', effect: 'damage', power: 100, heightPowerPerStep: 25, heightPowerCap: 100, mpCost: 0, castSpeed: 34 };
+export const testFireSpirit: SpellDefinition = {
+  ...single,
+  id: 'fireSpirit',
+  element: 'fire',
+  effect: 'damage',
+  affects: 'enemies',
+  power: 100,
+  areaRadius: 2,
+  heightTolerance: 3,
+  mpCost: 0,
+  castSpeed: 12,
+};
+export const testHealSpirit: SpellDefinition = { ...testFireSpirit, id: 'healSpirit', element: 'light', effect: 'heal', affects: 'allies' };
+export const testFireBlade: StrikeDefinition = { id: 'fireBlade', damagePercent: 70, hitBonus: 0, weapons: ['sword'], magicBlend: true, element: 'fire', mpCost: 6 };
+
 export const testSpells = [
   testFire,
   testWind,
@@ -269,6 +292,13 @@ export const testSpells = [
   testChakra,
   testShout,
   testEarthWave,
+  testHaste,
+  testDecelerate,
+  testStop,
+  testQuicken,
+  testEarth,
+  testFireSpirit,
+  testHealSpirit,
 ];
 export const testStrikes = [
   testPowerStrike,
@@ -280,6 +310,7 @@ export const testStrikes = [
   testStealGold,
   testStealGear,
   testBackstab,
+  testFireBlade,
 ];
 
 /** テスト用の受動的なアビリティ（本番の数値は src/data/passives.ts） */
@@ -302,6 +333,10 @@ export const testPassives: readonly PassiveDefinition[] = [
   { id: 'ironFist', slot: 'support', effect: { kind: 'unarmedAttackBonus', amount: 3 } },
   { id: 'flee', slot: 'reaction', effect: { kind: 'flee' } },
   { id: 'swiftFeet', slot: 'movement', effect: { kind: 'moveBonus', amount: 2 } },
+  { id: 'criticalHaste', slot: 'reaction', effect: { kind: 'criticalHaste', divisor: 4 } },
+  { id: 'teleport', slot: 'movement', effect: { kind: 'teleport' } },
+  { id: 'spiritWard', slot: 'support', effect: { kind: 'steadyCasting' } },
+  { id: 'manaBlade', slot: 'support', effect: { kind: 'magicToAttack', percent: 40 } },
 ];
 
 /** id の受動的なアビリティの定義（テスト用） */

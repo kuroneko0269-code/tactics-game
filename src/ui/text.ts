@@ -56,6 +56,10 @@ export const TEXT = {
     targetBadge: '★',
     /** 敵の全滅は常に勝利、味方の全滅は常に敗北 */
     alwaysNote: '敵が全滅しても勝利、味方が全滅すると敗北です',
+    /** 膠着（フェーズ2-6） */
+    stalemate: (n: number) => `膠着まで残り ${n} 手番（ダメージ・回復・状態変化がないまま過ぎると、HP の割合が高い側の勝ち）`,
+    stalemateShort: (n: number) => `膠着まで ${n} 手番`,
+    stalemateResult: '膠着（HP の割合で決着）',
   },
 
   /** マップ上のイベントのメッセージ（messageId で引く） */
@@ -101,6 +105,9 @@ export const TEXT = {
     knight: '騎士',
     monk: '格闘家',
     thief: '盗賊',
+    timeMage: '時魔道士',
+    summoner: '召喚士',
+    magicKnight: '魔法剣士',
   } as Readonly<Record<string, string>>,
 
   /** 行動順の欄に出す、ジョブの1文字の略 */
@@ -113,6 +120,9 @@ export const TEXT = {
     knight: '騎',
     monk: '拳',
     thief: '盗',
+    timeMage: '刻',
+    summoner: '召',
+    magicKnight: '剣',
   } as Readonly<Record<string, string>>,
 
   /** ジョブのコマンド（行動アビリティのまとまり）の名前。ジョブの id で引く */
@@ -125,6 +135,9 @@ export const TEXT = {
     knight: '破壊術',
     monk: '拳法',
     thief: '盗術',
+    timeMage: '時魔法',
+    summoner: '召喚',
+    magicKnight: '魔法剣',
   } as Readonly<Record<string, string>>,
 
   /** アビリティ（行動アビリティと、受動的なアビリティ）の名前。id で引く */
@@ -176,6 +189,25 @@ export const TEXT = {
     backstab: '不意打ち',
     flee: '逃げ足',
     swiftFeet: '俊足',
+    ice: '氷',
+    earth: '土',
+    haste: '加速',
+    decelerate: '減速',
+    stop: '停止',
+    quicken: '早送り',
+    fireSpirit: '炎の精霊',
+    iceSpirit: '氷の精霊',
+    thunderSpirit: '雷の精霊',
+    earthSpirit: '土の精霊',
+    healSpirit: '癒しの精霊',
+    fireBlade: '炎の剣',
+    iceBlade: '氷の剣',
+    thunderBlade: '雷の剣',
+    sealBlade: '魔封剣',
+    criticalHaste: '危機の加速',
+    teleport: '瞬間移動',
+    spiritWard: '精霊の守り',
+    manaBlade: '魔力の刃',
   } as Readonly<Record<string, string>>,
 
   /** 行動順の欄に出す、詠唱のある魔法・技の1文字の略 */
@@ -190,6 +222,17 @@ export const TEXT = {
     protectPrayer: '守',
     inferno: '業',
     revive: '蘇',
+    ice: '氷',
+    earth: '土',
+    haste: '加',
+    decelerate: '減',
+    stop: '止',
+    quicken: '早',
+    fireSpirit: '炎',
+    iceSpirit: '氷',
+    thunderSpirit: '雷',
+    earthSpirit: '土',
+    healSpirit: '癒',
   } as Readonly<Record<string, string>>,
 
   /** 行動アビリティの短い説明（編成の画面で、習得する前に見る） */
@@ -240,6 +283,25 @@ export const TEXT = {
     backstab: '背面から攻撃した時だけ、通常攻撃の 2 倍のダメージ。短剣が必要',
     flee: '武器による攻撃を受けて生き残った時、攻撃した相手から1マス離れる',
     swiftFeet: '移動力 +2',
+    ice: '単体の攻撃魔法。威力は炎と風の間',
+    earth: '単体の攻撃魔法。相手が自分より低い位置にいるほど威力が上がる（1 段ごとに +25%）',
+    haste: '単体に加速（素早さ +50%、3手番）を付ける。詠唱は速い',
+    decelerate: '単体に素早さ低下（-25%、3手番）を付ける。詠唱は速い',
+    stop: '単体に停止（次の手番が何もできずに過ぎる）を付ける。詠唱は長い',
+    quicken: '味方ひとりの CT を満たし、すぐに行動させる。消費 MP が大きい',
+    fireSpirit: '中心から 2 マス以内の、敵だけにダメージ。詠唱は長い',
+    iceSpirit: '中心から 2 マス以内の、敵だけにダメージ。詠唱は長い',
+    thunderSpirit: '中心から 2 マス以内の、敵だけにダメージ。詠唱は長い',
+    earthSpirit: '中心から 2 マス以内の、敵だけにダメージ。詠唱は長い',
+    healSpirit: '中心から 2 マス以内の、味方だけを回復。詠唱は長い',
+    fireBlade: '隣の敵に剣で攻撃（攻撃力と魔力の合計の 70%）。炎属性。MP 6',
+    iceBlade: '隣の敵に剣で攻撃（攻撃力と魔力の合計の 70%）。氷属性。MP 6',
+    thunderBlade: '隣の敵に剣で攻撃（攻撃力と魔力の合計の 70%）。雷属性。MP 6',
+    sealBlade: '通常攻撃の 60% のダメージ。当たると沈黙を付ける。MP 6',
+    criticalHaste: 'ダメージを受けて HP が 1/4 以下になった時、自分に加速が付く',
+    teleport: '段差とほかのユニットを無視して移動する（距離は移動力と同じ）',
+    spiritWard: '詠唱中に受けるダメージが増えない',
+    manaBlade: '魔力の 40% を攻撃力に加える',
   } as Readonly<Record<string, string>>,
 
   /** 状態変化の名前 */
@@ -300,6 +362,8 @@ export const TEXT = {
     wind: '風',
     thunder: '雷',
     light: '光',
+    ice: '氷',
+    earth: '土',
     none: '無',
   } satisfies Record<SpellElement, string>,
 
@@ -396,6 +460,12 @@ export const TEXT = {
     'e-archer-1': '敵の弓使い',
     'e-mage-1': '敵の魔道士',
     'e-healer-1': '敵の治癒師',
+    'e-knight-1': '敵の騎士',
+    'e-thief-1': '敵の盗賊',
+    'e-magicKnight-1': '敵の魔法剣士',
+    'e-monk-1': '敵の格闘家',
+    'e-timeMage-1': '敵の時魔道士',
+    'e-summoner-1': '敵の召喚士',
     'r3-boss': '祭壇の主',
   } as Readonly<Record<string, string>>,
 
@@ -494,6 +564,8 @@ export const TEXT = {
     angle: (side: string, height: string) => `（${side}・高低差 ${height}）`,
     /** 詠唱のない業（時守。フェーズ2-6） */
     instant: '詠唱なし（すぐに発動）',
+    /** 敵だけ・味方だけに効く（召喚。フェーズ2-6） */
+    affects: { enemies: '敵だけに効く（赤い範囲）', allies: '味方だけに効く（緑の範囲）' } as const,
     rewind: (before: number, after: number) => `HP ${before} → ${after}（前回の手番の始め）`,
     /** 詠唱のない業の狙い（追いかける必要がないので、相手の名前だけ） */
     targetInstant: (name: string) => `相手: ${name}`,
@@ -553,6 +625,9 @@ export const TEXT = {
     gold: (n: number) => `+${n} G`,
     item: (name: string) => `${name}を奪った`,
     failed: '盗めなかった',
+    /** 盗んだ時に画面の上に出す（PR #17 の回答: 勝った時だけ持ち帰れる） */
+    keepGold: (n: number) => `${n} G を盗んだ（勝てば持ち帰れる）`,
+    keepItem: (name: string) => `${name}を盗んだ（勝てば持ち帰れる）`,
   },
   cleared: '状態変化が解けた',
   interrupted: '中断',
@@ -602,8 +677,8 @@ export const TEXT = {
     hits: (n: number) => `${n}回攻撃（1回ごとに命中を判定）`,
     stealTitle: (name: string) => `「${name}」の予測`,
     stealPercent: '成功率',
-    stealGold: (gold: number) => `成功すると ${gold} G（戦闘の後に入る）`,
-    stealItem: (item: string) => `成功すると「${item}」を奪う`,
+    stealGold: (gold: number) => `成功すると ${gold} G（勝てば持ち帰れる）`,
+    stealItem: (item: string) => `成功すると「${item}」を奪う（勝てば持ち帰れる）`,
     stealNothing: '盗める装備がありません',
     backstabNote: '背面からなら 2 倍',
     endures: (name: string) => `相手の「${name}」で HP 1 残る`,
@@ -810,7 +885,8 @@ export const TEXT = {
     /** 解放条件を満たした瞬間の知らせ */
     unlockToast: (name: string, job: string) => `${name}が「${job}」に就けるようになった！`,
     /** 結果の画面の札 */
-    unlockChip: (name: string, job: string) => `${name}: ${job}に就ける`,
+    unlockChip: (parts: string) => `解放: ${parts}`,
+    unlockPart: (name: string, jobs: string) => `${name} ${jobs}`,
     changeJobTitle: (job: string) => `${job}に変える`,
     compareNow: '今',
     compareAfter: '変更後',

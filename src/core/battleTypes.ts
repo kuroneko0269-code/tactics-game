@@ -28,7 +28,7 @@ export interface UnitStats {
  * 魔法の属性。今は表示と記録だけで、効果の違いはない（後のフェーズで連携魔法と弱点に使う）。
  * none は属性のない技（狙い撃ちなど）。
  */
-export type SpellElement = 'fire' | 'wind' | 'thunder' | 'light' | 'none';
+export type SpellElement = 'fire' | 'wind' | 'thunder' | 'light' | 'ice' | 'earth' | 'none';
 
 /** 武器の種類。装備している武器で決まる（フェーズ2-4。それまではジョブごとに固定だった）。短剣はフェーズ2-6 */
 export type WeaponType = 'sword' | 'bow' | 'staff' | 'dagger';
@@ -89,7 +89,7 @@ export type GrowthValues = Readonly<Record<GrowthStat, number>>;
  * 魔法の効果の種類。status は状態変化を付けるだけ（ダメージも回復もない）。
  * revive は蘇生（戦闘不能のユニットだけに効き、最大 HP の power% で復帰させる。フェーズ2-5）
  */
-export type SpellEffect = 'damage' | 'heal' | 'status' | 'revive' | 'rewind' | 'swap' | 'delay' | 'cleanse';
+export type SpellEffect = 'damage' | 'heal' | 'status' | 'revive' | 'rewind' | 'swap' | 'delay' | 'cleanse' | 'quicken';
 
 /**
  * 狙える相手（ユニットだけを狙う魔法・業。フェーズ2-6）。ally は自分以外の味方、enemy は敵。
@@ -188,7 +188,11 @@ export type PassiveSlot = 'reaction' | 'support' | 'movement';
 /** 受動的なアビリティの効果。数値は src/data の定義に置く */
 export type PassiveEffect =
   /** 反撃: 隣接するマスから近接攻撃を受けて生き残った時、通常攻撃で反撃する（反撃に対する反撃は起きない） */
-  | { readonly kind: 'counter' }
+  | {
+      readonly kind: 'counter';
+      /** 反撃のダメージの倍率（%。通常攻撃に掛ける。フェーズ2-6 で追加。省くと 100） */
+      readonly damagePercent?: number;
+    }
   /** 身かわし: 正面と側面からの、武器による攻撃の命中率を下げる */
   | { readonly kind: 'evade'; readonly hitPenalty: number }
   /** 魔力の殻: 魔法で受けるダメージの倍率（%） */
@@ -219,6 +223,14 @@ export type PassiveEffect =
   | { readonly kind: 'unarmedAttackBonus'; readonly amount: number }
   /** 逃げ足（フェーズ2-6）: 武器による攻撃を受けて生き残った時、攻撃した相手から1マス離れる */
   | { readonly kind: 'flee' }
+  /** 危機の加速（フェーズ2-6）: ダメージを受けて生き残り、HP が最大 HP の 1/divisor 以下になった時、自分に加速が付く */
+  | { readonly kind: 'criticalHaste'; readonly divisor: number }
+  /** 瞬間移動（フェーズ2-6）: 段差とほかのユニットを無視して、移動力の歩数（縦横の歩数）以内の空いたマスへ移動する */
+  | { readonly kind: 'teleport' }
+  /** 精霊の守り（フェーズ2-6）: 詠唱中に受けるダメージが増えない */
+  | { readonly kind: 'steadyCasting' }
+  /** 魔力の刃（フェーズ2-6）: 魔力の percent% を攻撃力に足す（切り捨て） */
+  | { readonly kind: 'magicToAttack'; readonly percent: number }
   /** 時守の心得（フェーズ2-6）: 待機した（移動も行動もしなかった）時に、手番の後の CT に足す値 */
   | { readonly kind: 'waitCtBonus'; readonly amount: number };
 
@@ -278,6 +290,11 @@ export interface SpellDefinition {
   readonly shape?: 'line';
   readonly lineLength?: number;
   readonly lineMaxStep?: number;
+  /**
+   * 相手が低い位置にいるほど威力が上がる（土。フェーズ2-6）。詠唱者より 1 段低いごとに威力 +heightPowerPerStep（%）、上限 heightPowerCap
+   */
+  readonly heightPowerPerStep?: number;
+  readonly heightPowerCap?: number;
   /** 範囲の大きさ（中心からの歩数）。0 なら単体、1 なら中心と上下左右の5マス */
   readonly areaRadius: number;
   /** 高さの許容。中心のマスとの高さの差がこれを超えるマスには届かない */
@@ -330,6 +347,12 @@ export interface StrikeDefinition {
    * 成功率は向きで決まる（BattleRules.steal）。命中の代わりに成功を判定する
    */
   readonly steal?: 'gold' | 'item';
+  /** 消費 MP（魔法剣。フェーズ2-6）。省くと 0 */
+  readonly mpCost?: number;
+  /** 属性（魔法剣。今は表示だけ） */
+  readonly element?: SpellElement;
+  /** true なら、ダメージの元を「攻撃力 + 魔力」にする（魔法剣） */
+  readonly magicBlend?: boolean;
   /** true なら、当たった相手を1マス押し出す（突き飛ばし）。相手が詠唱中なら、詠唱を中断させる */
   readonly knockback?: boolean;
   /** 当たった相手に付ける状態変化（足止めの矢の鈍足など） */
@@ -436,6 +459,11 @@ export interface BattleRules {
   readonly knockout: KnockoutRules;
   /** 盗みの数値（フェーズ2-6。省くと盗めない） */
   readonly steal?: StealRules;
+  /**
+   * 膠着（フェーズ2-6）: 両軍を合わせて turns 回の手番のあいだ、ダメージ・回復・状態変化の付与が起きなければ、戦闘を終える。
+   * 残り warnTurns 手番になったら、画面に残りの手番数を出す。省くと膠着で終わらない
+   */
+  readonly stalemate?: { readonly turns: number; readonly warnTurns: number };
 }
 
 /** 盗みの数値（src/data に置く） */
@@ -812,6 +840,11 @@ export interface BattleState {
   readonly turnNumber: number;
   /** 最後に通常攻撃か魔法の指定があった手番（なければ 0）。AI がにらみ合いを見分けるため */
   readonly lastAggressionTurn: number;
+  /**
+   * 陣営ごとに、最後に相手へ攻撃か害のある魔法・技を使った手番（フェーズ2-6）。AI が「自分の側だけが攻めていない」を見分ける。
+   * 省いた状態（以前の途中の戦闘）は、lastAggressionTurn と同じとみなす
+   */
+  readonly teamAggression?: Readonly<Partial<Record<Team, number>>>;
   /** 勝敗条件・イベント・罠・予告済みの増援 */
   readonly scenario: ScenarioState;
   /**
@@ -819,6 +852,10 @@ export interface BattleState {
    * 省いた状態（以前の途中の戦闘）は、何も盗んでいないものとして扱う
    */
   readonly stolen?: { readonly gold: number; readonly items: readonly string[] };
+  /**
+   * 最後にダメージ・回復・状態変化の付与が起きた手番（膠着の判定。フェーズ2-6）。省いた状態（以前の途中の戦闘）は、今の手番として扱う
+   */
+  readonly lastActivityTurn?: number;
 }
 
 /** プレイヤーや AI が選ぶ行動 */
@@ -1037,7 +1074,7 @@ export type BattleEvent =
       /** 決着した。reason は決め手になった条件（勝利なら勝利条件、敗北なら敗北条件の kind） */
       readonly type: 'battleEnded';
       readonly winner: Team;
-      readonly reason: VictoryCondition['kind'] | DefeatCondition['kind'];
+      readonly reason: VictoryCondition['kind'] | DefeatCondition['kind'] | 'stalemate';
     };
 
 /** 魔法が1体のユニットに与えた結果 */

@@ -30,7 +30,7 @@ export const DEFAULT_OBJECTIVES: BattleObjectives = {
   defeat: [{ kind: 'allDefeated' }],
 };
 
-export type OutcomeReason = VictoryCondition['kind'] | DefeatCondition['kind'];
+export type OutcomeReason = VictoryCondition['kind'] | DefeatCondition['kind'] | 'stalemate';
 
 export interface Outcome {
   readonly winner: Team;
@@ -63,6 +63,42 @@ export function judgeOutcome(state: BattleState): Outcome | null {
     if (c.kind === 'unitDefeated' && isDown(c.unitId)) return { winner: 'enemy', reason: c.kind };
   }
   return null;
+}
+
+/** 勝敗条件に手番数が関わるか（規定の手番を耐える・超える）。その戦闘では、膠着の決まりより手番数の条件を優先する */
+export function hasTurnObjective(objectives: BattleObjectives): boolean {
+  return [...objectives.victory, ...objectives.defeat].some((c) => c.kind === 'surviveTurns' || c.kind === 'turnLimit');
+}
+
+/**
+ * 膠着（フェーズ2-6）まで残りの手番数（今の手番を含む）。膠着の決まりがない・手番数の条件がある戦闘では null。
+ * 最後にダメージ・回復・状態変化の付与が起きた手番から、規定の手番数が過ぎると膠着
+ */
+export function stalemateTurnsLeft(state: BattleState): number | null {
+  const rule = state.rules.stalemate;
+  if (!rule || hasTurnObjective(state.scenario.objectives)) return null;
+  const last = state.lastActivityTurn ?? state.turnNumber;
+  return Math.max(0, rule.turns - (state.turnNumber - 1 - last));
+}
+
+/**
+ * 膠着の勝敗（finishedTurns 回の手番が終わった時点）。残っている（退場していない）ユニットの HP の合計 ÷ 最大 HP の合計 が高い側の勝ち。
+ * 同じ時はプレイヤー側の負け。膠着でなければ null
+ */
+export function judgeStalemate(state: BattleState, finishedTurns: number): Outcome | null {
+  const rule = state.rules.stalemate;
+  if (!rule || hasTurnObjective(state.scenario.objectives)) return null;
+  const last = state.lastActivityTurn ?? finishedTurns;
+  if (finishedTurns - last < rule.turns) return null;
+  const sum = (team: Team) => {
+    const units = state.units.filter((u) => u.team === team && !u.retired);
+    return { hp: units.reduce((s, u) => s + u.hp, 0), max: units.reduce((s, u) => s + u.stats.maxHp, 0) };
+  };
+  const p = sum('player');
+  const e = sum('enemy');
+  // 割合を比べる（整数のまま、たすき掛けで）
+  const playerWins = p.hp * Math.max(1, e.max) > e.hp * Math.max(1, p.max);
+  return { winner: playerWins ? 'player' : 'enemy', reason: 'stalemate' };
 }
 
 /**

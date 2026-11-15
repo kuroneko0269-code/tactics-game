@@ -2,7 +2,7 @@ import type { EquipmentDefinition, GrowthValues, JobDefinition, UnitStats } from
 import type { BattleReward } from '../../core/shop';
 import type { BattleSite, EnemyTier } from '../../core/sortie';
 import { quickRing, quietAmulet, springBoots, steadyBangle } from '../equipment';
-import { archer, healer, mage, warrior } from '../jobs';
+import { archer, healer, knight, mage, magicKnight, monk, summoner, thief, timeMage, warrior } from '../jobs';
 import { twinHills } from '../maps/twinHills';
 import { kit, weaponOf } from './enemyUnits';
 
@@ -41,6 +41,7 @@ const tier = (
   equipment: (job: JobDefinition) => readonly EquipmentDefinition[],
   reward: BattleReward,
   statBonus: Readonly<Record<string, Partial<UnitStats>>> = {},
+  lineup: readonly (readonly [string, JobDefinition, number, number])[] = DEFAULT_LINEUP,
 ): EnemyTier => {
   const unit = (id: string, job: JobDefinition, x: number, z: number) => ({
     id,
@@ -58,15 +59,34 @@ const tier = (
   return {
     id,
     reward,
-    units: [
-      unit('e-warrior-1', warrior, 3, 1),
-      unit('e-warrior-2', warrior, 6, 1),
-      unit('e-archer-1', archer, 5, 0),
-      unit('e-mage-1', mage, 4, 0),
-      unit('e-healer-1', healer, 6, 0),
-    ],
+    units: lineup.map(([id, job, x, z]) => unit(id, job, x, z)),
   };
 };
+
+/** 敵の編成（id・ジョブ・位置）。前列2体（z = 1）、後列3体（z = 0）。やさしい は戦士2・弓使い・魔道士・治癒師 */
+const DEFAULT_LINEUP: readonly (readonly [string, JobDefinition, number, number])[] = [
+  ['e-warrior-1', warrior, 3, 1],
+  ['e-warrior-2', warrior, 6, 1],
+  ['e-archer-1', archer, 5, 0],
+  ['e-mage-1', mage, 4, 0],
+  ['e-healer-1', healer, 6, 0],
+];
+/** ふつう（フェーズ2-6）: 前列に魔法剣士と騎士、後列に盗賊・魔道士・治癒師 */
+const NORMAL_LINEUP: readonly (readonly [string, JobDefinition, number, number])[] = [
+  ['e-magicKnight-1', magicKnight, 3, 1],
+  ['e-knight-1', knight, 6, 1],
+  ['e-thief-1', thief, 5, 0],
+  ['e-mage-1', mage, 4, 0],
+  ['e-healer-1', healer, 6, 0],
+];
+/** むずかしい（フェーズ2-6）: 前列に戦士と格闘家、後列に時魔道士・召喚士・治癒師 */
+const HARD_LINEUP: readonly (readonly [string, JobDefinition, number, number])[] = [
+  ['e-warrior-1', warrior, 3, 1],
+  ['e-monk-1', monk, 6, 1],
+  ['e-timeMage-1', timeMage, 5, 0],
+  ['e-summoner-1', summoner, 4, 0],
+  ['e-healer-1', healer, 6, 0],
+];
 
 /** 「むずかしい」の敵の装飾品 */
 const HARD_ACCESSORY: Readonly<Record<string, EquipmentDefinition>> = {
@@ -74,6 +94,9 @@ const HARD_ACCESSORY: Readonly<Record<string, EquipmentDefinition>> = {
   archer: quickRing,
   mage: steadyBangle,
   healer: quietAmulet,
+  monk: springBoots,
+  timeMage: steadyBangle,
+  summoner: quietAmulet,
 };
 
 export const twinHillsBattle: BattleSite = {
@@ -110,8 +133,11 @@ export const twinHillsBattle: BattleSite = {
         archer: ['aimedShot', 'slowArrow'],
         mage: ['wind', 'fire', 'seal'],
         healer: ['heal', 'bigHeal', 'protectPrayer', 'revive'],
+        magicKnight: ['fireBlade', 'iceBlade'],
+        knight: ['breakWeapon', 'breakArmor'],
+        thief: ['blindStrike', 'backstab', 'stealGear'],
       },
-      { warrior: ['quickStep'], archer: ['focus'], mage: ['magicShell'], healer: ['meditate'] },
+      { warrior: ['quickStep'], archer: ['focus'], mage: ['magicShell'], healer: ['meditate'], knight: ['cover'], thief: ['flee'] },
       (job) => kit(job, 2),
       {
         gold: 300,
@@ -120,6 +146,8 @@ export const twinHillsBattle: BattleSite = {
           { itemId: 'dagger-2', percent: 6 },
         ]),
       },
+      {},
+      NORMAL_LINEUP,
     ),
     // むずかしい: レベル 18。すべての行動アビリティを覚えていて、付けられる受動的なアビリティをすべて付けている。
     // 3段階目の武器と防具と、装飾品（戦士 跳ね靴、弓使い 早駆けの指輪、魔道士 不動の腕輪、治癒師 静寂よけの護符）
@@ -131,12 +159,18 @@ export const twinHillsBattle: BattleSite = {
         archer: ['aimedShot', 'slowArrow'],
         mage: ['wind', 'fire', 'thunder', 'seal'],
         healer: ['heal', 'bigHeal', 'protectPrayer', 'revive'],
+        monk: ['doubleStrike', 'chakra', 'shout', 'earthWave'],
+        timeMage: ['haste', 'decelerate', 'stop', 'quicken'],
+        summoner: ['fireSpirit', 'healSpirit', 'iceSpirit', 'thunderSpirit', 'earthSpirit'],
       },
       {
         warrior: ['counter', 'heavyArmor', 'quickStep'],
         archer: ['evade', 'focus', 'lightFoot'],
         mage: ['magicShell', 'quickCast'],
         healer: ['meditate', 'thrift'],
+        monk: ['parry', 'ironFist'],
+        timeMage: ['criticalHaste', 'teleport'],
+        summoner: ['spiritWard'],
       },
       (job) => [...kit(job, 3), HARD_ACCESSORY[job.id]!],
       {
@@ -147,6 +181,8 @@ export const twinHillsBattle: BattleSite = {
           { itemId: 'dagger-3', percent: 5 },
         ]),
       },
+      {},
+      HARD_LINEUP,
     ),
   ],
 };

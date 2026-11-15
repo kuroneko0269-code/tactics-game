@@ -24,7 +24,7 @@ export interface BattleView {
   sync(state: BattleState): void;
   setMarks(marks: readonly TileMark[]): void;
   /** 詠唱中の魔法が予約している範囲を、属性の色で薄く表示する */
-  setReserved(tiles: readonly { x: number; z: number; element: SpellElement }[]): void;
+  setReserved(tiles: readonly { x: number; z: number; element: SpellElement; affects?: 'enemies' | 'allies' }[]): void;
   /** 詠唱中のユニットに、属性の色の目印（回る輪）を付ける。element が undefined なら外す */
   setCharging(unitId: string, element: SpellElement | undefined): void;
   /** 魔法を指定した時の動き（詠唱者が杖を掲げて、属性の色に光る） */
@@ -81,6 +81,14 @@ const JOB_LOOKS: Record<string, Omit<PuppetLook, 'body'>> = {
   archer: { accent: 0x8fd66b, weapon: 'bow' },
   mage: { accent: 0x8a5cf0, weapon: 'staff' },
   healer: { accent: 0xf4f1e8, weapon: 'staff' },
+  // フェーズ2-6 のジョブ（仮の人形は、帽子と武器の形を3種類から選び、色で見分ける）
+  timekeeper: { accent: 0x5fd0e0, weapon: 'sword' },
+  knight: { accent: 0xb8c4d6, weapon: 'sword' },
+  monk: { accent: 0xe07a3a, weapon: 'bow' },
+  thief: { accent: 0x5a6a52, weapon: 'bow' },
+  timeMage: { accent: 0x3fc1c9, weapon: 'staff' },
+  summoner: { accent: 0x2f9e5a, weapon: 'staff' },
+  magicKnight: { accent: 0xc0404f, weapon: 'sword' },
 };
 /** 属性の色（仮） */
 export const ELEMENT_COLORS: Record<SpellElement, number> = {
@@ -88,6 +96,8 @@ export const ELEMENT_COLORS: Record<SpellElement, number> = {
   wind: 0x3fd69a,
   thunder: 0x6f8bff,
   light: 0xffe56b,
+  ice: 0x9fe8ff,
+  earth: 0xb08a4a,
   none: 0xd9d9d9,
 };
 /** 罠が発動した時の光の色（ぬかるみは土色、脱力の罠は紫） */
@@ -353,7 +363,17 @@ export function createBattleView(options: {
       v.puppet.body.position.y = 0;
     },
     setReserved(tiles) {
-      mapView.setReserved(tiles.map((t): ReservedTile => ({ x: t.x, z: t.z, color: ELEMENT_COLORS[t.element] })));
+      // 敵だけ・味方だけに効く魔法（召喚。フェーズ2-6）は、枠を赤・緑にして見分けられるようにする
+      mapView.setReserved(
+        tiles.map(
+          (t): ReservedTile => ({
+            x: t.x,
+            z: t.z,
+            color: ELEMENT_COLORS[t.element],
+            ...(t.affects ? { frame: t.affects === 'enemies' ? 0xff3b3b : 0x3ddc84 } : {}),
+          }),
+        ),
+      );
     },
     setCharging(unitId, element) {
       const v = visual(unitId);

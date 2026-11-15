@@ -9,7 +9,7 @@
  * - 鈍足が付いていると、移動力が下がる（effects.ts）。
  */
 import type { BattleState, UnitState } from './battleTypes';
-import { DIRECTION_VECTORS, DIRECTIONS, type Coord } from './geometry';
+import { DIRECTION_VECTORS, DIRECTIONS, manhattan, type Coord } from './geometry';
 import { effectiveMove } from './effects';
 import { getTile } from './map';
 
@@ -63,6 +63,12 @@ export function reachableTiles(state: BattleState, unit: UnitState): ReachableTi
   let frontier: Coord[] = [start];
 
   const move = effectiveMove(unit, state.rules);
+  // 瞬間移動（フェーズ2-6）: 段差とほかのユニットを無視して、移動力の歩数以内の空いたマスへ
+  if (unit.passives.some((p) => p.effect.kind === 'teleport')) {
+    return state.map.tiles
+      .filter((t) => manhattan(start, t) >= 1 && manhattan(start, t) <= move && !occupantAt(state, t.x, t.z))
+      .map((t) => ({ x: t.x, z: t.z, path: [start, { x: t.x, z: t.z }] }));
+  }
   for (let step = 0; step < move; step++) {
     const next: Coord[] = [];
     for (const from of frontier) {

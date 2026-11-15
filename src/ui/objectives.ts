@@ -1,5 +1,5 @@
 import type { BattleState, DefeatCondition, VictoryCondition } from '../core/battleTypes';
-import { goalTiles, turnsRemaining } from '../core/scenario';
+import { goalTiles, stalemateTurnsLeft, turnsRemaining } from '../core/scenario';
 import type { ObjectivesView } from './hud';
 import { TEXT, unitName } from './text';
 
@@ -50,6 +50,13 @@ export function objectivesView(state: BattleState): ObjectivesView {
   if (turns) {
     notes.push(TEXT.objectives.turnsLeft(turns.turns));
     short.push(TEXT.objectives.turnsLeft(turns.turns));
+  }
+  // 膠着（フェーズ2-6）: 残り warnTurns 手番になったら、残りの手番数を出す
+  const quiet = stalemateTurnsLeft(state);
+  const warn = state.rules.stalemate?.warnTurns ?? 0;
+  if (quiet !== null && quiet <= warn) {
+    notes.push(TEXT.objectives.stalemate(quiet));
+    short.push(TEXT.objectives.stalemateShort(quiet));
   }
   const next = [...state.scenario.reinforcements].sort((a, b) => a.appearAfterTurn - b.appearAfterTurn);
   for (const r of next) notes.push(TEXT.objectives.reinforcement(r.units.length, r.appearAfterTurn - state.turnNumber));

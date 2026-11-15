@@ -12,7 +12,7 @@ import type { PassiveDefinition } from '../core/battleTypes';
 // ---- リアクション ----
 
 /** 反撃（戦士）: 隣接するマスから近接攻撃を受けて生き残った時、通常攻撃で反撃する。反撃に対する反撃は起きない */
-export const counter: PassiveDefinition = { id: 'counter', slot: 'reaction', effect: { kind: 'counter' } };
+export const counter: PassiveDefinition = { id: 'counter', slot: 'reaction', effect: { kind: 'counter', damagePercent: 60 } };
 
 /** 身かわし（弓使い）: 正面と側面からの、武器による攻撃の命中率 -20 */
 export const evade: PassiveDefinition = { id: 'evade', slot: 'reaction', effect: { kind: 'evade', hitPenalty: 20 } };
@@ -33,7 +33,7 @@ export const meditate: PassiveDefinition = { id: 'meditate', slot: 'reaction', e
 export const heavyArmor: PassiveDefinition = {
   id: 'heavyArmor',
   slot: 'support',
-  effect: { kind: 'maxHpPercent', percent: 115 },
+  effect: { kind: 'maxHpPercent', percent: 110 },
 };
 
 /** 集中（弓使い）: 武器による攻撃の命中率 +10 */
@@ -84,6 +84,17 @@ export const flee: PassiveDefinition = { id: 'flee', slot: 'reaction', effect: {
 /** 俊足（盗賊・ムーブ）: 移動力 +2 */
 export const swiftFeet: PassiveDefinition = { id: 'swiftFeet', slot: 'movement', effect: { kind: 'moveBonus', amount: 2 } };
 
+// ---- 時魔道士・召喚士・魔法剣士（フェーズ2-6）----
+
+/** 危機の加速（時魔道士・リアクション）: ダメージを受けて HP が 1/4 以下になった時、自分に加速が付く */
+export const criticalHaste: PassiveDefinition = { id: 'criticalHaste', slot: 'reaction', effect: { kind: 'criticalHaste', divisor: 4 } };
+/** 瞬間移動（時魔道士・ムーブ）: 段差とほかのユニットを無視して移動する（移動できる距離は移動力と同じ） */
+export const teleport: PassiveDefinition = { id: 'teleport', slot: 'movement', effect: { kind: 'teleport' } };
+/** 精霊の守り（召喚士・サポート）: 詠唱中に受けるダメージが増えない */
+export const spiritWard: PassiveDefinition = { id: 'spiritWard', slot: 'support', effect: { kind: 'steadyCasting' } };
+/** 魔力の刃（魔法剣士・サポート）: 魔力の 40% を攻撃力に加える */
+export const manaBlade: PassiveDefinition = { id: 'manaBlade', slot: 'support', effect: { kind: 'magicToAttack', percent: 40 } };
+
 export const passives: readonly PassiveDefinition[] = [
   counter,
   evade,
@@ -103,4 +114,8 @@ export const passives: readonly PassiveDefinition[] = [
   ironFist,
   flee,
   swiftFeet,
+  criticalHaste,
+  teleport,
+  spiritWard,
+  manaBlade,
 ];

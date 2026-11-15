@@ -94,9 +94,15 @@ export function spellArea(map: BattleMap, spell: SpellDefinition, center: Coord,
 }
 
 /** 魔法の基本の効果量（詠唱中の倍率などを掛ける前）。元の能力値は魔力（狙い撃ちなどは攻撃力） */
-export function baseSpellAmount(caster: UnitState, spell: SpellDefinition): number {
+export function baseSpellAmount(caster: UnitState, spell: SpellDefinition, powerBonus = 0): number {
   const stat = spell.stat === 'attack' ? caster.stats.attack : caster.stats.magic;
-  return Math.floor((stat * spell.power) / 100);
+  return Math.floor((stat * (spell.power + powerBonus)) / 100);
+}
+
+/** 土（フェーズ2-6）: 相手が詠唱者より低いほど上がる威力（%）。heightDiff は詠唱者の高さ − 相手の高さ */
+export function heightPowerBonus(spell: SpellDefinition, heightDiff: number): number {
+  if (!spell.heightPowerPerStep) return 0;
+  return Math.min(spell.heightPowerCap ?? Infinity, Math.max(0, heightDiff) * spell.heightPowerPerStep);
 }
 
 /**
@@ -109,8 +115,9 @@ export function spellAmountOn(
   spell: SpellDefinition,
   target: UnitState,
   angle?: { side: RelativeSide; heightPercent: number },
+  powerBonus = 0,
 ): number {
-  if (spell.effect === 'status' || spell.effect === 'swap' || spell.effect === 'cleanse') return 0;
+  if (spell.effect === 'status' || spell.effect === 'swap' || spell.effect === 'cleanse' || spell.effect === 'quicken') return 0;
   if (spell.effect === 'revive') return reviveHp(target, spell);
   // 引き戻し: 最後に手番が始まった時の HP に戻す（今の方が高ければ何もしない）。最大 HP は超えない
   if (spell.effect === 'rewind') return Math.max(0, Math.min(target.turnStartHp, target.stats.maxHp) - target.hp);
@@ -120,7 +127,7 @@ export function spellAmountOn(
   const base =
     spell.directional && angle
       ? computeDamage(rules, stat, angle.side, angle.heightPercent, 100, spell.power)
-      : baseSpellAmount(caster, spell);
+      : baseSpellAmount(caster, spell, powerBonus);
   if (spell.effect === 'heal') return Math.max(0, Math.min(base, target.stats.maxHp - target.hp));
   const damage = damageTaken(rules, target, Math.max(rules.minimumDamage, base), { magical: spell.kind === 'magic' });
   // 「踏みとどまる」で耐える時は、HP 1 を残す
@@ -188,7 +195,8 @@ export function previewSpellAt(
     const angle = spell.directional
       ? { side: relativeSide(from, u, u.facing), heightPercent: heightDamagePercent(state.rules, heightOf(from), heightOf(u)) }
       : undefined;
-    const amount = spellAmountOn(state.rules, caster, spell, u, angle);
+    const bonus = heightPowerBonus(spell, heightOf(from) - heightOf(u));
+    const amount = spellAmountOn(state.rules, caster, spell, u, angle, bonus);
     const hp =
       spell.effect === 'heal' || spell.effect === 'rewind'
         ? u.hp + amount
@@ -198,7 +206,7 @@ export function previewSpellAt(
             ? amount
             : u.hp;
     // 踏みとどまるを使えないものとして計算した量と違えば、耐えた
-    const endured = spell.effect === 'damage' && amount !== spellAmountOn(state.rules, caster, spell, { ...u, endureUsed: true }, angle);
+    const endured = spell.effect === 'damage' && amount !== spellAmountOn(state.rules, caster, spell, { ...u, endureUsed: true }, angle, bonus);
     results.push({ unitId: u.id, amount, hp, ...angle, ...(endured ? { endured: true } : {}) });
   }
   return { center, tiles, results };

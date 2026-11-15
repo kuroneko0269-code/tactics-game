@@ -46,7 +46,8 @@ describe('装備の定義（フェーズ2-4）', () => {
   it('最初の5人は1段階目の武器と防具を付けていて、その能力値は装備が入る前（フェーズ2-3）とほぼ同じ', () => {
     expect(validateRoster(initialRoster, catalog, progressionRules)).toEqual([]);
     const before: Record<string, { maxHp: number; attack: number; maxMp: number; magic: number }> = {
-      warrior: { maxHp: 72, attack: 14, maxMp: 0, magic: 0 },
+      // 戦士はフェーズ2-6 のバランス調整で HP 62 → 58、攻撃力 11 → 10（1段階目を付けて HP 68、攻撃力 13）
+      warrior: { maxHp: 68, attack: 13, maxMp: 0, magic: 0 },
       archer: { maxHp: 50, attack: 11, maxMp: 0, magic: 0 },
       mage: { maxHp: 40, attack: 6, maxMp: 36, magic: 12 },
       healer: { maxHp: 45, attack: 6, maxMp: 40, magic: 12 },
