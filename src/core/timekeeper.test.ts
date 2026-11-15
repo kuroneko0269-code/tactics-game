@@ -224,3 +224,4 @@ describe('AI の時守', () => {
     expect(action).toMatchObject({ type: 'attack', abilityId: 'sweep' });
   });
 });
+

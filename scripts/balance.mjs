@@ -226,6 +226,7 @@ async function main() {
     archer: ['bow', 'light'],
     mage: ['staff', 'robe'],
     healer: ['staff', 'robe'],
+    timekeeper: ['sword', 'heavy'],
   };
   /** 部隊の全員に、段階 tierOf(ジョブ) の武器と防具（と装飾品）を持たせて付ける（今の装備は捨てる） */
   const withGear = (roster, tierOf, accessoryOf = () => null) => {
