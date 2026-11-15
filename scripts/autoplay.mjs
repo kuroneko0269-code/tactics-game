@@ -213,7 +213,9 @@ async function main() {
   // 1戦を戦う画面サイズを先に、画面の収まりの確認をその後に動かす
   const layoutsAlongside = QUICK && !STORY_ONLY ? LAYOUT_VIEWPORTS.map(layoutRun) : [];
   // 物語の土台（試しの場面を、最初から最後まで・スキップで・途中で読み込み直して通す）。スマホ縦向きの1つで
+  // 短くした版（CI）では、画面の収まりの確認が終わってから始める（同時に動かすブラウザの数を抑えて、CI の検査全体を5分以内に収めるため）
   const storyAlongside = LAYOUTS_ONLY ? undefined : (async () => {
+    if (QUICK && !STORY_ONLY) await Promise.allSettled(layoutsAlongside);
     const browser = await chromium.launch({
       headless: !HEADED,
       args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist'],
@@ -2613,6 +2615,11 @@ async function checkLayouts(browser, baseUrl, name, core) {
   await inspect('roster-job-mastered');
 
   // ---- 物語の土台: 題名・会話・読み返し・スキップの確認・操作の場面・対象物のある戦闘・「これまで」 ----
+  // 短くした版（CI）では、いちばん厳しい小さめのスマホだけで確かめる（CI の検査全体を5分以内に収めるため）
+  if (QUICK && name !== 'small') {
+    await context.close();
+    return { screens, seconds: Math.round((Date.now() - started) / 1000) };
+  }
   await page.goto(`${baseUrl}?seed=${SEED}&speed=${SPEED}`);
   await screenIs('title');
   await inspect('title');
