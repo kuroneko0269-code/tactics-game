@@ -23,6 +23,9 @@ import {
   masteredJobs,
   masteryCapBonus,
   isJobUnlocked,
+  canTakeJob,
+  eligibleJobs,
+  isExclusiveJob,
   jobLevel,
   jobProgress,
   learnAbility,
@@ -245,38 +248,71 @@ export function createRosterScreen(root: HTMLElement, deps: RosterScreenDeps): R
       bar([[next === undefined ? 1 : (p.jpTotal - prev) / (next - prev), 'bar-jp']], true),
       el('span', 'screen-note', next === undefined ? TEXT.roster.jobMaxLevel : TEXT.roster.jpToNext(next - p.jpTotal)),
     );
+    // ジョブは増え続けるので、一覧の枠の中だけをスクロールする（フェーズ2-6）。その人物が就ける対象のジョブだけを出す
+    const list = el('div', 'scroll-area job-list');
     const grid = el('div', 'job-grid');
-    for (const job of catalog.jobs) {
+    for (const job of eligibleJobs(u, catalog)) {
       const unlocked = isJobUnlocked(u, job, rules, catalog);
       const current = job.id === u.jobId;
+      // 解放されていないジョブは、条件と今の達成の具合を出す（押すと、条件の一覧）
       const sub = current
         ? TEXT.roster.current
         : !unlocked
-          ? (job.unlock ?? [])
-                .map((r) =>
-                  r.mastered ? TEXT.roster.unlockNeedsMastery(jobName(r.jobId)) : TEXT.roster.unlockNeeds(jobName(r.jobId), r.level ?? 1),
-                )
-                .join('、') || TEXT.roster.locked
+          ? unlockLines(u, job).map((l) => l.text).join('、') || TEXT.roster.locked
           : `Lv ${jobLevel(u, job.id, rules)} ・ ${TEXT.roster.jp(jobProgress(u, job.id).jp)}`;
-      // マスターしたジョブには印を付ける（フェーズ2-5）
+      // マスターしたジョブには印を付ける（フェーズ2-5）。専用ジョブには「専用」の札（フェーズ2-6）
       const jobMastered = isJobMastered(u, job, rules);
-      const b = screenButton(`${jobName(job.id)}${jobMastered ? ` ${TEXT.mastery.mark}` : ''}`, () => set(() => (sheet = { kind: 'job', jobId: job.id })), {
-        className: 'job-choice',
+      const exclusive = isExclusiveJob(job);
+      const label = `${jobName(job.id)}${jobMastered ? ` ${TEXT.mastery.mark}` : ''}`;
+      const b = screenButton(label, () => set(() => (sheet = { kind: 'job', jobId: job.id })), {
+        className: `job-choice${exclusive ? ' exclusive' : ''}${unlocked ? '' : ' locked'}`,
         sub,
-        disabled: !unlocked || current,
+        disabled: current,
         pressed: current,
       });
+      if (exclusive) {
+        const tag = el('span', 'tag exclusive', TEXT.roster.exclusive);
+        tag.title = TEXT.roster.exclusiveNote(unitName(u.id, u.jobId));
+        b.prepend(tag);
+      }
       b.dataset.jobId = job.id;
       b.dataset.mastered = String(jobMastered);
+      b.dataset.unlocked = String(unlocked);
+      b.dataset.exclusive = String(exclusive);
       if (jobMastered) b.title = TEXT.mastery.markTitle;
       grid.append(b);
     }
-    panel.append(card, grid);
+    list.append(grid);
+    panel.append(card, list);
+  };
+
+  /** 解放条件の1つずつの文（今の達成の具合つき）と、満たしているか */
+  const unlockLines = (u: RosterUnit, job: JobDefinition) =>
+    (job.unlock ?? []).map((r) => {
+      const required = findJob(catalog, r.jobId);
+      if (r.mastered) {
+        const done = isJobMastered(u, required, rules);
+        return { text: TEXT.roster.unlockMasteryProgress(jobName(r.jobId), done), done };
+      }
+      const now = jobLevel(u, r.jobId, rules);
+      const need = r.level ?? 1;
+      return { text: TEXT.roster.unlockProgress(jobName(r.jobId), need, now), done: now >= need };
+    });
+
+  /** まだ就けないジョブを押した時: 解放条件の一覧（満たした条件は印） */
+  const lockedSheet = (u: RosterUnit, job: JobDefinition): HTMLElement[] => {
+    const list = el('ul', 'sheet-conditions');
+    for (const line of unlockLines(u, job)) {
+      const li = el('li', line.done ? 'ok' : 'ng', `${line.done ? '✓' : '・'} ${line.text}`);
+      list.append(li);
+    }
+    return [list, el('p', 'screen-note', TEXT.roster.lockedNote)];
   };
 
   /** ジョブを変える前の比較（選んだジョブについてだけ。付けられなくなる装備は外した後の値）と「〇〇になる」 */
   const jobSheet = (u: RosterUnit, jobId: string): HTMLElement[] => {
     const next = findJob(catalog, jobId);
+    if (!isJobUnlocked(u, next, rules, catalog)) return lockedSheet(u, next);
     const now = findJob(catalog, u.jobId);
     const roster = deps.roster();
     const before = equippedStats(u, roster, catalog);
@@ -390,7 +426,7 @@ export function createRosterScreen(root: HTMLElement, deps: RosterScreenDeps): R
     const list = el('div', 'learn-list scroll-area');
     list.dataset.group = learnGroup;
     // 今のジョブを先頭に。解放されていないジョブは出さない
-    const jobsInOrder = [findJob(catalog, u.jobId), ...catalog.jobs.filter((j) => j.id !== u.jobId)].filter((j) => isJobUnlocked(u, j, rules, catalog));
+    const jobsInOrder = [findJob(catalog, u.jobId), ...catalog.jobs.filter((j) => j.id !== u.jobId)].filter((j) => canTakeJob(u, j, rules, catalog));
     for (const job of jobsInOrder) {
       const entries = groupEntries(job, learnGroup);
       if (entries.length === 0) continue;
@@ -570,7 +606,9 @@ export function createRosterScreen(root: HTMLElement, deps: RosterScreenDeps): R
     animatedSheet = key;
 
     if (s.kind === 'job') {
-      showSheet(root, { kind: 'job', title: TEXT.roster.changeJobTitle(jobName(s.jobId)), body: jobSheet(u, s.jobId), closeLabel: TEXT.roster.close, onClose: close });
+      const locked = !isJobUnlocked(u, findJob(catalog, s.jobId), rules, catalog);
+      const title = locked ? TEXT.roster.lockedTitle(jobName(s.jobId)) : TEXT.roster.changeJobTitle(jobName(s.jobId));
+      showSheet(root, { kind: 'job', title, body: jobSheet(u, s.jobId), closeLabel: TEXT.roster.close, onClose: close });
     } else if (s.kind === 'slot') {
       showSheet(root, {
         kind: `slot-${s.slot}`,

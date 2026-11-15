@@ -44,6 +44,13 @@ export const testRules: BattleRules = {
     protect: { harmful: false, turns: 3, damageTakenPercent: 75 },
     slow: { harmful: true, turns: 2, movePenalty: 2, minMove: 1 },
     silence: { harmful: true, turns: 2 },
+    attackDown: { harmful: true, turns: 3, percent: 75 },
+    magicDown: { harmful: true, turns: 3, percent: 75 },
+    speedDown: { harmful: true, turns: 3, percent: 50 },
+    maxHpDown: { harmful: true, turns: 3, percent: 80 },
+    haste: { harmful: false, turns: 3, percent: 150 },
+    blind: { harmful: true, turns: 3, hitPenalty: 30 },
+    stop: { harmful: true, turns: 1, ctAfterSkip: 0 },
   },
   knockback: { fallDamagePercentPerHeight: 10, blockedDamagePercent: 10 },
   trap: { rockfallDamagePercent: 20 },
@@ -214,8 +221,29 @@ export const testRevive: SpellDefinition = {
   castSpeed: 20,
 };
 
-export const testSpells = [testFire, testWind, testHeal, testAimedShot, testThunder, testBigHeal, testSeal, testProtectPrayer, testRevive];
-export const testStrikes = [testPowerStrike, testKnockback, testSlowArrow];
+/** 時守の業（フェーズ2-6。詠唱なし） */
+const instantSkill = { kind: 'skill', element: 'none', instant: true, power: 0, range: 3, areaRadius: 0, heightTolerance: 0, castSpeed: 0 } as const;
+export const testRewind: SpellDefinition = { ...instantSkill, id: 'rewind', effect: 'rewind', targets: 'ally', mpCost: 6 };
+export const testGateSwap: SpellDefinition = { ...instantSkill, id: 'gateSwap', effect: 'swap', targets: 'ally', mpCost: 4 };
+export const testTimeDelay: SpellDefinition = { ...instantSkill, id: 'timeDelay', effect: 'delay', targets: 'enemy', ctDelay: 40, mpCost: 6 };
+/** 斬り分け: 正面と左右のマスの敵を、通常攻撃の 70% で */
+export const testSweep: StrikeDefinition = { id: 'sweep', damagePercent: 70, hitBonus: 0, weapons: ['sword'], sweep: true };
+
+export const testSpells = [
+  testFire,
+  testWind,
+  testHeal,
+  testAimedShot,
+  testThunder,
+  testBigHeal,
+  testSeal,
+  testProtectPrayer,
+  testRevive,
+  testRewind,
+  testGateSwap,
+  testTimeDelay,
+];
+export const testStrikes = [testPowerStrike, testKnockback, testSlowArrow, testSweep];
 
 /** テスト用の受動的なアビリティ（本番の数値は src/data/passives.ts） */
 export const testPassives: readonly PassiveDefinition[] = [
@@ -229,6 +257,8 @@ export const testPassives: readonly PassiveDefinition[] = [
   { id: 'thrift', slot: 'support', effect: { kind: 'mpCostPercent', percent: 75 } },
   { id: 'quickStep', slot: 'movement', effect: { kind: 'moveBonus', amount: 1 } },
   { id: 'lightFoot', slot: 'movement', effect: { kind: 'jumpBonus', amount: 1 } },
+  { id: 'endure', slot: 'reaction', effect: { kind: 'endure' } },
+  { id: 'timekeeperWisdom', slot: 'support', effect: { kind: 'waitCtBonus', amount: 20 } },
 ];
 
 /** id の受動的なアビリティの定義（テスト用） */
@@ -313,6 +343,9 @@ export interface TestUnit {
   growth?: GrowthValues;
   /** 装備（能力値への反映はしない。装飾品の効果を確かめる時に使う） */
   equipment?: EquipmentDefinition[];
+  /** 最後に手番が始まった時の HP（省くと今の HP） */
+  turnStartHp?: number;
+  endureUsed?: boolean;
 }
 
 /** 平らなマップ（すべて高さ 0） */
@@ -376,6 +409,8 @@ export function makeState(options: {
       actionCount: 0,
       charging: u.charging ?? null,
       movedLastTurn: u.movedLastTurn ?? false,
+      turnStartHp: u.turnStartHp ?? u.hp ?? job.stats.maxHp,
+      endureUsed: u.endureUsed ?? false,
     };
   });
   const active = units.find((u) => u.id === (options.activeId ?? units[0]?.id));

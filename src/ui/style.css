@@ -956,6 +956,38 @@ body {
   background: #c9a2ff;
 }
 
+.status-badge.status-attackDown {
+  background: #ff9b6b;
+}
+
+.status-badge.status-magicDown {
+  background: #ff8fd0;
+}
+
+.status-badge.status-speedDown {
+  background: #7fe0c0;
+}
+
+.status-badge.status-maxHpDown {
+  background: #ff6b6b;
+}
+
+.status-badge.status-blind {
+  background: #b0b0b0;
+}
+
+.status-badge.status-stop {
+  background: #e0e0ff;
+}
+
+.status-badge.status-haste {
+  background: #9dff6b;
+}
+
+.status-badge.status-more {
+  background: #f2f2f2;
+}
+
 /* 情報の欄の、状態変化と受動的なアビリティ */
 .info-status {
   font-size: 12px;
@@ -972,6 +1004,34 @@ body {
 
 .info-status.status-silence {
   color: #c9a2ff;
+}
+
+.info-status.status-attackDown {
+  color: #ff9b6b;
+}
+
+.info-status.status-magicDown {
+  color: #ff8fd0;
+}
+
+.info-status.status-speedDown {
+  color: #7fe0c0;
+}
+
+.info-status.status-maxHpDown {
+  color: #ff6b6b;
+}
+
+.info-status.status-blind {
+  color: #b0b0b0;
+}
+
+.info-status.status-stop {
+  color: #e0e0ff;
+}
+
+.info-status.status-haste {
+  color: #9dff6b;
 }
 
 .info-passives,
@@ -2655,4 +2715,33 @@ body {
   padding: 0 5px;
   border-radius: 8px;
   color: #2b2100;
+}
+
+/* 編成の画面のジョブの一覧（フェーズ2-6: ジョブが増えたので、一覧の枠の中だけをスクロールする） */
+.job-list {
+  flex: 1;
+  padding-right: 2px;
+}
+
+.job-grid .screen-button.locked {
+  opacity: 0.62;
+}
+
+/* 専用ジョブ（特定の人物だけが就ける）の札 */
+.tag.exclusive {
+  display: inline-block;
+  align-self: flex-start;
+  width: auto;
+  margin-right: 6px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: bold;
+  background: #7fd6ff;
+  color: #062030;
+  vertical-align: middle;
+}
+
+.job-grid .screen-button.exclusive {
+  border-color: #7fd6ff;
 }

@@ -35,6 +35,7 @@ const records = { trainingWins: { normal: 2 } };
 const context: SaveMigrationContext = {
   starterEquipment: { warrior: ['sword', 'mail'], mage: ['rod'] },
   startingGold: 300,
+  legacyUnitIds: { 'hero-1': 'touma', 'hero-2': 'gord' },
   equipment: [
     { id: 'sword', slot: 'weapon' },
     { id: 'mail', slot: 'armor' },
@@ -53,7 +54,7 @@ describe('セーブデータ', () => {
     expect(migrateSaveData({ version: 3, roster, dungeon, records }, context)).toEqual({
       ok: true,
       migratedFrom: 3,
-      data: { version: 4, roster, dungeon, records, battle: null },
+      data: { version: SAVE_VERSION, roster, dungeon, records, battle: null },
     });
     // 途中の戦闘の形が崩れていれば、その戦闘だけ捨てる
     expect(migrateSaveData({ version: 4, roster, dungeon, records, battle: { origin: { kind: 'x' }, state: null } }, context)).toMatchObject({
@@ -62,10 +63,10 @@ describe('セーブデータ', () => {
     });
   });
 
-  it('版 1（フェーズ2-1a・2-1b・2-2a）のデータは、版 2・3 を経て版 4 に直す。ダンジョンは挑戦中なし・クリアなし', () => {
-    expect(SAVE_VERSION).toBe(4);
+  it('版 1（フェーズ2-1a・2-1b・2-2a）のデータは、版 2・3・4 を経て版 5 に直す。ダンジョンは挑戦中なし・クリアなし', () => {
+    expect(SAVE_VERSION).toBe(5);
     const loaded = migrateSaveData({ version: 1, roster: { units: [unitV2] } }, context, SAVE_MIGRATIONS);
-    expect(loaded).toMatchObject({ ok: true, migratedFrom: 1, data: { version: 4, dungeon: EMPTY_DUNGEON_STATE, records: EMPTY_RECORDS, battle: null } });
+    expect(loaded).toMatchObject({ ok: true, migratedFrom: 1, data: { version: 5, dungeon: EMPTY_DUNGEON_STATE, records: EMPTY_RECORDS, battle: null } });
   });
 
   it('版 2 → 3: 育てた状態を残し、各ユニットの今のジョブの最初の装備を配って付け、最初の所持金を持たせる', () => {
@@ -75,7 +76,7 @@ describe('セーブデータ', () => {
       ok: true,
       migratedFrom: 2,
       data: {
-        version: 4,
+        version: SAVE_VERSION,
         dungeon,
         records: EMPTY_RECORDS,
         battle: null,
@@ -94,6 +95,44 @@ describe('セーブデータ', () => {
         },
       },
     });
+  });
+
+  it('版 4 → 5（フェーズ2-6）: ユニットの id を人物の id に付け替える。途中の戦闘の中の id も付け替え、新しい項目を足す', () => {
+    const units = [
+      { ...unitV2, id: 'hero-1', equipment: { weapon: null, armor: null, accessory: null } },
+      { ...unitV2, id: 'hero-2', equipment: { weapon: null, armor: null, accessory: null } },
+    ];
+    const state = {
+      units: [
+        { id: 'hero-1', team: 'player', hp: 30, charging: { spellId: 'heal', target: { kind: 'unit', unitId: 'hero-2' }, progress: 10 } },
+        { id: 'hero-2', team: 'player', hp: 12 },
+        { id: 'e-1', team: 'enemy', hp: 40 },
+      ],
+      turn: { unitId: 'hero-2', moved: false, acted: false },
+      map: {},
+      rules: {},
+      scenario: { objectives: { victory: [], defeat: [{ kind: 'unitDefeated', unitId: 'hero-1' }] } },
+      rngState: 5,
+      turnNumber: 3,
+      winner: null,
+    };
+    const old = {
+      version: 4,
+      roster: { ...roster, units },
+      dungeon,
+      records,
+      battle: { origin: { kind: 'training', tierId: 'easy' }, state },
+    };
+    const loaded = migrateSaveData(old, context);
+    if (!loaded.ok) throw new Error('読めませんでした');
+    expect(loaded.data.roster.units.map((u) => u.id)).toEqual(['touma', 'gord']);
+    // 育てた状態（今のジョブ・レベル・JP など）はそのまま
+    expect(loaded.data.roster.units[0]).toEqual({ ...units[0], id: 'touma' });
+    const b = loaded.data.battle!.state as unknown as typeof state & { units: Record<string, unknown>[] };
+    expect(b.units.map((u) => u.id)).toEqual(['touma', 'gord', 'e-1']);
+    expect(b.turn.unitId).toBe('gord');
+    expect(b.units[0]).toMatchObject({ turnStartHp: 30, endureUsed: false, charging: { target: { unitId: 'gord' } } });
+    expect(b.scenario.objectives.defeat[0]).toEqual({ kind: 'unitDefeated', unitId: 'touma' });
   });
 
   it('古い版のデータは、古い順に1つずつ新しい形に直してから読み込む', () => {

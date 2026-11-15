@@ -98,6 +98,7 @@ export const twinHillsBattle: BattleSite = {
         { itemId: 'sword-1', percent: 10 },
         { itemId: 'bow-1', percent: 10 },
         { itemId: 'staff-1', percent: 10 },
+        { itemId: 'dagger-1', percent: 10 },
       ],
     }),
     // ふつう: レベル 8。各ジョブの技を覚えていて、受動的なアビリティを1つずつ付けている。2段階目の武器と防具
@@ -116,6 +117,7 @@ export const twinHillsBattle: BattleSite = {
         gold: 300,
         loot: ['sword-2', 'bow-2', 'staff-2', 'heavy-2', 'light-2', 'robe-2'].map((itemId) => ({ itemId, percent: 6 })).concat([
           { itemId: 'quick-ring', percent: 3 },
+          { itemId: 'dagger-2', percent: 6 },
         ]),
       },
     ),
@@ -142,6 +144,7 @@ export const twinHillsBattle: BattleSite = {
         loot: ['sword-3', 'bow-3', 'staff-3', 'heavy-3', 'light-3', 'robe-3'].map((itemId) => ({ itemId, percent: 5 })).concat([
           { itemId: 'swift-boots', percent: 5 },
           { itemId: 'steady-bangle', percent: 5 },
+          { itemId: 'dagger-3', percent: 5 },
         ]),
       },
     ),

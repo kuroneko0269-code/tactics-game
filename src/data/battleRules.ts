@@ -23,6 +23,21 @@ export const battleRules: BattleRules = {
     slow: { harmful: true, turns: 2, movePenalty: 2, minMove: 1 },
     /** 沈黙: 魔法を使えない。付いた時に魔法を詠唱中なら、詠唱が中断される。2手番 */
     silence: { harmful: true, turns: 2 },
+    // ---- フェーズ2-6 ----
+    /** 攻撃力低下: 攻撃力 -25%（倍率 75%、切り捨て）。3手番 */
+    attackDown: { harmful: true, turns: 3, percent: 75 },
+    /** 魔力低下: 魔力 -25%。3手番 */
+    magicDown: { harmful: true, turns: 3, percent: 75 },
+    /** 素早さ低下: 素早さ -25%（最低 1）。3手番 */
+    speedDown: { harmful: true, turns: 3, percent: 75 },
+    /** 最大 HP 低下: 最大 HP -20%（今の HP は新しい最大まで下がる。消えても戻らない）。3手番 */
+    maxHpDown: { harmful: true, turns: 3, percent: 80 },
+    /** 加速: 素早さ +50%（倍率 150%）。3手番 */
+    haste: { harmful: false, turns: 3, percent: 150 },
+    /** 目くらまし: 武器による攻撃の命中率 -30。3手番 */
+    blind: { harmful: true, turns: 3, hitPenalty: 30 },
+    /** 停止: 次の手番が何もできずに過ぎる（その後の CT は 0）。1手番 */
+    stop: { harmful: true, turns: 1, ctAfterSkip: 0 },
   },
   /**
    * 突き飛ばし。ダメージは押し出された相手の最大 HP に対する割合（切り捨て、最小 1）。守りが付いていれば減る。

@@ -30,8 +30,13 @@ export interface UnitStats {
  */
 export type SpellElement = 'fire' | 'wind' | 'thunder' | 'light' | 'none';
 
-/** 武器の種類。装備している武器で決まる（フェーズ2-4。それまではジョブごとに固定だった） */
-export type WeaponType = 'sword' | 'bow' | 'staff';
+/** 武器の種類。装備している武器で決まる（フェーズ2-4。それまではジョブごとに固定だった）。短剣はフェーズ2-6 */
+export type WeaponType = 'sword' | 'bow' | 'staff' | 'dagger';
+
+/**
+ * アビリティに必要な武器の指定。武器の種類のほか、'unarmed'（素手。武器の枠が空）も指定できる（フェーズ2-6）
+ */
+export type WeaponRequirement = WeaponType | 'unarmed';
 
 /** 防具の種類（鎧・軽装・ローブ） */
 export type ArmorType = 'heavy' | 'light' | 'robe';
@@ -84,7 +89,13 @@ export type GrowthValues = Readonly<Record<GrowthStat, number>>;
  * 魔法の効果の種類。status は状態変化を付けるだけ（ダメージも回復もない）。
  * revive は蘇生（戦闘不能のユニットだけに効き、最大 HP の power% で復帰させる。フェーズ2-5）
  */
-export type SpellEffect = 'damage' | 'heal' | 'status' | 'revive';
+export type SpellEffect = 'damage' | 'heal' | 'status' | 'revive' | 'rewind' | 'swap' | 'delay';
+
+/**
+ * 狙える相手（ユニットだけを狙う魔法・業。フェーズ2-6）。ally は自分以外の味方、enemy は敵。
+ * 省くと、どのマスもどのユニットも狙える（今までの魔法）
+ */
+export type SpellTargetRule = 'ally' | 'enemy';
 
 /**
  * 詠唱のある行動アビリティの種類。magic は魔法（沈黙で使えなくなり、魔力の殻で軽くなる）、
@@ -98,7 +109,17 @@ export type SpellKind = 'magic' | 'skill';
  * - slow（鈍足）: 移動力が下がる
  * - silence（沈黙）: 魔法を使えない。付いた時に魔法を詠唱中なら、詠唱が中断される
  */
-export type StatusId = 'protect' | 'slow' | 'silence';
+export type StatusId =
+  | 'protect'
+  | 'slow'
+  | 'silence'
+  | 'attackDown'
+  | 'magicDown'
+  | 'speedDown'
+  | 'maxHpDown'
+  | 'blind'
+  | 'stop'
+  | 'haste';
 
 /** ユニットに付いている状態変化。turns は残りの手番数（そのユニットの手番が終わるたびに 1 減り、0 で消える） */
 export interface StatusState {
@@ -129,6 +150,28 @@ export interface StatusRules {
     readonly harmful: boolean;
     readonly turns: number;
   };
+  /** 攻撃力低下（フェーズ2-6）: 攻撃力の倍率（%。切り捨て） */
+  readonly attackDown: StatPercentStatus;
+  /** 魔力低下: 魔力の倍率 */
+  readonly magicDown: StatPercentStatus;
+  /** 素早さ低下: 素早さの倍率（最低 1） */
+  readonly speedDown: StatPercentStatus;
+  /** 最大 HP 低下: 最大 HP の倍率（今の HP は新しい最大を超えないように抑える。消えても今の HP は戻らない） */
+  readonly maxHpDown: StatPercentStatus;
+  /** 加速: 素早さの倍率 */
+  readonly haste: StatPercentStatus;
+  /** 目くらまし: 武器による攻撃の命中率から引く値 */
+  readonly blind: { readonly harmful: boolean; readonly turns: number; readonly hitPenalty: number };
+  /** 停止: 手番が来ても何もできずに過ぎる（その手番の後の CT は ctAfterSkip） */
+  readonly stop: { readonly harmful: boolean; readonly turns: number; readonly ctAfterSkip: number };
+}
+
+/** 能力値を割合で変える状態変化の数値 */
+export interface StatPercentStatus {
+  readonly harmful: boolean;
+  readonly turns: number;
+  /** 能力値の倍率（%。切り捨て） */
+  readonly percent: number;
 }
 
 /** 突き飛ばしの数値（src/data に置く）。ダメージは押し出された相手の最大 HP に対する割合（%） */
@@ -163,7 +206,11 @@ export type PassiveEffect =
   /** 早足: 移動力に足す値 */
   | { readonly kind: 'moveBonus'; readonly amount: number }
   /** 身軽: ジャンプ力に足す値 */
-  | { readonly kind: 'jumpBonus'; readonly amount: number };
+  | { readonly kind: 'jumpBonus'; readonly amount: number }
+  /** 踏みとどまる（フェーズ2-6）: HP が 0 になるダメージを受けた時、1戦に1度だけ HP 1 で耐える */
+  | { readonly kind: 'endure' }
+  /** 時守の心得（フェーズ2-6）: 待機した（移動も行動もしなかった）時に、手番の後の CT に足す値 */
+  | { readonly kind: 'waitCtBonus'; readonly amount: number };
 
 /** 受動的なアビリティ（リアクション・サポート・ムーブ）の定義（src/data に置く） */
 export interface PassiveDefinition {
@@ -203,7 +250,15 @@ export interface SpellDefinition {
   /** 射程の下限（歩数）。省くと 0（自分のマスも狙える） */
   readonly minRange?: number;
   /** 使うのに必要な武器の種類（どれか1つ）。省くと武器を問わない */
-  readonly weapons?: readonly WeaponType[];
+  readonly weapons?: readonly WeaponRequirement[];
+  /**
+   * true なら詠唱せず、指定したその場で発動する（フェーズ2-6。時守の業）。castSpeed は使わない
+   */
+  readonly instant?: boolean;
+  /** 狙える相手（ユニットだけを狙う）。省くと、どのマス・ユニットも狙える */
+  readonly targets?: SpellTargetRule;
+  /** effect が delay の時に、相手の CT から引く値（0 より下にはしない） */
+  readonly ctDelay?: number;
   /** 範囲の大きさ（中心からの歩数）。0 なら単体、1 なら中心と上下左右の5マス */
   readonly areaRadius: number;
   /** 高さの許容。中心のマスとの高さの差がこれを超えるマスには届かない */
@@ -241,7 +296,12 @@ export interface StrikeDefinition {
   /** 命中率に足す値（%。マイナスもある）。結果は 0〜100 に収める */
   readonly hitBonus: number;
   /** 使うのに必要な武器の種類（どれか1つ）。省くと武器を問わない */
-  readonly weapons?: readonly WeaponType[];
+  readonly weapons?: readonly WeaponRequirement[];
+  /**
+   * true なら、正面のマスと、その左右のマス（正面のマスの両隣）にいる敵をまとめて攻撃する（斬り分け。フェーズ2-6）。
+   * 正面は選んだ相手の方向。1体ずつ命中を判定する
+   */
+  readonly sweep?: boolean;
   /** true なら、当たった相手を1マス押し出す（突き飛ばし）。相手が詠唱中なら、詠唱を中断させる */
   readonly knockback?: boolean;
   /** 当たった相手に付ける状態変化（足止めの矢の鈍足など） */
@@ -270,8 +330,23 @@ export interface JobRequirement {
   readonly mastered?: boolean;
 }
 
+/**
+ * ジョブに就ける対象（フェーズ2-6）。
+ * - everyone: だれでも（解放条件を満たせば）
+ * - characters: 特定の人物だけ（人物の id。部隊のユニットの id）。その人物の「専用ジョブ」
+ * - enemy: 敵専用（部隊のユニットは就けない）
+ */
+export type JobEligibility =
+  | { readonly kind: 'everyone' }
+  | { readonly kind: 'characters'; readonly characterIds: readonly string[] }
+  | { readonly kind: 'enemy' };
+
 export interface JobDefinition {
   readonly id: string;
+  /** 就ける対象。省くとだれでも */
+  readonly eligibility?: JobEligibility;
+  /** 武器の枠が空（素手）の時に、能力値に足す値（フェーズ2-6。格闘家） */
+  readonly unarmedBonus?: Partial<UnitStats>;
   /** 基本の能力値。ユニットの能力値は、これに成長値と装備を足したもの */
   readonly stats: UnitStats;
   /**
@@ -658,6 +733,12 @@ export interface UnitState {
   readonly charging: ChargeState | null;
   /** 直前の自分の手番で移動したか（AI が「動いていない相手」を見分けるため） */
   readonly movedLastTurn: boolean;
+  /**
+   * 最後に自分の手番が始まった時の HP（フェーズ2-6。引き戻しで戻す値）。まだ手番が来ていなければ戦闘の開始時の HP
+   */
+  readonly turnStartHp: number;
+  /** この戦闘で「踏みとどまる」を使ったか */
+  readonly endureUsed: boolean;
 }
 
 /** いま手番を持っているユニットの進み具合 */
@@ -816,6 +897,12 @@ export type BattleEvent =
   | { readonly type: 'defeated'; readonly unitId: string; readonly count: number }
   /** 戦闘不能のユニットの手番が来るはずだった時に、カウントが減った（count は残り） */
   | { readonly type: 'knockoutCounted'; readonly unitId: string; readonly count: number }
+  /** 停止で、手番が何もできずに過ぎた（ct はその後の CT。フェーズ2-6） */
+  | { readonly type: 'turnSkipped'; readonly unitId: string; readonly ct: number }
+  /** 門渡り: 2体の位置が入れ替わった（a は使ったユニット。フェーズ2-6） */
+  | { readonly type: 'swapped'; readonly a: string; readonly b: string; readonly aTo: Coord; readonly bTo: Coord }
+  /** 踏みとどまる: HP 0 になるダメージを HP 1 で耐えた */
+  | { readonly type: 'endured'; readonly unitId: string; readonly abilityId: string }
   /** 戦闘不能のカウントが 0 になり、退場した（マップから消える） */
   | { readonly type: 'retired'; readonly unitId: string }
   /** 蘇生した（hp は復帰した時の HP。CT は 0） */
@@ -899,6 +986,8 @@ export interface SpellUnitResult {
   readonly amount: number;
   /** 効果の後の HP */
   readonly hp: number;
+  /** 「踏みとどまる」で HP 1 で耐えたか（フェーズ2-6） */
+  readonly endured?: boolean;
 }
 
 export interface ActionResult {

@@ -20,4 +20,6 @@ export const aiConfig: AiConfig = {
    * 届かない位置からだけでは、1戦に 0.1 回ほどしか使わなかったため（PR #8 の質問 4、フェーズ2-2）
    */
   sealMaxDanger: 2,
+  /** 引き戻し（時守。フェーズ2-6）: 味方の HP を 12 以上戻せる時に使う */
+  rewindMinHp: 12,
 };

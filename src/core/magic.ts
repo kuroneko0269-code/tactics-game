@@ -20,7 +20,7 @@
  */
 import type { BattleRules, BattleState, ChargeState, SpellDefinition, SpellTarget, UnitState } from './battleTypes';
 import { computeDamage, heightDamagePercent, weaponFits } from './combat';
-import { damageTaken, isSilencedFor, mpCostOf } from './effects';
+import { damageTaken, enduredDamage, isSilencedFor, mpCostOf } from './effects';
 import { manhattan, relativeSide, type Coord, type RelativeSide } from './geometry';
 import { getTile, type BattleMap } from './map';
 import { isAlive, isKnockedOut, unitAt } from './movement';
@@ -94,8 +94,12 @@ export function spellAmountOn(
   target: UnitState,
   angle?: { side: RelativeSide; heightPercent: number },
 ): number {
-  if (spell.effect === 'status') return 0;
+  if (spell.effect === 'status' || spell.effect === 'swap') return 0;
   if (spell.effect === 'revive') return reviveHp(target, spell);
+  // 引き戻し: 最後に手番が始まった時の HP に戻す（今の方が高ければ何もしない）。最大 HP は超えない
+  if (spell.effect === 'rewind') return Math.max(0, Math.min(target.turnStartHp, target.stats.maxHp) - target.hp);
+  // 時送り: CT を減らす（0 より下にはしない）
+  if (spell.effect === 'delay') return Math.min(target.ct, spell.ctDelay ?? 0);
   const stat = spell.stat === 'attack' ? caster.stats.attack : caster.stats.magic;
   const base =
     spell.directional && angle
@@ -103,7 +107,8 @@ export function spellAmountOn(
       : baseSpellAmount(caster, spell);
   if (spell.effect === 'heal') return Math.max(0, Math.min(base, target.stats.maxHp - target.hp));
   const damage = damageTaken(rules, target, Math.max(rules.minimumDamage, base), { magical: spell.kind === 'magic' });
-  return Math.min(damage, target.hp);
+  // 「踏みとどまる」で耐える時は、HP 1 を残す
+  return enduredDamage(target, damage).damage;
 }
 
 /** 蘇生で復帰した時の HP（最大 HP × 威力 ÷ 100、切り捨て、最小 1） */
@@ -111,9 +116,16 @@ export function reviveHp(target: UnitState, spell: SpellDefinition): number {
   return Math.max(1, Math.floor((target.stats.maxHp * spell.power) / 100));
 }
 
-/** その魔法の対象になるユニットか（蘇生なら戦闘不能のユニット、それ以外は立っているユニット） */
-export function affectsUnit(spell: SpellDefinition, unit: UnitState): boolean {
-  return spell.effect === 'revive' ? isKnockedOut(unit) : isAlive(unit);
+/**
+ * その魔法の対象になるユニットか（蘇生なら戦闘不能のユニット、それ以外は立っているユニット）。
+ * 狙える相手が決まっている業（時守の業。フェーズ2-6）は、caster から見て自分以外の味方か、敵だけ
+ */
+export function affectsUnit(spell: SpellDefinition, unit: UnitState, caster?: Pick<UnitState, 'id' | 'team'>): boolean {
+  if (spell.effect === 'revive') return isKnockedOut(unit);
+  if (!isAlive(unit)) return false;
+  if (spell.targets === 'ally') return caster !== undefined && unit.team === caster.team && unit.id !== caster.id;
+  if (spell.targets === 'enemy') return caster !== undefined && unit.team !== caster.team;
+  return true;
 }
 
 export interface SpellPreview {
@@ -129,6 +141,8 @@ export interface SpellPreview {
     readonly hp: number;
     readonly side?: RelativeSide;
     readonly heightPercent?: number;
+    /** 「踏みとどまる」で HP 1 で耐えるか */
+    readonly endured?: boolean;
   }[];
 }
 
@@ -147,17 +161,25 @@ export function previewSpellAt(
   const tiles = spellArea(state.map, spell, center);
   const from = casterOverride ?? caster;
   const heightOf = (c: Coord) => getTile(state.map, c.x, c.z)?.height ?? 0;
-  const results: { unitId: string; amount: number; hp: number; side?: RelativeSide; heightPercent?: number }[] = [];
+  const results: { unitId: string; amount: number; hp: number; side?: RelativeSide; heightPercent?: number; endured?: boolean }[] = [];
   for (const unit of state.units) {
     const u = casterOverride && unit.id === caster.id ? casterOverride : unit;
-    if (!affectsUnit(spell, u) || !tiles.some((t) => t.x === u.x && t.z === u.z)) continue;
+    if (!affectsUnit(spell, u, caster) || !tiles.some((t) => t.x === u.x && t.z === u.z)) continue;
     const angle = spell.directional
       ? { side: relativeSide(from, u, u.facing), heightPercent: heightDamagePercent(state.rules, heightOf(from), heightOf(u)) }
       : undefined;
     const amount = spellAmountOn(state.rules, caster, spell, u, angle);
     const hp =
-      spell.effect === 'heal' ? u.hp + amount : spell.effect === 'damage' ? u.hp - amount : spell.effect === 'revive' ? amount : u.hp;
-    results.push({ unitId: u.id, amount, hp, ...angle });
+      spell.effect === 'heal' || spell.effect === 'rewind'
+        ? u.hp + amount
+        : spell.effect === 'damage'
+          ? u.hp - amount
+          : spell.effect === 'revive'
+            ? amount
+            : u.hp;
+    // 踏みとどまるを使えないものとして計算した量と違えば、耐えた
+    const endured = spell.effect === 'damage' && amount !== spellAmountOn(state.rules, caster, spell, { ...u, endureUsed: true }, angle);
+    results.push({ unitId: u.id, amount, hp, ...angle, ...(endured ? { endured: true } : {}) });
   }
   return { center, tiles, results };
 }
@@ -170,7 +192,10 @@ export function isValidSpellTarget(
   target: SpellTarget,
 ): boolean {
   // 倒れたユニットは、新しく狙うことはできない（蘇生は、戦闘不能のユニットだけを狙える）
-  if (target.kind === 'unit' && !state.units.some((u) => u.id === target.unitId && affectsUnit(spell, u))) return false;
+  const caster = 'team' in from ? (from as UnitState) : undefined;
+  if (target.kind === 'unit' && !state.units.some((u) => u.id === target.unitId && affectsUnit(spell, u, caster))) return false;
+  // 狙える相手が決まっている業は、ユニットだけを狙う
+  if (spell.targets && target.kind !== 'unit') return false;
   const center = targetCenter(state, target);
   if (!center || !getTile(state.map, center.x, center.z)) return false;
   if (target.kind === 'tile' && (!Number.isInteger(target.x) || !Number.isInteger(target.z))) return false;

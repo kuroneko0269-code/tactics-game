@@ -176,8 +176,73 @@ export const revive: SpellDefinition = {
   castSpeed: 20,
 };
 
-/** 詠唱のある行動アビリティ（魔法と狙い撃ち） */
-export const spells: readonly SpellDefinition[] = [fire, wind, thunder, heal, bigHeal, aimedShot, seal, protectPrayer, inferno, revive];
+// ---- 時守の業（フェーズ2-6）。詠唱せず、その場で発動する（instant）。溜めのある技と同じく沈黙の影響を受けない ----
+
+/** 引き戻し: 味方ひとり（自分以外）の HP を、その味方の前回の手番が始まった時の値に戻す。今の HP の方が高ければ何もしない */
+export const rewind: SpellDefinition = {
+  id: 'rewind',
+  kind: 'skill',
+  element: 'none',
+  effect: 'rewind',
+  instant: true,
+  targets: 'ally',
+  power: 0,
+  mpCost: 6,
+  range: 3,
+  areaRadius: 0,
+  heightTolerance: 0,
+  castSpeed: 0,
+};
+
+/** 門渡り: 射程 3 の中にいる味方ひとり（自分以外）と、位置を入れ替える */
+export const gateSwap: SpellDefinition = {
+  id: 'gateSwap',
+  kind: 'skill',
+  element: 'none',
+  effect: 'swap',
+  instant: true,
+  targets: 'ally',
+  power: 0,
+  mpCost: 4,
+  range: 3,
+  areaRadius: 0,
+  heightTolerance: 0,
+  castSpeed: 0,
+};
+
+/** 時送り: 敵ひとりの CT を 40 減らし、次の行動を遅らせる（0 より下にはしない）。射程 3 */
+export const timeDelay: SpellDefinition = {
+  id: 'timeDelay',
+  kind: 'skill',
+  element: 'none',
+  effect: 'delay',
+  instant: true,
+  targets: 'enemy',
+  ctDelay: 40,
+  power: 0,
+  mpCost: 6,
+  range: 3,
+  areaRadius: 0,
+  heightTolerance: 0,
+  castSpeed: 0,
+};
+
+/** 詠唱のある行動アビリティ（魔法と狙い撃ち）と、詠唱のない業（時守） */
+export const spells: readonly SpellDefinition[] = [
+  fire,
+  wind,
+  thunder,
+  heal,
+  bigHeal,
+  aimedShot,
+  seal,
+  protectPrayer,
+  inferno,
+  revive,
+  rewind,
+  gateSwap,
+  timeDelay,
+];
 
 /** 強打: 通常攻撃のダメージ 1.5 倍、命中率 -15。近接武器（剣・杖）が必要 */
 export const powerStrike: StrikeDefinition = {
@@ -209,5 +274,17 @@ export const slowArrow: StrikeDefinition = {
   inflicts: 'slow',
 };
 
+/**
+ * 斬り分け（時守。フェーズ2-6）: 正面のマスと、その左右のマスにいる敵をまとめて斬る。1体ずつ命中を判定し、
+ * ダメージは通常攻撃の 70%。剣が必要。最初から習得済み
+ */
+export const sweep: StrikeDefinition = {
+  id: 'sweep',
+  damagePercent: 70,
+  hitBonus: 0,
+  weapons: ['sword'],
+  sweep: true,
+};
+
 /** すぐに出る技 */
-export const strikes: readonly StrikeDefinition[] = [powerStrike, knockback, slowArrow];
+export const strikes: readonly StrikeDefinition[] = [powerStrike, knockback, slowArrow, sweep];

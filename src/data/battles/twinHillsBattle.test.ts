@@ -24,15 +24,18 @@ const configs = { player: aiConfig, enemy: aiConfig };
 
 // data のテストは「定義データが core で正しく読めるか」を確かめるため、core の関数を使ってよい。
 describe('ふたつの丘の戦場と最初の部隊', () => {
-  it('最初の部隊は正しく、core で読み込めて、味方5体（戦士2・弓使い1・魔道士1・治癒師1）と敵5体（同じ構成）がいる', () => {
+  it('最初の部隊は正しく、core で読み込めて、味方5体（時守・戦士・弓使い・魔道士・治癒師）と敵5体（戦士2・弓使い・魔道士・治癒師）がいる', () => {
     expect(validateRoster(initialRoster, catalog, progressionRules)).toEqual([]);
     const { state } = start(1);
     expect(state.map.width).toBe(10);
     expect(state.map.depth).toBe(10);
-    for (const team of ['player', 'enemy'] as const) {
-      const members = state.units.filter((u) => u.team === team).map((u) => u.jobId).sort();
-      expect(members).toEqual(['archer', 'healer', 'mage', 'warrior', 'warrior']);
-    }
+    const members = (team: 'player' | 'enemy') => state.units.filter((u) => u.team === team).map((u) => u.jobId).sort();
+    expect(members('player')).toEqual(['archer', 'healer', 'mage', 'timekeeper', 'warrior']);
+    expect(members('enemy')).toEqual(['archer', 'healer', 'mage', 'warrior', 'warrior']);
+    // トウマは専用ジョブ「時守」で、斬り分けを覚えている
+    const touma = state.units.find((u) => u.id === 'touma')!;
+    expect(touma.jobId).toBe('timekeeper');
+    expect(touma.strikes.map((s) => s.id)).toEqual(['sweep']);
     // 今の版でできることがそのままできる: 魔道士は風と炎、治癒師は癒し
     const mage = state.units.find((u) => u.team === 'player' && u.jobId === 'mage')!;
     expect(mage.spells.map((s) => s.id).sort()).toEqual(['fire', 'wind']);
@@ -47,7 +50,9 @@ describe('ふたつの丘の戦場と最初の部隊', () => {
       expect(getTile(map, tile.x, map.depth - 1 - tile.z)?.height).toBe(tile.height);
     }
     for (const u of state.units.filter((u) => u.team === 'player')) {
-      const mirror = state.units.find((e) => e.team === 'enemy' && e.jobId === u.jobId && e.x === u.x);
+      // 時守は、敵の戦士と向かい合う
+      const job = u.jobId === 'timekeeper' ? 'warrior' : u.jobId;
+      const mirror = state.units.find((e) => e.team === 'enemy' && e.jobId === job && e.x === u.x);
       expect(mirror?.z, u.id).toBe(map.depth - 1 - u.z);
     }
     const maxHeight = Math.max(...map.tiles.map((t) => t.height));
@@ -100,6 +105,7 @@ describe('ふたつの丘の戦場と最初の部隊', () => {
 
   it('部隊の育成の状態（ジョブ・成長値・副コマンド）が、戦闘のユニットに反映される', () => {
     let warrior = gainExp(initialRoster.units[0]!, 2000, catalog, progressionRules);
+    warrior = changeJob(warrior, 'warrior', catalog, progressionRules);
     warrior = changeJob(warrior, 'mage', catalog, progressionRules);
     warrior = learnAbility(
       { ...warrior, jobs: { ...warrior.jobs, mage: { ...warrior.jobs.mage!, jp: 999, jpTotal: 999 } } },
@@ -111,7 +117,7 @@ describe('ふたつの丘の戦場と最初の部隊', () => {
     warrior = changeJob(warrior, 'warrior', catalog, progressionRules);
     warrior = { ...warrior, slots: { ...warrior.slots, secondary: 'mage' } };
     const roster = { ...initialRoster, units: [warrior, ...initialRoster.units.slice(1)] };
-    const unit = start(1, 'easy', roster).state.units.find((u) => u.id === 'hero-1')!;
+    const unit = start(1, 'easy', roster).state.units.find((u) => u.id === 'touma')!;
     expect(unit.level).toBe(warrior.level);
     expect(unit.stats).toEqual(equippedStats(warrior, roster, catalog));
     expect(unit.commands).toEqual([
@@ -139,11 +145,15 @@ describe('ふたつの丘の戦場と最初の部隊', () => {
   }, 30_000);
 
   it('敵 AI の封じ: 「ふつう」以上で、魔法を使う相手（育てていない部隊）がいる戦闘では、1戦に平均 0.5 回以上使う', () => {
+    // 敵 AI の動きを確かめるので、味方はフェーズ2-5 までと同じ構成（トウマも戦士）にする。
+    // 時守のトウマ（素早さ 7）だと、育てていない部隊は「むずかしい」に早く負けて、封じを使う前に決着することが多いため
+    const touma = changeJob(initialRoster.units[0]!, 'warrior', catalog, progressionRules);
+    const warriors: Roster = { ...initialRoster, units: [touma, ...initialRoster.units.slice(1)] };
     for (const tierId of ['normal', 'hard']) {
       let seals = 0;
       const n = 12;
       for (let seed = 1; seed <= n; seed++) {
-        const { events, state } = runAutoBattle(start(seed, tierId).state, 1000, configs);
+        const { events, state } = runAutoBattle(start(seed, tierId, warriors).state, 1000, configs);
         const enemy = new Set(state.units.filter((u) => u.team === 'enemy').map((u) => u.id));
         seals += events.filter((e) => e.type === 'castStarted' && e.spellId === 'seal' && enemy.has(e.casterId)).length;
       }

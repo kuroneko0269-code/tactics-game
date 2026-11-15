@@ -16,6 +16,11 @@ import {
   growthTotalCapOf,
   isJobMastered,
   isJobUnlocked,
+  canTakeJob,
+  eligibleJobs,
+  isExclusiveJob,
+  isJobEligible,
+  newlyUnlockedJobs,
   masteredJobs,
   isGrowthCapped,
   jobLevel,
@@ -350,6 +355,59 @@ describe('ジョブチェンジと副コマンド', () => {
     expect(() => changeJob(u, 'knight', catalog, rules)).toThrow();
     const ready = gainJp(u, 'warrior', 250);
     expect(changeJob(ready, 'knight', catalog, rules).jobId).toBe('knight');
+  });
+
+  it('解放条件が複数あるジョブは、すべて満たした時に就ける。満たした瞬間を newlyUnlockedJobs で知らせる（フェーズ2-6）', () => {
+    const summoner: JobDefinition = { ...testMage, id: 'summoner', unlock: [{ jobId: 'mage', level: 3 }, { jobId: 'warrior', level: 2 }] };
+    const cat = { ...catalog, jobs: [...catalog.jobs, summoner] };
+    const u = recruit();
+    const half = gainJp(u, 'mage', 250);
+    expect(canTakeJob(half, summoner, rules, cat)).toBe(false);
+    expect(newlyUnlockedJobs(u, half, cat, rules)).toEqual([]);
+    const both = gainJp(half, 'warrior', 100);
+    expect(canTakeJob(both, summoner, rules, cat)).toBe(true);
+    // 戦士 Lv 2 で、騎士（戦士 Lv 3）はまだ。召喚士だけが新しく就けるようになった
+    expect(newlyUnlockedJobs(half, both, cat, rules)).toEqual(['summoner']);
+    // 最初から就けるジョブ（解放条件のないもの）は知らせない
+    expect(newlyUnlockedJobs(u, u, cat, rules)).toEqual([]);
+    // 条件を満たしていないジョブのアビリティは習得できない
+    expect(learnRefusal(half, 'summoner', 'wind', cat, rules)).toBe('jobLocked');
+  });
+
+  it('専用ジョブ: 特定の人物だけが就ける。敵専用のジョブには、だれも就けない。専用ジョブで習得したアビリティは、転職しても付けられる', () => {
+    const keeper: JobDefinition = {
+      ...testWarrior,
+      id: 'keeper',
+      eligibility: { kind: 'characters', characterIds: ['touma'] },
+      passives: [{ id: 'evade', jpCost: 10 }],
+      abilities: [{ id: 'powerStrike', jpCost: 10 }],
+    };
+    const beast: JobDefinition = { ...testWarrior, id: 'beast', eligibility: { kind: 'enemy' } };
+    const cat = { ...catalog, jobs: [...catalog.jobs, keeper, beast] };
+    const touma = recruit('warrior', { id: 'touma' });
+    const other = recruit('warrior', { id: 'gord' });
+    expect([isJobEligible(touma, keeper), isJobEligible(other, keeper), isJobEligible(touma, beast)]).toEqual([true, false, false]);
+    expect(isExclusiveJob(keeper)).toBe(true);
+    expect(isExclusiveJob(sturdy)).toBe(false);
+    expect(eligibleJobs(touma, cat).map((j) => j.id)).toContain('keeper');
+    expect(eligibleJobs(other, cat).map((j) => j.id)).not.toContain('keeper');
+    expect(eligibleJobs(touma, cat).map((j) => j.id)).not.toContain('beast');
+    expect(() => changeJob(other, 'keeper', cat, rules)).toThrow();
+    expect(() => changeJob(touma, 'beast', cat, rules)).toThrow();
+    expect(learnRefusal(gainJp(other, 'keeper', 100), 'keeper', 'evade', cat, rules)).toBe('jobLocked');
+    // トウマは専用ジョブで覚えた身かわしと副コマンドを、戦士に戻っても付けられる
+    let t = changeJob(gainJp(touma, 'keeper', 100), 'keeper', cat, rules);
+    t = learnAbility(learnAbility(t, 'keeper', 'evade', cat, rules), 'keeper', 'powerStrike', cat, rules);
+    t = changeJob(t, 'warrior', cat, rules);
+    t = setSecondary(setPassive(t, 'reaction', 'evade', cat), 'keeper', cat);
+    const roster = { units: [t], gold: 0, items: [], nextItemSeq: 1 };
+    expect(validateRoster(roster, cat, rules)).toEqual([]);
+    // ほかの人物が専用ジョブに就いている部隊は、ルールに合わない
+    expect(validateRoster({ ...roster, units: [{ ...other, jobId: 'keeper' }] }, cat, rules)).toContainEqual({
+      kind: 'jobNotEligible',
+      unitId: 'gord',
+      jobId: 'keeper',
+    });
   });
 
   it('副コマンド: ほかのジョブで習得済みのアビリティを使える。今のジョブと同じジョブ、習得済みがないジョブは付けられない', () => {

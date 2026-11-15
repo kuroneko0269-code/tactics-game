@@ -57,6 +57,18 @@ export const quickStep: PassiveDefinition = { id: 'quickStep', slot: 'movement',
 /** 身軽（弓使い）: ジャンプ力 +1 */
 export const lightFoot: PassiveDefinition = { id: 'lightFoot', slot: 'movement', effect: { kind: 'jumpBonus', amount: 1 } };
 
+// ---- 時守（フェーズ2-6）----
+
+/** 踏みとどまる（リアクション）: HP が 0 になるダメージを受けた時、1戦に1度だけ HP 1 で耐える */
+export const endure: PassiveDefinition = { id: 'endure', slot: 'reaction', effect: { kind: 'endure' } };
+
+/** 時守の心得（サポート）: 待機した（移動も行動もしなかった）時に、手番の後の CT が 20 増える（40 → 60） */
+export const timekeeperWisdom: PassiveDefinition = {
+  id: 'timekeeperWisdom',
+  slot: 'support',
+  effect: { kind: 'waitCtBonus', amount: 20 },
+};
+
 export const passives: readonly PassiveDefinition[] = [
   counter,
   evade,
@@ -68,4 +80,6 @@ export const passives: readonly PassiveDefinition[] = [
   thrift,
   quickStep,
   lightFoot,
+  endure,
+  timekeeperWisdom,
 ];

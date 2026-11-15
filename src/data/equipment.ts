@@ -2,6 +2,7 @@ import type { AttackProfile, EquipmentDefinition } from '../core/battleTypes';
 import type { AutoEquipWeights } from '../core/equipment';
 import type { SaveMigrationContext } from '../core/saveData';
 import type { ShopDefinition } from '../core/shop';
+import { legacyUnitIds } from './characters';
 
 /**
  * 装備の定義（フェーズ2-4）。数値はすべて仮（バランス調整で変える）。
@@ -19,6 +20,7 @@ import type { ShopDefinition } from '../core/shop';
 const swordAttack: AttackProfile = { kind: 'melee', maxHeightDiff: 2 };
 const bowAttack: AttackProfile = { kind: 'ranged', minRange: 3, maxRange: 5, heightPerExtraRange: 2 };
 const staffAttack: AttackProfile = { kind: 'melee', maxHeightDiff: 2 };
+const daggerAttack: AttackProfile = { kind: 'melee', maxHeightDiff: 2 };
 
 const sword = (id: string, tier: number, price: number, attack: number): EquipmentDefinition => ({
   id,
@@ -48,6 +50,17 @@ const staff = (id: string, tier: number, price: number, magic: number): Equipmen
   attack: staffAttack,
 });
 
+/** 短剣（フェーズ2-6）: 攻撃力は剣より低く、素早さが 1 上がる。装備できるのは盗賊 */
+const dagger = (id: string, tier: number, price: number, attack: number): EquipmentDefinition => ({
+  id,
+  slot: 'weapon',
+  weaponType: 'dagger',
+  tier,
+  price,
+  stats: { attack, speed: 1 },
+  attack: daggerAttack,
+});
+
 // ---- 武器（剣・弓: 攻撃力 +3 / +5 / +8、杖: 魔力 +3 / +5 / +7）----
 export const sword1 = sword('sword-1', 1, 150, 3);
 export const sword2 = sword('sword-2', 2, 320, 5);
@@ -58,6 +71,10 @@ export const bow3 = bow('bow-3', 3, 1000, 8);
 export const staff1 = staff('staff-1', 1, 150, 3);
 export const staff2 = staff('staff-2', 2, 320, 5);
 export const staff3 = staff('staff-3', 3, 1000, 7);
+// 短剣: 攻撃力 +2 / +4 / +6、素早さ +1
+export const dagger1 = dagger('dagger-1', 1, 140, 2);
+export const dagger2 = dagger('dagger-2', 2, 300, 4);
+export const dagger3 = dagger('dagger-3', 3, 950, 6);
 
 // ---- 防具（鎧: 最大 HP +10 / +18 / +28、軽装: +7 / +12 / +18、ローブ: 最大 HP +4 / +7 / +10 と最大 MP +6 / +10 / +16）----
 export const heavy1: EquipmentDefinition = { id: 'heavy-1', slot: 'armor', armorType: 'heavy', tier: 1, price: 130, stats: { maxHp: 10 } };
@@ -118,6 +135,9 @@ export const equipment: readonly EquipmentDefinition[] = [
   staff1,
   staff2,
   staff3,
+  dagger1,
+  dagger2,
+  dagger3,
   heavy1,
   heavy2,
   heavy3,
@@ -142,13 +162,14 @@ export const starterEquipment: Readonly<Record<string, readonly string[]>> = {
   archer: ['bow-1', 'light-1'],
   mage: ['staff-1', 'robe-1'],
   healer: ['staff-1', 'robe-1'],
+  timekeeper: ['sword-1', 'heavy-1'],
 };
 
 /** 最初の所持金 */
 export const startingGold = 300;
 
 /** 古いセーブデータを直す時に使う定義（core の saveData.ts に渡す） */
-export const saveMigrationContext: SaveMigrationContext = { starterEquipment, startingGold, equipment };
+export const saveMigrationContext: SaveMigrationContext = { starterEquipment, startingGold, equipment, legacyUnitIds };
 
 /**
  * 店（拠点の「店」）。品ぞろえは進み具合で増える。
@@ -159,10 +180,10 @@ export const saveMigrationContext: SaveMigrationContext = { starterEquipment, st
 export const shop: ShopDefinition = {
   sellPercent: 50,
   entries: [
-    ...['sword-1', 'bow-1', 'staff-1', 'heavy-1', 'light-1', 'robe-1'].map((itemId) => ({ itemId })),
+    ...['sword-1', 'bow-1', 'staff-1', 'dagger-1', 'heavy-1', 'light-1', 'robe-1'].map((itemId) => ({ itemId })),
     ...['sword-2', 'staff-2', 'heavy-2'].map((itemId) => ({ itemId })),
-    ...['bow-2', 'light-2', 'robe-2'].map((itemId) => ({ itemId, requires: { kind: 'dungeonCleared' as const, dungeonId: 'ruins' } })),
-    ...['sword-3', 'bow-3', 'staff-3', 'heavy-3', 'light-3', 'robe-3'].map((itemId) => ({
+    ...['bow-2', 'dagger-2', 'light-2', 'robe-2'].map((itemId) => ({ itemId, requires: { kind: 'dungeonCleared' as const, dungeonId: 'ruins' } })),
+    ...['sword-3', 'bow-3', 'staff-3', 'dagger-3', 'heavy-3', 'light-3', 'robe-3'].map((itemId) => ({
       itemId,
       requires: { kind: 'trainingWon' as const, tierId: 'normal' },
     })),

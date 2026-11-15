@@ -473,7 +473,9 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
       const title = el('div', `preview-title element-text-${p.element}`);
       title.textContent = TEXT.spellPreview.title(p.spellName);
       const meta = el('div', 'spell-meta');
-      meta.textContent = [p.targetText, TEXT.spellPreview.timing(p.timing), p.mpText].filter((t) => t !== '').join(' ・ ');
+      // timing が 0 なら、詠唱のない業（その場で発動する。フェーズ2-6）
+      const timing = p.timing > 0 ? TEXT.spellPreview.timing(p.timing) : TEXT.spellPreview.instant;
+      meta.textContent = [p.targetText, timing, p.mpText].filter((t) => t !== '').join(' ・ ');
       preview.append(title, meta);
       if (p.warning) {
         const warn = el('div', 'spell-warning');
@@ -498,9 +500,13 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
           : `${r.name}: ${p.effect === 'heal' ? TEXT.spellPreview.heal : TEXT.spellPreview.damage} ${sign}${r.amount}（${TEXT.hp} ${before} → ${r.hp}）${r.note ?? ''}`;
         list.append(li);
       }
-      const note = el('div', 'spell-note');
-      note.textContent = TEXT.spellPreview.note;
-      preview.append(list, note);
+      preview.append(list);
+      // 「今のまま誰も動かなかった場合」は、詠唱のある魔法だけ（詠唱のない業は、その場で発動する）
+      if (p.timing > 0) {
+        const note = el('div', 'spell-note');
+        note.textContent = TEXT.spellPreview.note;
+        preview.append(note);
+      }
     },
     setUndoMove(onClick) {
       undoArea.innerHTML = '';

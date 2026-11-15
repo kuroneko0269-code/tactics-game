@@ -60,11 +60,14 @@ import type {
   UnitState,
   UnitStats,
 } from './battleTypes';
-import { attackableTargets, canReach, knockbackOutcome, previewAttack, strikeOf, weaponFits } from './combat';
+import { attackableTargets, canReach, knockbackOutcome, previewAttack, strikeOf, sweepExtraTargets, weaponFits } from './combat';
 import {
   addStatus,
   applyPassiveStats,
+  applyStatusStats,
   damageTaken,
+  enduredDamage,
+  hasStatus,
   isSilencedFor,
   mpCostOf,
   passiveEffect,
@@ -97,7 +100,7 @@ import {
   turnTriggerDue,
   type Outcome,
 } from './scenario';
-import { ctAfterTurn, nextTimelineEntry } from './turnOrder';
+import { ctAfterTurnFor, nextTimelineEntry } from './turnOrder';
 
 /**
  * 定義データから戦闘を始める。最初の手番が始まった状態を返す。
@@ -211,7 +214,9 @@ function buildUnit(
   const weaponItem = equipment.find((e) => e.slot === 'weapon');
   const weapon = p.equipment ? (weaponItem?.weaponType ?? null) : (job.weaponTypes?.[0] ?? null);
   const attack = p.equipment ? (weaponItem?.attack ?? rules.unarmedAttack) : job.attack;
-  const statBonus = sumStats([p.statBonus ?? {}, ...equipment.map((e) => e.stats)]);
+  // 素手（武器の枠が空）の時のジョブの補正（格闘家。フェーズ2-6）
+  const unarmed = weapon === null && job.unarmedBonus ? [job.unarmedBonus] : [];
+  const statBonus = sumStats([p.statBonus ?? {}, ...equipment.map((e) => e.stats), ...unarmed]);
   const stats = computeStats(job.stats, growth, statBonus, unitPassives);
   return {
     id: p.id,
@@ -254,6 +259,8 @@ function buildUnit(
     actionCount: 0,
     charging: null,
     movedLastTurn: false,
+    turnStartHp: stats.maxHp,
+    endureUsed: false,
   };
 }
 
@@ -282,6 +289,28 @@ function withBonus(stats: UnitStats, bonus: Partial<UnitStats> | undefined): Uni
   const result: Record<keyof UnitStats, number> = { ...stats };
   for (const key of Object.keys(bonus) as (keyof UnitStats)[]) result[key] = Math.max(0, stats[key] + (bonus[key] ?? 0));
   return result;
+}
+
+/** 今の能力値: 基本値 + 成長値 + 補正 に、受動的なアビリティと状態変化（フェーズ2-6）を反映したもの */
+function currentStats(u: UnitState, rules: BattleRules, growth = u.growth, statuses = u.statuses): UnitStats {
+  return applyStatusStats(computeStats(u.baseStats, growth, u.statBonus, u.passives), statuses, rules);
+}
+
+/**
+ * 状態変化の一覧を入れ替え、能力値を計算し直す（攻撃力低下・加速などが付いた・消えた時）。
+ * 最大 HP・MP が下がったら、今の HP・MP は最大を超えないように抑える（上がっても今の値は増やさない）
+ */
+function setStatuses(state: BattleState, unitId: string, statuses: UnitState['statuses']): BattleState {
+  const u = getUnit(state, unitId);
+  const stats = currentStats(u, state.rules, u.growth, statuses);
+  return updateUnit(state, unitId, { statuses, stats, hp: Math.min(u.hp, stats.maxHp), mp: Math.min(u.mp, stats.maxMp) });
+}
+
+/** 「踏みとどまる」で耐えた: 使ったことを記録し、出来事に残す */
+function markEndured(state: BattleState, unitId: string, events: BattleEvent[]): BattleState {
+  const u = getUnit(state, unitId);
+  events.push({ type: 'endured', unitId, abilityId: passiveIdOf(u, 'endure') ?? '' });
+  return updateUnit(state, unitId, { endureUsed: true });
 }
 
 export function getUnit(state: BattleState, id: string): UnitState {
@@ -351,9 +380,16 @@ export function applyAction(state: BattleState, action: BattleAction): ActionRes
     case 'attack': {
       const target = getUnit(state, action.targetId);
       const strike = action.abilityId === undefined ? undefined : strikeOf(unit, action.abilityId);
-      let next = resolveWeaponAttack(state, unit.id, target.id, strike, false, events);
-      // 当たっても外れても、同じ量の経験値と JP（反撃を受けて倒れても入る）
-      next = grantProgress(next, unit.id, target.level, false, events);
+      // 斬り分け: 正面の左右のマスの敵を先に、選んだ相手（正面）を最後に攻撃する（反撃は正面の相手だけなので、最後に起きる）
+      const extras = strike?.sweep ? sweepExtraTargets(state, unit, unit, target) : [];
+      let next = state;
+      for (const extra of extras) {
+        if (!isAlive(getUnit(next, unit.id))) break;
+        next = resolveWeaponAttack(next, unit.id, extra.id, { ...strike!, sweep: false }, false, events);
+      }
+      if (isAlive(getUnit(next, unit.id))) next = resolveWeaponAttack(next, unit.id, target.id, strike, false, events);
+      // 当たっても外れても、同じ量の経験値と JP（反撃を受けて倒れても入る）。巻き込んだ敵の中で最もレベルの高い相手で計算する
+      next = grantProgress(next, unit.id, Math.max(target.level, ...extras.map((e) => e.level)), false, events);
       next = runStateEvents(next, events);
       next = { ...next, turn: { ...turn, acted: true }, lastAggressionTurn: state.turnNumber };
       next = endIfDecided(next, events);
@@ -371,6 +407,16 @@ export function applyAction(state: BattleState, action: BattleAction): ActionRes
         ? { kind: 'unit' as const, unitId: action.target.unitId }
         : { kind: 'tile' as const, x: action.target.x, z: action.target.z };
       events.push({ type: 'castStarted', casterId: unit.id, spellId: spell.id, target, mp, casterFacing });
+      // 詠唱のない業（時守。フェーズ2-6）は、その場で発動する
+      if (spell.instant) {
+        let next = updateUnit(state, unit.id, { mp, facing: casterFacing });
+        next = { ...next, turn: { ...turn, acted: true }, lastAggressionTurn: state.turnNumber };
+        next = resolveSpellAt(next, unit.id, spell, center, events);
+        next = runStateEvents(next, events);
+        next = endIfDecided(next, events);
+        if (!next.winner && !isAlive(getUnit(next, unit.id))) next = beginNextTurn({ ...next, turn: null }, events);
+        return { state: next, events };
+      }
       // 経験値と JP は、発動した時に入る（resolveCharge）
       const next = updateUnit(state, unit.id, {
         mp,
@@ -382,15 +428,13 @@ export function applyAction(state: BattleState, action: BattleAction): ActionRes
 
     case 'endTurn': {
       if (!DIRECTIONS.includes(action.facing)) throw new Error(`向き ${String(action.facing)} が不正です`);
-      const ct = ctAfterTurn(state.rules, turn.moved, turn.acted);
+      const ct = ctAfterTurnFor(state.rules, unit, turn.moved, turn.acted);
       events.push({ type: 'turnEnded', unitId: unit.id, facing: action.facing, ct });
       // 状態変化の持続を 1 減らす（0 になったものは消える）
       const ticked = tickStatuses(unit.statuses);
       for (const status of ticked.expired) events.push({ type: 'statusExpired', unitId: unit.id, status });
-      const next: BattleState = {
-        ...updateUnit(state, unit.id, { facing: action.facing, ct, movedLastTurn: turn.moved, statuses: ticked.statuses }),
-        turn: null,
-      };
+      let next: BattleState = updateUnit(state, unit.id, { facing: action.facing, ct, movedLastTurn: turn.moved });
+      next = { ...setStatuses(next, unit.id, ticked.statuses), turn: null };
       return { state: beginNextTurn(next, events), events };
     }
   }
@@ -436,7 +480,7 @@ function defeat(state: BattleState, unitId: string, events: BattleEvent[]): Batt
   const count = state.rules.knockout.count;
   events.push({ type: 'defeated', unitId, count });
   const unit = getUnit(state, unitId);
-  const next = updateUnit(state, unitId, { statuses: [], knockoutCount: count });
+  const next = updateUnit(setStatuses(state, unitId, []), unitId, { knockoutCount: count, hp: 0 });
   if (!unit.charging) return next;
   events.push({ type: 'spellFizzled', casterId: unitId, spellId: unit.charging.spellId, reason: 'casterDefeated' });
   return updateUnit(next, unitId, { charging: null });
@@ -468,7 +512,7 @@ function inflict(state: BattleState, unitId: string, status: StatusId, events: B
   }
   const statuses = addStatus(unit.statuses, status, state.rules);
   events.push({ type: 'statusAdded', unitId, status, turns: state.rules.status[status].turns });
-  const next = updateUnit(state, unitId, { statuses });
+  const next = setStatuses(state, unitId, statuses);
   if (status === 'silence' && unit.charging && spellOf(unit, unit.charging.spellId).kind === 'magic') {
     return interruptCharge(next, unitId, 'silenced', events);
   }
@@ -525,6 +569,7 @@ function resolveWeaponAttack(
   });
   let next = updateUnit(state, attackerId, { facing: preview.attackerFacing });
   next = { ...updateUnit(next, targetId, { hp: targetHp }), rngState: rng.getState() };
+  if (hit && preview.endures) next = markEndured(next, targetId, events);
   if (!hit) {
     if (preview.evadePenalty > 0) events.push({ type: 'reaction', unitId: targetId, abilityId: passiveIdOf(target, 'evade')! });
     return next;
@@ -536,10 +581,12 @@ function resolveWeaponAttack(
     next = interruptCharge(next, targetId, 'knockedBack', events);
     const t = getUnit(next, targetId);
     const kb = knockbackOutcome(next, attackerId, attacker, t);
-    const kbDamage = Math.min(kb.damage, t.hp);
+    const kbHit = enduredDamage(t, kb.damage);
+    const kbDamage = kbHit.damage;
     const hp = t.hp - kbDamage;
     events.push({ type: 'knockedBack', unitId: targetId, from: { x: t.x, z: t.z }, to: kb.to, damage: kbDamage, hp });
     next = updateUnit(next, targetId, kb.to ? { x: kb.to.x, z: kb.to.z, hp } : { hp });
+    if (kbHit.endured) next = markEndured(next, targetId, events);
     if (hp === 0) return defeat(next, targetId, events);
     // 押し出された先の罠と「マスに入る」のイベント
     if (kb.to) {
@@ -576,6 +623,8 @@ function isSupportive(state: BattleState, spell: SpellDefinition): boolean {
   return (
     spell.effect === 'heal' ||
     spell.effect === 'revive' ||
+    spell.effect === 'rewind' ||
+    spell.effect === 'swap' ||
     (spell.effect === 'status' && !state.rules.status[spell.inflicts!].harmful)
   );
 }
@@ -631,7 +680,7 @@ function grantProgress(
     const need = expToNext(u.level, rules);
     if (progress.exp < need) break;
     const growth = addGrowth(u.growth, u.growthRates, rules, progress.growthTotalCap);
-    const stats = computeStats(u.baseStats, growth, u.statBonus, u.passives);
+    const stats = currentStats(u, state.rules, growth);
     // 最大 HP・MP が増えた分だけ、今の HP・MP も増やす（倒れているユニットは起き上がらない）
     const alive = isAlive(u);
     const hp = alive ? Math.max(0, u.hp + stats.maxHp - u.stats.maxHp) : 0;
@@ -709,10 +758,12 @@ function springTrap(
   const unit = getUnit(state, unitId);
   if (kind === 'rockfall') {
     const raw = Math.floor((unit.stats.maxHp * state.rules.trap.rockfallDamagePercent) / 100);
-    const damage = Math.min(unit.hp, damageTaken(state.rules, unit, raw, { ignoreCharging: true }));
+    const taken = enduredDamage(unit, damageTaken(state.rules, unit, raw, { ignoreCharging: true }));
+    const damage = taken.damage;
     const hp = unit.hp - damage;
     events.push({ ...base, unitId, damage, hp });
-    const next = updateUnit(state, unitId, { hp });
+    let next = updateUnit(state, unitId, { hp });
+    if (taken.endured) next = markEndured(next, unitId, events);
     return hp === 0 ? defeat(next, unitId, events) : next;
   }
   if (kind === 'mud') {
@@ -727,7 +778,7 @@ function springTrap(
     return state;
   }
   const growth = subtractGrowth(unit.growth, unit.growthRates);
-  const stats = computeStats(unit.baseStats, growth, unit.statBonus, unit.passives);
+  const stats = currentStats(unit, state.rules, growth);
   const hp = Math.min(unit.hp, stats.maxHp);
   events.push({ ...base, unitId, damage: 0, hp, level: { from, to: from - 1 } });
   return updateUnit(state, unitId, {
@@ -829,11 +880,18 @@ function resolveCharge(state: BattleState, casterId: string, events: BattleEvent
   const charge = caster.charging!;
   const spell = spellOf(caster, charge.spellId);
   // 詠唱は終わったので、発動の計算では詠唱者を詠唱中として扱わない
-  let next = updateUnit(state, casterId, { charging: null });
+  const next = updateUnit(state, casterId, { charging: null });
   const center = targetCenter(next, charge.target);
   // 狙ったユニットが倒れていても、倒れたマスを中心に発動する（不発にはしない）
   if (!center) throw new Error(`魔法の狙い先がありません（${spell.id}）`);
-  const preview = previewSpellAt(next, getUnit(next, casterId), spell, center);
+  return resolveSpellAt(next, casterId, spell, center, events);
+}
+
+/** 魔法・業を center に発動する（詠唱が満ちた時と、詠唱のない業を指定した時） */
+function resolveSpellAt(state: BattleState, casterId: string, spell: SpellDefinition, center: Coord, events: BattleEvent[]): BattleState {
+  let next = state;
+  const caster = getUnit(next, casterId);
+  const preview = previewSpellAt(next, caster, spell, center);
   events.push({
     type: 'spellResolved',
     casterId,
@@ -858,6 +916,34 @@ function resolveCharge(state: BattleState, casterId: string, events: BattleEvent
     for (const r of preview.results) next = inflict(next, r.unitId, spell.inflicts!, events);
     return grant(next);
   }
+  // 引き戻し: 最後に手番が始まった時の HP に戻す（今の方が高ければ何もしない）
+  if (spell.effect === 'rewind') {
+    for (const r of preview.results) next = updateUnit(next, r.unitId, { hp: r.hp });
+    return grant(next);
+  }
+  // 時送り: 相手の CT を減らす（次の行動が遅れる）
+  if (spell.effect === 'delay') {
+    for (const r of preview.results) next = updateUnit(next, r.unitId, { ct: getUnit(next, r.unitId).ct - r.amount });
+    return grant(next);
+  }
+  // 門渡り: 味方と位置を入れ替える。入れ替わった先の罠と「マスに入る」のイベントは、使ったユニット → 相手の順
+  if (spell.effect === 'swap') {
+    for (const r of preview.results) {
+      const self = getUnit(next, casterId);
+      const other = getUnit(next, r.unitId);
+      const aTo = { x: other.x, z: other.z };
+      const bTo = { x: self.x, z: self.z };
+      events.push({ type: 'swapped', a: casterId, b: other.id, aTo, bTo });
+      next = updateUnit(updateUnit(next, casterId, aTo), other.id, bTo);
+      // 手番の中で後から移動を取り消しても、入れ替わった後の位置から動かないように、戻す先を入れ替わった先にする
+      if (next.turn?.unitId === casterId) {
+        next = { ...next, turn: { ...next.turn, origin: { ...aTo, facing: self.facing } } };
+      }
+      next = arrive(next, casterId, events);
+      if (isAlive(getUnit(next, other.id))) next = arrive(next, other.id, events);
+    }
+    return grant(next);
+  }
   // 蘇生: 戦闘不能のユニットを、決まった HP で復帰させる（CT は 0。退場していたら効かない）
   if (spell.effect === 'revive') {
     for (const r of preview.results) {
@@ -873,6 +959,7 @@ function resolveCharge(state: BattleState, casterId: string, events: BattleEvent
     // 魔力の殻で軽くなった時は、その名前を出す
     const shell = spell.kind === 'magic' ? passiveIdOf(u, 'magicShell') : undefined;
     if (shell) events.push({ type: 'reaction', unitId: u.id, abilityId: shell });
+    if (r.endured) next = markEndured(next, r.unitId, events);
     if (r.hp === 0) next = defeat(next, r.unitId, events);
     else if (r.amount > 0) next = meditate(next, r.unitId, events);
   }
@@ -896,6 +983,17 @@ function beginNextTurn(state: BattleState, events: BattleEvent[]): BattleState {
       continue;
     }
     const unit = getUnit(current, entry.unitId);
+    // 停止（フェーズ2-6）: 手番は何もできずに過ぎる（手番の数には数えない）。状態変化の持続はふつうの手番と同じく 1 減る
+    if (hasStatus(unit, 'stop')) {
+      const ct = current.rules.status.stop.ctAfterSkip;
+      events.push({ type: 'turnSkipped', unitId: unit.id, ct });
+      const ticked = tickStatuses(unit.statuses);
+      for (const status of ticked.expired) events.push({ type: 'statusExpired', unitId: unit.id, status });
+      current = setStatuses(updateUnit(current, unit.id, { ct, movedLastTurn: false }), unit.id, ticked.statuses);
+      continue;
+    }
+    // 引き戻しで戻す値として、手番が始まった時の HP を覚えておく
+    current = updateUnit(current, unit.id, { turnStartHp: unit.hp });
     const turn: TurnState = {
       unitId: unit.id,
       moved: false,

@@ -1,4 +1,5 @@
 import type { JobDefinition } from '../core/battleTypes';
+import { characterIds } from './characters';
 
 /**
  * ジョブの定義。数値はすべて仮（バランス調整で変える）。
@@ -14,7 +15,8 @@ import type { JobDefinition } from '../core/battleTypes';
  *   習得すると、ジョブを問わず付けられる。ジョブのレベルを上げる意味を作るため、jobLevel が必要なものを混ぜている
  * - growth: 成長率。レベルが 1 上がるごとに増える成長値（能力値の 1/100 単位。300 なら HP 3.0）。
  *   差は控えめにしている（育て方を気にしなくても困らず、こだわると違いが分かる程度）
- * - unlock: 解放条件（ほかのジョブのレベル）。今は4つとも最初から就ける
+ * - unlock: 解放条件（ほかのジョブのレベル）。最初の4つ（戦士・弓使い・魔道士・治癒師）は、だれでも最初から就ける
+ * - eligibility: 就ける対象（フェーズ2-6）。省くとだれでも。characters なら特定の人物だけ（専用ジョブ）、enemy なら敵専用
  */
 
 /** 戦士「武技」: 隣接マスに近接攻撃。高さの差が 2 以内の相手だけ攻撃できる。HP と攻撃力が高く、HP と攻撃力が伸びやすい */
@@ -99,4 +101,29 @@ export const healer: JobDefinition = {
   unlock: [],
 };
 
-export const jobs: readonly JobDefinition[] = [warrior, archer, mage, healer];
+/**
+ * 時守（トウマの専用ジョブ。フェーズ2-6）「時の業」: 前に出て剣で戦い、時を扱う業を持つ。装備は剣と鎧。
+ * 能力値は戦士に近く、素早さが少し高い（7）。業のために少しの MP を持つ
+ */
+export const timekeeper: JobDefinition = {
+  id: 'timekeeper',
+  eligibility: { kind: 'characters', characterIds: [characterIds.touma] },
+  stats: { maxHp: 64, attack: 10, speed: 7, move: 4, jump: 2, maxMp: 12, magic: 3 },
+  attack: { kind: 'melee', maxHeightDiff: 2 },
+  weaponTypes: ['sword'],
+  armorTypes: ['heavy'],
+  abilities: [
+    { id: 'sweep', jpCost: 0, starter: true },
+    { id: 'rewind', jpCost: 120 },
+    { id: 'gateSwap', jpCost: 100, jobLevel: 2 },
+    { id: 'timeDelay', jpCost: 160, jobLevel: 3 },
+  ],
+  passives: [
+    { id: 'endure', jpCost: 200, jobLevel: 3 },
+    { id: 'timekeeperWisdom', jpCost: 180, jobLevel: 2 },
+  ],
+  growth: { maxHp: 270, maxMp: 50, attack: 55, magic: 25, speed: 6 },
+  unlock: [],
+};
+
+export const jobs: readonly JobDefinition[] = [warrior, archer, mage, healer, timekeeper];

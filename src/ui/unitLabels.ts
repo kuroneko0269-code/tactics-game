@@ -42,6 +42,9 @@ export interface LabelUnit {
   readonly maxMp: number;
 }
 
+/** 頭上に出す状態変化の目印の数の上限 */
+const MAX_STATUS_BADGES = 2;
+
 export function createUnitLabels(root: HTMLElement, units: readonly LabelUnit[]): UnitLabels {
   root.innerHTML = '';
   const labels = new Map<
@@ -162,12 +165,20 @@ export function createUnitLabels(root: HTMLElement, units: readonly LabelUnit[])
       if (!l) return;
       l.statuses.innerHTML = '';
       l.statuses.hidden = statuses.length === 0;
-      for (const st of statuses) {
+      // 目印は2つまで（同時にたくさん付くと読めなくなるため。フェーズ2-6）。残りは「+N」で、情報の欄ですべて見られる
+      for (const st of statuses.slice(0, MAX_STATUS_BADGES)) {
         const badge = document.createElement('span');
         badge.className = `status-badge status-${st}`;
         badge.textContent = TEXT.statusShort[st];
         badge.title = TEXT.statuses[st];
         l.statuses.append(badge);
+      }
+      if (statuses.length > MAX_STATUS_BADGES) {
+        const more = document.createElement('span');
+        more.className = 'status-badge status-more';
+        more.textContent = TEXT.statusMore(statuses.length - MAX_STATUS_BADGES);
+        more.title = TEXT.statusMoreTitle;
+        l.statuses.append(more);
       }
     },
   };
