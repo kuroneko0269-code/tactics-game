@@ -323,14 +323,14 @@ const timeMagic = (
   id: string,
   rest: Pick<SpellDefinition, 'effect' | 'mpCost' | 'castSpeed'> & Partial<SpellDefinition>,
 ): SpellDefinition => ({ id, kind: 'magic', element: 'none', power: 0, range: 4, areaRadius: 0, heightTolerance: 0, ...rest });
-/** 加速: 加速（素早さ +50%）を付ける */
-export const haste = timeMagic('haste', { effect: 'status', inflicts: 'haste', mpCost: 8, castSpeed: 50 });
-/** 減速: 素早さ低下を付ける */
-export const decelerate = timeMagic('decelerate', { effect: 'status', inflicts: 'speedDown', mpCost: 8, castSpeed: 50 });
+/** 加速: 中心と上下左右の5マスの、味方だけに加速（素早さ +50%）を付ける */
+export const haste = timeMagic('haste', { effect: 'status', inflicts: 'haste', affects: 'allies', areaRadius: 1, heightTolerance: 2, mpCost: 8, castSpeed: 50 });
+/** 減速: 中心と上下左右の5マスの、敵だけに素早さ低下を付ける */
+export const decelerate = timeMagic('decelerate', { effect: 'status', inflicts: 'speedDown', affects: 'enemies', areaRadius: 1, heightTolerance: 2, mpCost: 8, castSpeed: 50 });
 /** 停止: 停止（次の手番が何もできずに過ぎる）を付ける。詠唱は長い */
-export const stop = timeMagic('stop', { effect: 'status', inflicts: 'stop', mpCost: 14, castSpeed: 15 });
+export const stop = timeMagic('stop', { effect: 'status', inflicts: 'stop', mpCost: 14, castSpeed: 34 });
 /** 早送り: 味方ひとり（自分以外）の CT を満たし、すぐに行動させる。詠唱あり。消費 MP が大きい */
-export const quicken = timeMagic('quicken', { effect: 'quicken', targets: 'ally', mpCost: 20, castSpeed: 34 });
+export const quicken = timeMagic('quicken', { effect: 'quicken', targets: 'ally', mpCost: 16, castSpeed: 50 });
 
 // ---- 召喚士（フェーズ2-6）: 中心から 2 マス以内の、敵だけ（または味方だけ）に効く。詠唱は長く、消費 MP が大きい ----
 const spirit = (id: string, element: SpellDefinition['element']): SpellDefinition => ({
@@ -392,7 +392,7 @@ export const spells: readonly SpellDefinition[] = [
 /** 強打: 通常攻撃のダメージ 1.5 倍、命中率 -15。近接武器（剣・杖）が必要 */
 export const powerStrike: StrikeDefinition = {
   id: 'powerStrike',
-  damagePercent: 150,
+  damagePercent: 140,
   hitBonus: -15,
   weapons: ['sword', 'staff'],
 };
@@ -458,14 +458,14 @@ export const stealGold: StrikeDefinition = { id: 'stealGold', damagePercent: 0, 
 /** 装備を盗む: 成功すると、敵の装備をひとつ奪う（武器 → 防具 → 装飾品の順。ボスの専用の装備は盗めない） */
 export const stealGear: StrikeDefinition = { id: 'stealGear', damagePercent: 0, hitBonus: 0, steal: 'item' };
 /** 目くらまし: 通常攻撃の 50% のダメージを与え、目くらましを付ける。短剣が必要 */
-export const blindStrike: StrikeDefinition = { id: 'blindStrike', damagePercent: 50, hitBonus: 0, weapons: ['dagger'], inflicts: 'blind' };
+export const blindStrike: StrikeDefinition = { id: 'blindStrike', damagePercent: 70, hitBonus: 0, weapons: ['dagger'], inflicts: 'blind' };
 /** 不意打ち: 背面から攻撃した時だけ、通常攻撃の 200%（それ以外は通常攻撃と同じ）。短剣が必要 */
 export const backstab: StrikeDefinition = { id: 'backstab', damagePercent: 100, backDamagePercent: 200, hitBonus: 0, weapons: ['dagger'] };
 
 // ---- 魔法剣士（フェーズ2-6）: 隣の敵に武器で攻撃。ダメージの元は攻撃力 + 魔力。MP を使う。剣が必要 ----
 const blade = (id: string, element: StrikeDefinition['element']): StrikeDefinition => ({
   id,
-  damagePercent: 70,
+  damagePercent: 90,
   hitBonus: 0,
   weapons: ['sword'],
   magicBlend: true,

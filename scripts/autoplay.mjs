@@ -772,6 +772,7 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
       const usable =
         (!weapons || (unit.weapon === null ? weapons.includes('unarmed') : weapons.includes(unit.weapon))) &&
         (!spell || unit.mp >= spell.mpCost) &&
+        unit.mp >= (unit.strikes.find((s) => s.id === id)?.mpCost ?? 0) &&
         (spell?.effect !== 'revive' || downAlly);
       const disabled = await page.getByRole('button', { name: text.abilities[id], exact: true }).isDisabled();
       check(disabled === !usable, `「${text.abilities[id]}」のボタンの押せる・押せないが、武器や MP と合いません`);
@@ -1905,6 +1906,51 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
     check(pick(await getState()) === pick(d.expected), `「${d.abilityId}」の結果が core の計算と違います（画面 ${pick(await getState())} / core ${pick(d.expected)}）`);
     stats.newJobActions++;
   }
+  // (4) 魔法のジョブ（フェーズ2-6 PR C）: 時魔道士の早送り、召喚士の炎の精霊（敵だけに効く赤い範囲）、魔法剣士の炎の剣
+  for (const d of jd.spells) {
+    await page.evaluate((r) => window.__tactics.load(r), d.start);
+    await waitFor('魔法のジョブの手番', (id) => window.__tactics.mode() === 'main' && window.__tactics.state().turn?.unitId === id, d.unitId);
+    await waitForInput();
+    const me = (await getState()).units.find((u) => u.id === d.unitId);
+    await openCommandOf(me, d.abilityId);
+    await pressButton(text.abilities[d.abilityId]);
+    await waitFor(`「${d.abilityId}」の狙い`, (id) => {
+      const m = window.__tactics.modeDetail();
+      return (m.kind === 'spellTarget' && m.spellId === id) || (m.kind === 'targeting' && m.abilityId === id);
+    }, d.abilityId);
+    await tapUnit(d.targetId);
+    if ((await getMode()).kind === 'spellTargetKind') await pressButton(d.tile ? text.buttons.targetTile : text.buttons.targetUnit);
+    const m = await getMode();
+    check(m.kind === 'spellConfirm' || m.kind === 'confirm', `「${d.abilityId}」の確定の前の画面になっていません（${JSON.stringify(m)}）`);
+    const previewText = await page.locator('.preview').textContent();
+    for (const want of d.previewIncludes) check(previewText.includes(want), `「${d.abilityId}」の予測に「${want}」がありません（${previewText}）`);
+    if (d.markKind) {
+      const kinds = await T(() => window.__tactics.marks().map((x) => x.kind));
+      check(kinds.includes(d.markKind), `「${d.abilityId}」の範囲の色分け（${d.markKind}）がありません（${JSON.stringify([...new Set(kinds)])}）`);
+    }
+    check(!(await overlaps('.preview', '.actions')), `「${d.abilityId}」の予測が行動のボタンに重なっています`);
+    await screenshot(`newjob-${d.abilityId}`);
+    await pressButton('確定');
+    await waitFor(`「${d.abilityId}」の後`, () => !['busy', 'confirm', 'spellConfirm'].includes(window.__tactics.mode()));
+    const pick = (st) => JSON.stringify(st.units.filter((u) => [d.unitId, d.targetId].includes(u.id)).map((u) => [u.id, u.hp, u.mp, u.charging, u.statuses]));
+    check(pick(await getState()) === pick(d.expected), `「${d.abilityId}」の結果が core の計算と違います（画面 ${pick(await getState())} / core ${pick(d.expected)}）`);
+    stats.newJobActions++;
+  }
+
+  // (5) 頭上の状態変化の目印は2つまでで、残りは「+N」。膠着まで残り 10 手番になると、勝敗条件の帯に残りの手番数が出る
+  await page.evaluate((r) => window.__tactics.load(r), jd.markers.start);
+  await waitFor('目印の場面', (id) => window.__tactics.mode() === 'main' && window.__tactics.state().turn?.unitId === id, jd.markers.unitId);
+  await waitForInput();
+  const badges = await T((id) => {
+    const labels = [...document.querySelectorAll('.unit-label')];
+    const i = window.__tactics.state().units.findIndex((u) => u.id === id);
+    return [...labels[i].querySelectorAll('.status-badge')].map((b) => b.textContent);
+  }, jd.markers.targetId);
+  check(JSON.stringify(badges) === JSON.stringify(jd.markers.badges), `頭上の状態変化の目印が違います（画面 ${JSON.stringify(badges)} / 期待 ${JSON.stringify(jd.markers.badges)}）`);
+  const quietBar = await page.locator('.objective-bar').textContent();
+  check(quietBar.includes(jd.markers.stalemate), `膠着までの残りの手番数が出ていません（${quietBar}）`);
+  await screenshot('status-markers-stalemate');
+
   // 撤退の後の部隊に戻して、拠点へ戻る（用意した場面の戦闘は、部隊に反映しない）
   await page.evaluate((r) => window.__tactics.setRoster(r), retreated);
   await waitFor('拠点', () => window.__tactics.screen() === 'base');
@@ -2677,7 +2723,8 @@ function passiveDrill(core, roster) {
   const jobId = 'warrior';
   const u0 = P.findUnit(roster, unitId);
   const p = P.jobProgress(u0, jobId);
-  const u = { ...u0, jobId, slots: { ...u0.slots, secondary: u0.slots.secondary === jobId ? null : u0.slots.secondary }, jobs: { ...u0.jobs, [jobId]: { ...p, jp: 300, jpTotal: Math.max(300, Math.min(p.jpTotal, 399)) } } };
+  const [lv3, lv4] = [rules.jobLevelJp[1], rules.jobLevelJp[2]];
+  const u = { ...u0, jobId, slots: { ...u0.slots, secondary: u0.slots.secondary === jobId ? null : u0.slots.secondary }, jobs: { ...u0.jobs, [jobId]: { ...p, jp: 300, jpTotal: Math.max(lv3, Math.min(p.jpTotal, lv4 - 1)) } } };
   const start = P.replaceUnit(roster, u);
   if (P.jobLevel(u, jobId, rules) !== 3) throw new Error('受動的なアビリティの場面のジョブのレベルが想定と違います');
   const learned = P.setPassive(P.learnAbility(u, jobId, 'counter', catalog, rules), 'reaction', 'counter', catalog);
@@ -2752,6 +2799,65 @@ function jobDrills(core, base) {
     };
   };
   const enemySword = actionBase.units.find((u) => u.id === 'e-warrior-1').equipment.find((e) => e.slot === 'weapon');
+  // 魔法のジョブ（PR C）: ゴード → 魔法剣士（戦士 Lv 3・魔道士 Lv 3）、フェン → 時魔道士（魔道士 Lv 2）、ノノ → 召喚士（魔道士 Lv 3・時魔道士 Lv 3）
+  const lv3 = rules.jobLevelJp[1];
+  let magicRoster = withJp(withJp(jobsRoster, 'gord', 'mage', lv3), 'nono', 'mage', lv3);
+  magicRoster = withJp(withJp(magicRoster, 'nono', 'timeMage', lv3), 'fen', 'mage', lv3);
+  magicRoster = learned(learned(learned(magicRoster, 'gord', 'magicKnight', ['fireBlade']), 'fen', 'timeMage', ['quicken']), 'nono', 'summoner', ['fireSpirit']);
+  if (P.validateRoster(magicRoster, catalog, rules).length > 0) throw new Error(`魔法のジョブの場面の部隊が正しくありません ${JSON.stringify(P.validateRoster(magicRoster, catalog, rules))}`);
+  const magicBase = core.start(magicRoster, 'easy', SEED + 10).state;
+  const magicScene = (unitId, patch, abilityId, targetId, action, previewIncludes, extra = {}) => {
+    const state = drillState(magicBase, unitId, patch);
+    checkFree(state, `「${abilityId}」の場面`);
+    return {
+      unitId,
+      abilityId,
+      targetId,
+      previewIncludes,
+      ...extra,
+      start: { state, events: [{ type: 'turnStarted', unitId, turnNumber: 1 }] },
+      expected: core.battle.applyAction(state, action).state,
+    };
+  };
+  const spells = [
+    magicScene(
+      'fen',
+      { fen: { x: 4, z: 8 }, kiri: { x: 5, z: 8 } },
+      'quicken',
+      'kiri',
+      { type: 'cast', spellId: 'quicken', target: { kind: 'unit', unitId: 'kiri' } },
+      [t.abilities.quicken],
+    ),
+    magicScene(
+      'nono',
+      { nono: { x: 4, z: 8 }, 'e-warrior-1': { x: 4, z: 5 } },
+      'fireSpirit',
+      'e-warrior-1',
+      { type: 'cast', spellId: 'fireSpirit', target: { kind: 'tile', x: 4, z: 5 } },
+      [t.spellPreview.affects.enemies],
+      { tile: true, markKind: 'spellAreaEnemies' },
+    ),
+    magicScene(
+      'gord',
+      { gord: { x: 4, z: 7, facing: 'north' }, 'e-warrior-1': { x: 4, z: 6, facing: 'north' } },
+      'fireBlade',
+      'e-warrior-1',
+      { type: 'attack', targetId: 'e-warrior-1', abilityId: 'fireBlade' },
+      [t.abilities.fireBlade],
+    ),
+  ];
+  // 目印と膠着: 敵の戦士に状態変化を3つ付け、最後にダメージなどが起きたのを 21 手番前にした場面（膠着まで残り 10 手番）
+  const markerState = drillState(actionBase, 'gord', {
+    'e-warrior-1': {
+      statuses: [
+        { id: 'protect', turns: 2 },
+        { id: 'slow', turns: 2 },
+        { id: 'blind', turns: 2 },
+      ],
+    },
+  });
+  const stalemateTurns = core.data.rules.stalemate.turns;
+  const quietState = { ...markerState, turnNumber: 25, lastActivityTurn: 25 - 1 - (stalemateTurns - 10) };
   return {
     unlock: {
       roster: unlockRoster,
@@ -2761,6 +2867,14 @@ function jobDrills(core, base) {
       message: t.roster.unlockToast(t.unitNames.kiri, t.jobs.thief),
     },
     jobs: { roster: jobsRoster, changes, expected },
+    spells,
+    markers: {
+      unitId: 'gord',
+      targetId: 'e-warrior-1',
+      start: { state: quietState, events: [{ type: 'turnStarted', unitId: 'gord', turnNumber: 25 }] },
+      badges: [t.statusShort.protect, t.statusShort.slow, t.statusMore(1)],
+      stalemate: t.objectives.stalemateShort(10),
+    },
     actions: [
       scene('gord', 'breakWeapon', [t.preview.inflicts(t.statuses.attackDown)]),
       scene('touma', 'doubleStrike', [t.preview.hits(2)]),

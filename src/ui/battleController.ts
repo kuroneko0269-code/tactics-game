@@ -1083,6 +1083,8 @@ export function createBattleController(start: ActionResult, deps: BattleControll
   };
 
   syncKnockoutLabels();
+  // 途中の戦闘を再開した時などに、付いている状態変化の目印を出す
+  for (const u of state.units) labels.setStatuses(u.id, u.statuses.map((x) => x.id));
   void play(start.events).then(proceed);
 
   return {

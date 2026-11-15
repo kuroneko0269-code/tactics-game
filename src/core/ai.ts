@@ -530,8 +530,44 @@ function pendingTargets(state: BattleState, unit: UnitState, match: (s: UnitStat
  */
 export function chooseStatusSpell(state: BattleState, unit: UnitState, canMove: boolean, config: AiConfig): SpellPlan | undefined {
   const spells = unit.spells.filter(
-    (s) => s.effect === 'status' && s.areaRadius === 0 && s.inflicts && s.inflicts !== 'silence' && s.inflicts !== 'protect' && canCast(unit, s),
+    (s) => s.effect === 'status' && s.inflicts && s.inflicts !== 'silence' && s.inflicts !== 'protect' && canCast(unit, s),
   );
+  // 範囲に、敵だけ・味方だけに付けるもの（加速・減速。フェーズ2-6）: 付く相手が最も多い場所に（1体以上）
+  const area = spells.filter((s) => s.areaRadius > 0 && s.affects);
+  if (area.length > 0) {
+    const threat = threatMap(state, unit.team);
+    let best: { plan: SpellPlan; score: number[] } | undefined;
+    for (const spell of area) {
+      const status = spell.inflicts!;
+      for (const pos of candidatePositions(state, unit, canMove)) {
+        const reach = threat.get(keyOf(state, pos)) ?? 0;
+        if (reach > (config.sealMaxDanger ?? 0)) continue;
+        const self = { ...unit, x: pos.x, z: pos.z };
+        for (const center of spellRangeTiles(state.map, spell, pos)) {
+          const fresh = previewSpellAt(state, unit, spell, center, self).results.filter((r) => {
+            const u = r.unitId === unit.id ? self : state.units.find((x) => x.id === r.unitId)!;
+            return !hasStatus(u, status) && !statusBlocker(u, status) && !(spell.affects === 'allies' && isHealer(u));
+          }).length;
+          if (fresh === 0) continue;
+          const score = [-fresh, reach, pos.steps, tieBreak(state, pos.x, pos.z, center.x, center.z)];
+          if (!best || compareScores(score, best.score) < 0) {
+            best = { plan: { position: { x: pos.x, z: pos.z }, spellId: spell.id, target: { kind: 'tile', x: center.x, z: center.z } }, score };
+          }
+        }
+      }
+    }
+    if (best) return best.plan;
+  }
+  return chooseSingleStatusSpell(state, unit, canMove, config, spells.filter((s) => s.areaRadius === 0));
+}
+
+function chooseSingleStatusSpell(
+  state: BattleState,
+  unit: UnitState,
+  canMove: boolean,
+  config: AiConfig,
+  spells: readonly UnitState['spells'][number][],
+): SpellPlan | undefined {
   if (spells.length === 0) return undefined;
   const threat = threatMap(state, unit.team);
   let best: { plan: SpellPlan; score: number[] } | undefined;
@@ -733,9 +769,16 @@ export function chooseHealSpell(
   return best?.plan;
 }
 
-/** にらみ合い（どちらの軍もしばらく攻撃や魔法をしていない）か */
-export function isStalemate(state: BattleState, config: AiConfig): boolean {
-  return state.turnNumber - state.lastAggressionTurn >= config.advanceAfterIdleTurns;
+/**
+ * にらみ合い（どちらの軍もしばらく攻撃や魔法をしていない）か。
+ * team を渡すと、その陣営がしばらく相手を攻めていない時も含める（フェーズ2-6）。相手だけが攻め続け、こちらは回復でしのぐだけの
+ * 状態が続くと、決着がつかないため（例: 最後の魔道士が「単独で踏み込まない」まま待ち、治癒師が回復と瞑想で耐え続ける）
+ */
+export function isStalemate(state: BattleState, config: AiConfig, team?: Team): boolean {
+  if (state.turnNumber - state.lastAggressionTurn >= config.advanceAfterIdleTurns) return true;
+  if (team === undefined) return false;
+  const own = state.teamAggression?.[team] ?? state.lastAggressionTurn;
+  return state.turnNumber - own >= config.advanceAfterIdleTurns;
 }
 
 /** 治癒師として振る舞うか（主コマンドに回復魔法がある） */
@@ -788,7 +831,7 @@ export function chooseApproach(state: BattleState, unit: UnitState, config: AiCo
   // 治癒師と撃破の対象は前に出ない。ただし治癒師しか残っていなければ、攻撃に切り替えて前進する（フェーズ2-5）
   const attackMode = isHealer(unit) && onlyHealersLeft(state, unit);
   const healer = (isHealer(unit) && !attackMode) || isObjectiveTarget(state, unit);
-  const advance = stance === 'advance' || attackMode || (!healer && isStalemate(state, config));
+  const advance = stance === 'advance' || attackMode || (!healer && isStalemate(state, config, unit.team));
   const threat = advance ? undefined : threatMap(state, unit.team);
   const hereReach = threat?.get(keyOf(state, unit)) ?? 0;
   const reserved = reservedTiles(state, unit);

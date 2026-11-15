@@ -60,7 +60,7 @@ import type {
   UnitState,
   UnitStats,
 } from './battleTypes';
-import { attackableTargets, canReach, knockbackOutcome, previewAttack, strikeOf, sweepExtraTargets, weaponFits } from './combat';
+import { attackableTargets, canReach, counterStrike, knockbackOutcome, previewAttack, strikeOf, sweepExtraTargets, weaponFits } from './combat';
 import {
   addStatus,
   applyPassiveStats,
@@ -435,7 +435,7 @@ function applyActionInner(state: BattleState, action: BattleAction): ActionResul
       // 当たっても外れても、同じ量の経験値と JP（反撃を受けて倒れても入る）。巻き込んだ敵の中で最もレベルの高い相手で計算する
       next = grantProgress(next, unit.id, Math.max(target.level, ...extras.map((e) => e.level)), false, events);
       next = runStateEvents(next, events);
-      next = { ...next, turn: { ...turn, acted: true }, lastAggressionTurn: state.turnNumber };
+      next = { ...next, turn: { ...turn, acted: true }, lastAggressionTurn: state.turnNumber, teamAggression: aggressed(state, unit.team) };
       next = endIfDecided(next, events);
       // 反撃で手番のユニットが倒れたら、その手番はそこで終わる
       if (!next.winner && !isAlive(getUnit(next, unit.id))) next = beginNextTurn({ ...next, turn: null }, events);
@@ -454,7 +454,7 @@ function applyActionInner(state: BattleState, action: BattleAction): ActionResul
       // 詠唱のない業（時守。フェーズ2-6）は、その場で発動する
       if (spell.instant) {
         let next = updateUnit(state, unit.id, { mp, facing: casterFacing });
-        next = { ...next, turn: { ...turn, acted: true }, lastAggressionTurn: state.turnNumber };
+        next = { ...next, turn: { ...turn, acted: true }, lastAggressionTurn: state.turnNumber, ...harmfulCast(state, unit.team, spell) };
         next = resolveSpellAt(next, unit.id, spell, center, events);
         next = runStateEvents(next, events);
         next = endIfDecided(next, events);
@@ -467,7 +467,7 @@ function applyActionInner(state: BattleState, action: BattleAction): ActionResul
         facing: casterFacing,
         charging: { spellId: spell.id, target, progress: 0 },
       });
-      return { state: { ...next, turn: { ...turn, acted: true }, lastAggressionTurn: state.turnNumber }, events };
+      return { state: { ...next, turn: { ...turn, acted: true }, lastAggressionTurn: state.turnNumber, ...harmfulCast(state, unit.team, spell) }, events };
     }
 
     case 'endTurn': {
@@ -482,6 +482,18 @@ function applyActionInner(state: BattleState, action: BattleAction): ActionResul
       return { state: beginNextTurn(next, events), events };
     }
   }
+}
+
+/** 陣営 team が今の手番で攻めたことを記録した teamAggression */
+function aggressed(state: BattleState, team: Team): BattleState['teamAggression'] {
+  return { ...state.teamAggression, [team]: state.turnNumber };
+}
+
+/** 害のある魔法・技（ダメージ・不利な状態変化・時送り）を使った時だけ、陣営が攻めたことを記録する */
+function harmfulCast(state: BattleState, team: Team, spell: SpellDefinition): Partial<BattleState> {
+  const harmful =
+    spell.effect === 'damage' || spell.effect === 'delay' || (spell.effect === 'status' && state.rules.status[spell.inflicts!].harmful);
+  return harmful ? { teamAggression: aggressed(state, team) } : {};
 }
 
 /** 決着していれば勝った陣営を返す（手番数の条件は除く。scenario.ts の judgeOutcome） */
@@ -677,7 +689,7 @@ function resolveWeaponAttack(
       canReach(next.map, counterer.attack, counterer, self)
     ) {
       events.push({ type: 'reaction', unitId: targetId, abilityId: counterId });
-      next = resolveWeaponAttack(next, targetId, attackerId, undefined, true, events);
+      next = resolveWeaponAttack(next, targetId, attackerId, counterStrike(counterer), true, events);
     }
   }
   return next;

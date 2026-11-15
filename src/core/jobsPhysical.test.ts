@@ -228,3 +228,23 @@ describe('盗賊', () => {
     expect(r2.events.some((e) => e.type === 'fled')).toBe(false);
   });
 });
+
+describe('反撃の倍率（フェーズ2-6 のバランス調整）', () => {
+  it('反撃の倍率を指定すると、反撃のダメージはその割合になる（予測と実際が同じ）', () => {
+    const state = makeState({
+      heights: flat(3, 1),
+      units: [
+        { id: 'w', team: 'player', x: 0, z: 0, facing: 'east' },
+        { id: 'e', team: 'enemy', x: 1, z: 0, facing: 'west' },
+      ],
+    });
+    const withCounter = {
+      ...state,
+      units: state.units.map((u) => (u.id === 'e' ? { ...u, passives: [{ id: 'counter', slot: 'reaction' as const, effect: { kind: 'counter' as const, damagePercent: 75 } }] } : u)),
+    };
+    const p = previewAttack(withCounter, getUnit(withCounter, 'w'), getUnit(withCounter, 'e'));
+    expect(p.counter?.damage).toBe(15);
+    const r = findSeed(withCounter, { type: 'attack', targetId: 'e' }, (x) => x.events.filter((e) => e.type === 'attacked' && e.hit).length === 2);
+    expect(getUnit(r.state, 'w').hp).toBe(35);
+  });
+});

@@ -28,12 +28,12 @@ export const battleRules: BattleRules = {
     attackDown: { harmful: true, turns: 3, percent: 75 },
     /** 魔力低下: 魔力 -25%。3手番 */
     magicDown: { harmful: true, turns: 3, percent: 75 },
-    /** 素早さ低下: 素早さ -25%（最低 1）。3手番 */
-    speedDown: { harmful: true, turns: 3, percent: 75 },
+    /** 素早さ低下: 素早さ -35%（最低 1）。3手番 */
+    speedDown: { harmful: true, turns: 3, percent: 65 },
     /** 最大 HP 低下: 最大 HP -20%（今の HP は新しい最大まで下がる。消えても戻らない）。3手番 */
     maxHpDown: { harmful: true, turns: 3, percent: 80 },
-    /** 加速: 素早さ +50%（倍率 150%）。3手番 */
-    haste: { harmful: false, turns: 3, percent: 150 },
+    /** 加速: 素早さ +50%（倍率 150%）。4手番 */
+    haste: { harmful: false, turns: 4, percent: 150 },
     /** 目くらまし: 武器による攻撃の命中率 -30。3手番 */
     blind: { harmful: true, turns: 3, hitPenalty: 30 },
     /** 停止: 次の手番が何もできずに過ぎる（その後の CT は 0）。1手番 */

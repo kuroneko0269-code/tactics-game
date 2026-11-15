@@ -48,6 +48,15 @@ const MID_JP = Number(args['mid-jp'] ?? 600);
 const EQUIP_LEVEL = Number(args['equip-level'] ?? 25);
 /** 買いそろえるまでの戦闘数を確かめる時の、乱数の通り数 */
 const CAMPAIGN_SEEDS = Number(args['campaign-seeds'] ?? 3);
+/** ジョブごとの強さの比較だけを見る（フェーズ2-6）。--jobs */
+const JOBS_ONLY = args.jobs === 'true';
+/** ジョブの比較で、1つの組み合わせ（2つのジョブ）を、陣営を入れ替えて何戦ずつ戦わせるか */
+const JOB_BATTLES = Number(args['job-battles'] ?? 6);
+/** ジョブの比較の部隊のレベルと装備の段階 */
+const JOB_LEVEL = Number(args['job-level'] ?? 10);
+const JOB_TIER = Number(args['job-tier'] ?? 2);
+/** ジョブが解放されるまでの戦闘数だけを見る（フェーズ2-6）。--unlocks */
+const UNLOCKS_ONLY = args.unlocks === 'true';
 
 /**
  * 見込み時間の目安（秒）。
@@ -63,7 +72,8 @@ async function main() {
   const { startBattle } = await load('/src/core/battle.ts');
   const { runAutoBattle } = await load('/src/core/ai.ts');
   const P = await load('/src/core/progression.ts');
-  const { buildSortie } = await load('/src/core/sortie.ts');
+  const sortieModule = await load('/src/core/sortie.ts');
+  const { buildSortie } = sortieModule;
   const { twinHillsBattle } = await load('/src/data/battles/twinHillsBattle.ts');
   const { ruinsDungeon } = await load('/src/data/battles/ruins/index.ts');
   const { jobs } = await load('/src/data/jobs.ts');
@@ -227,6 +237,12 @@ async function main() {
     mage: ['staff', 'robe'],
     healer: ['staff', 'robe'],
     timekeeper: ['sword', 'heavy'],
+    knight: ['sword', 'heavy'],
+    monk: ['light'],
+    thief: ['dagger', 'light'],
+    timeMage: ['staff', 'robe'],
+    summoner: ['staff', 'robe'],
+    magicKnight: ['sword', 'light'],
   };
   /** 部隊の全員に、段階 tierOf(ジョブ) の武器と防具（と装飾品）を持たせて付ける（今の装備は捨てる） */
   const withGear = (roster, tierOf, accessoryOf = () => null) => {
@@ -248,6 +264,159 @@ async function main() {
       return learnAll(P.gainJp(u, u.jobId, jp));
     }),
   });
+
+  // ---- ジョブごとの強さの比較（フェーズ2-6） ----
+  /**
+   * 同じレベル（JOB_LEVEL）・同じ段階の装備（JOB_TIER）で、5人のうち1人のジョブだけを入れ替えた部隊どうしを戦わせる。
+   * 部隊は 比べるジョブ・戦士・弓使い・魔道士・治癒師。比べるジョブは、近接で戦うジョブなら前列（戦士と並ぶ）、弓と杖のジョブなら後列（弓使いが前列に出る）。全員が今のジョブのアビリティをすべて覚え、受動的なアビリティを付けている。
+   * 2つのジョブの組ごとに、陣営（手前と奥）を入れ替えて JOB_BATTLES 戦ずつ戦い、ジョブごとの勝率を出す（目安は 40〜60%）
+   */
+  function jobsReport() {
+    const { interleaveTeams } = sortieModule;
+    const teamOf = (jobId) => {
+      const base = { secondary: null, reaction: null, support: null, movement: null };
+      const unit = (id, j) => {
+        let u = { id, jobId: j, level: 1, exp: 0, growth: { maxHp: 0, maxMp: 0, attack: 0, magic: 0, speed: 0 }, jobs: { [j]: { jp: 0, jpTotal: 0, learned: [] } }, slots: base, equipment: { weapon: null, armor: null, accessory: null } };
+        // 最初から習得済みのアビリティ
+        const job = P.findJob(catalog, j);
+        u = { ...u, jobs: { [j]: { jp: 0, jpTotal: 0, learned: (job.abilities ?? []).filter((a) => a.starter).map((a) => a.id) } } };
+        while (u.level < JOB_LEVEL) u = P.levelUp(u, catalog, rules);
+        return learnAll(P.gainJp(u, j, 3000));
+      };
+      // 比べるジョブは役割に合った位置に置く: 近接で戦うジョブは前列（戦士と並ぶ）、弓と杖のジョブは後列（弓使いが前列に出る）
+      const back = ['archer', 'mage', 'healer', 'timeMage', 'summoner'].includes(jobId);
+      const x = unit('x', jobId);
+      const order = back
+        ? [unit('w', 'warrior'), unit('a', 'archer'), x, unit('m', 'mage'), unit('h', 'healer')]
+        : [x, unit('w', 'warrior'), unit('a', 'archer'), unit('m', 'mage'), unit('h', 'healer')];
+      const roster = { units: order, gold: 0, items: [], nextItemSeq: 1 };
+      return withGear(roster, () => JOB_TIER);
+    };
+    const teams = Object.fromEntries(jobs.map((j) => [j.id, teamOf(j.id)]));
+    const depth = twinHillsBattle.map.heights.length;
+    /** 部隊 a を手前、部隊 b を奥に置いた1戦の定義 */
+    const setupOf = (a, b) => {
+      const near = buildSortie(twinHillsBattle, 'easy', a, catalog);
+      const far = buildSortie(twinHillsBattle, 'easy', b, catalog);
+      const players = near.units.filter((u) => u.team === 'player');
+      const enemies = far.units
+        .filter((u) => u.team === 'player')
+        .map((u) => ({ ...u, id: `b-${u.id}`, team: 'enemy', z: depth - 1 - u.z, facing: 'south' }));
+      return { ...near, units: interleaveTeams(players, enemies) };
+    };
+    const wins = Object.fromEntries(jobs.map((j) => [j.id, 0]));
+    const games = Object.fromEntries(jobs.map((j) => [j.id, 0]));
+    const turns = Object.fromEntries(jobs.map((j) => [j.id, []]));
+    let undecided = 0;
+    const pairs = [];
+    for (let i = 0; i < jobs.length; i++) for (let k = i + 1; k < jobs.length; k++) pairs.push([jobs[i].id, jobs[k].id]);
+    const head = {};
+    const only = args['job-pair']?.split(',');
+    for (const [x, y] of pairs) {
+      if (only && !(only.includes(x) && only.includes(y))) continue;
+      for (let n = 0; n < JOB_BATTLES * 2; n++) {
+        const [near, far] = n % 2 === 0 ? [x, y] : [y, x];
+        const start = startBattle(setupOf(teams[near], teams[far]), jobs, battleRules, 7000 + n, spells, strikes, passives).state;
+        const { state } = runAutoBattle(start, 2000, { player: aiConfig, enemy: aiConfig });
+        if (!state.winner) {
+          undecided++;
+          console.log(`  （未決着: 手前 ${near} / 奥 ${far}、シード値 ${7000 + n}、${state.turnNumber} 手番）`);
+          if (args['job-trace'] === 'true') {
+            const { events } = runAutoBattle(start, 2000, { player: aiConfig, enemy: aiConfig });
+            console.log(JSON.stringify(state.units.map((u) => [u.id, u.jobId, u.x, u.z, u.hp, u.mp, u.retired, u.statuses.map((x) => x.id)])));
+            console.log(events.slice(-40).map((e) => [e.type, e.unitId ?? e.casterId ?? e.attackerId ?? '', e.targetId ?? '', e.damage ?? e.amount ?? ''].join(':')).join(' '));
+          }
+        }
+        const winner = state.winner === 'player' ? near : state.winner === 'enemy' ? far : null;
+        for (const j of [x, y]) {
+          games[j]++;
+          turns[j].push(state.turnNumber);
+        }
+        if (winner) {
+          wins[winner]++;
+          head[`${winner}>${winner === x ? y : x}`] = (head[`${winner}>${winner === x ? y : x}`] ?? 0) + 1;
+        }
+      }
+    }
+    console.log('');
+    console.log(
+      `■ ジョブごとの強さ（Lv ${JOB_LEVEL}・${JOB_TIER}段階目の装備。部隊は 比べるジョブ・戦士・弓使い・魔道士・治癒師（比べるジョブは、近接なら前列、弓と杖なら後列）。` +
+        `ジョブの組ごとに、陣営を入れ替えて ${JOB_BATTLES} 戦ずつ。目安は勝率 40〜60%）`,
+    );
+    const rows = jobs.map((j) => ({ id: j.id, rate: wins[j.id] / games[j.id] })).sort((a, b) => b.rate - a.rate);
+    for (const r of rows) {
+      const flag = r.rate > 0.6 ? '  ← 強い' : r.rate < 0.4 ? '  ← 弱い' : '';
+      console.log(`  ${r.id.padEnd(12)} 勝率 ${(r.rate * 100).toFixed(1).padStart(5)}%（${wins[r.id]} / ${games[r.id]} 戦）、手番数 平均 ${avg(turns[r.id]).toFixed(1)}${flag}`);
+    }
+    console.log(`  未決着 ${undecided}`);
+    if (args['job-detail'] === 'true') {
+      for (const [x, y] of pairs) console.log(`    ${x} vs ${y}: ${head[`${x}>${y}`] ?? 0} - ${head[`${y}>${x}`] ?? 0}`);
+    }
+  }
+
+  // ---- ジョブが解放されるまでの戦闘数（フェーズ2-6） ----
+  /**
+   * 最初の部隊から訓練戦（部隊の平均レベル以下で最も強い段階）を続けて戦い、新しいジョブが（部隊のだれかに）解放されるまでの戦闘数を数える。
+   * 解放されたジョブへは、次の決まりで転職する（解放を進めるための、ありそうな育て方）:
+   * - フェン: 魔道士 Lv 3 → 時魔道士（召喚士の条件）
+   * - ゴード: 戦士 Lv 3 → 魔道士（魔法剣士の条件）→ 魔道士 Lv 3 → 魔法剣士
+   * - キリ: 弓使い Lv 2 → 盗賊
+   * 戦闘の後に、覚えられるアビリティを覚え、「おまかせ」で装備する。CAMPAIGN_SEEDS 通りの乱数で
+   */
+  function unlocksReport() {
+    const targets = ['knight', 'monk', 'thief', 'timeMage', 'summoner', 'magicKnight'];
+    const plans = {
+      fen: [{ when: (u) => P.jobLevel(u, 'mage', rules) >= 3, to: 'timeMage' }, { when: (u) => P.jobLevel(u, 'timeMage', rules) >= 3, to: 'summoner' }],
+      gord: [{ when: (u) => P.jobLevel(u, 'warrior', rules) >= 3, to: 'mage' }, { when: (u) => P.jobLevel(u, 'mage', rules) >= 3, to: 'magicKnight' }],
+      kiri: [{ when: (u) => P.jobLevel(u, 'archer', rules) >= 2, to: 'thief' }],
+    };
+    console.log('');
+    console.log('■ ジョブが解放されるまでの戦闘数（訓練戦を続けて戦う。フェン → 時魔道士 → 召喚士、ゴード → 魔道士 → 魔法剣士、キリ → 盗賊 と転職する）');
+    const firsts = [];
+    const alls = [];
+    for (let seedRun = 0; seedRun < CAMPAIGN_SEEDS; seedRun++) {
+      let roster = initialRoster;
+      const unlockedAt = {};
+      for (let b = 1; b <= 60 && Object.keys(unlockedAt).length < targets.length; b++) {
+        const avgLevel = avg(roster.units.map((u) => u.level));
+        const tier = [...twinHillsBattle.tiers].reverse().find((t) => t.units[0].level <= avgLevel) ?? twinHillsBattle.tiers[0];
+        const { state } = play(20000 + seedRun * 100 + b, tier.id, roster);
+        roster = P.applyBattleResult(roster, state, catalog, rules).roster;
+        for (const j of targets) {
+          if (unlockedAt[j]) continue;
+          if (roster.units.some((u) => P.canTakeJob(u, P.findJob(catalog, j), rules, catalog))) unlockedAt[j] = b;
+        }
+        // 転職と習得
+        for (const u0 of roster.units) {
+          let u = u0;
+          for (const step of plans[u.id] ?? []) {
+            const job = P.findJob(catalog, step.to);
+            if (u.jobId !== step.to && step.when(u) && P.canTakeJob(u, job, rules, catalog) && !(u.jobs[step.to]?.jpTotal > 0)) {
+              roster = EQ.changeJobWithEquipment(roster, u.id, step.to, catalog, rules).roster;
+              roster = EQ.autoEquip(roster, u.id, catalog, E.autoEquipWeights);
+              u = P.findUnit(roster, u.id);
+            }
+          }
+          roster = P.replaceUnit(roster, learnAll(P.findUnit(roster, u.id)));
+        }
+      }
+      const first = Math.min(...Object.values(unlockedAt));
+      const all = Object.keys(unlockedAt).length === targets.length ? Math.max(...Object.values(unlockedAt)) : null;
+      firsts.push(first);
+      if (all !== null) alls.push(all);
+      console.log(`  乱数 ${seedRun + 1}: ${targets.map((j) => `${j} ${unlockedAt[j] ?? '-'}戦目`).join('、')}`);
+    }
+    console.log(`  最初のジョブが解放されるまで: 平均 ${avg(firsts).toFixed(1)}戦（${Math.min(...firsts)}〜${Math.max(...firsts)}）`);
+    console.log(
+      `  6つすべてが解放されるまで: ${alls.length > 0 ? `平均 ${avg(alls).toFixed(1)}戦（${Math.min(...alls)}〜${Math.max(...alls)}）` : '60戦では届かない'}`,
+    );
+  }
+
+  if (JOBS_ONLY || UNLOCKS_ONLY) {
+    if (JOBS_ONLY) jobsReport();
+    if (UNLOCKS_ONLY) unlocksReport();
+    return server.close();
+  }
 
   function equipmentReport() {
     const lv5 = levelTo(initialRoster, MID_LEVEL, MID_JP);
@@ -486,6 +655,8 @@ async function main() {
   if (TIERS_ONLY) return server.close();
   dungeonReport();
   equipmentReport();
+  jobsReport();
+  unlocksReport();
 
   // ---- 育成の速さ（続けて戦う） ----
   console.log('');

@@ -184,6 +184,12 @@ export interface AttackPreview {
   readonly stealItemId?: string;
 }
 
+/** 反撃の攻撃（倍率が 100% でなければ、その倍率の技として扱う。フェーズ2-6） */
+export function counterStrike(counterer: UnitState): StrikeDefinition | undefined {
+  const percent = passiveEffect(counterer, 'counter')?.damagePercent;
+  return percent === undefined || percent === 100 ? undefined : { id: 'counter', damagePercent: percent, hitBonus: 0 };
+}
+
 /**
  * 「かばう」（フェーズ2-6）: target の隣にいる、かばうを付けた味方（target 以外・攻撃側以外・立っている）。
  * target の HP が最大 HP の半分以下の時だけ。複数いれば並び順で先のユニット
@@ -328,7 +334,7 @@ export function previewAttack(
     const self: UnitState = { ...attacker, x: from.x, z: from.z, facing: attackerFacing, charging: null };
     const counterer: UnitState = { ...target, hp: after };
     if (canReach(state.map, counterer.attack, counterer, self)) {
-      const p = previewAttack(state, counterer, self, counterer, undefined, { counter: true });
+      const p = previewAttack(state, counterer, self, counterer, counterStrike(counterer), { counter: true });
       counter = { abilityId: counterId, hitPercent: p.hitPercent, damage: p.damage };
     }
   }

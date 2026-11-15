@@ -188,7 +188,11 @@ export type PassiveSlot = 'reaction' | 'support' | 'movement';
 /** 受動的なアビリティの効果。数値は src/data の定義に置く */
 export type PassiveEffect =
   /** 反撃: 隣接するマスから近接攻撃を受けて生き残った時、通常攻撃で反撃する（反撃に対する反撃は起きない） */
-  | { readonly kind: 'counter' }
+  | {
+      readonly kind: 'counter';
+      /** 反撃のダメージの倍率（%。通常攻撃に掛ける。フェーズ2-6 で追加。省くと 100） */
+      readonly damagePercent?: number;
+    }
   /** 身かわし: 正面と側面からの、武器による攻撃の命中率を下げる */
   | { readonly kind: 'evade'; readonly hitPenalty: number }
   /** 魔力の殻: 魔法で受けるダメージの倍率（%） */
@@ -836,6 +840,11 @@ export interface BattleState {
   readonly turnNumber: number;
   /** 最後に通常攻撃か魔法の指定があった手番（なければ 0）。AI がにらみ合いを見分けるため */
   readonly lastAggressionTurn: number;
+  /**
+   * 陣営ごとに、最後に相手へ攻撃か害のある魔法・技を使った手番（フェーズ2-6）。AI が「自分の側だけが攻めていない」を見分ける。
+   * 省いた状態（以前の途中の戦闘）は、lastAggressionTurn と同じとみなす
+   */
+  readonly teamAggression?: Readonly<Partial<Record<Team, number>>>;
   /** 勝敗条件・イベント・罠・予告済みの増援 */
   readonly scenario: ScenarioState;
   /**
