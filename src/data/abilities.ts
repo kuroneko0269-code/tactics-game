@@ -227,7 +227,66 @@ export const timeDelay: SpellDefinition = {
   castSpeed: 0,
 };
 
-/** 詠唱のある行動アビリティ（魔法と狙い撃ち）と、詠唱のない業（時守） */
+// ---- 格闘家（フェーズ2-6）。詠唱なし。沈黙の影響を受けない技 ----
+
+/** 気功: 自分か隣の味方の HP を回復する（攻撃力 × 100%）。詠唱なし */
+export const chakra: SpellDefinition = {
+  id: 'chakra',
+  kind: 'skill',
+  element: 'none',
+  effect: 'heal',
+  stat: 'attack',
+  instant: true,
+  targets: 'allyOrSelf',
+  power: 100,
+  mpCost: 4,
+  range: 1,
+  areaRadius: 0,
+  heightTolerance: 0,
+  castSpeed: 0,
+};
+
+/** 喝: 自分か隣の味方の状態変化をすべて解く。詠唱なし */
+export const shout: SpellDefinition = {
+  id: 'shout',
+  kind: 'skill',
+  element: 'none',
+  effect: 'cleanse',
+  instant: true,
+  targets: 'allyOrSelf',
+  power: 0,
+  mpCost: 2,
+  range: 1,
+  areaRadius: 0,
+  heightTolerance: 0,
+  castSpeed: 0,
+};
+
+/**
+ * 地走り: 正面の直線 3 マスに衝撃波（敵だけに、攻撃力 × 80% のダメージ）。隣り合うマスの高さの差が 1 を超えるマスで止まる。
+ * 必ず当たる。詠唱なし。狙うのは隣のマス（向き）
+ */
+export const earthWave: SpellDefinition = {
+  id: 'earthWave',
+  kind: 'skill',
+  element: 'none',
+  effect: 'damage',
+  stat: 'attack',
+  instant: true,
+  affects: 'enemies',
+  shape: 'line',
+  lineLength: 3,
+  lineMaxStep: 1,
+  power: 80,
+  mpCost: 4,
+  range: 1,
+  minRange: 1,
+  areaRadius: 0,
+  heightTolerance: 0,
+  castSpeed: 0,
+};
+
+/** 詠唱のある行動アビリティ（魔法と狙い撃ち）と、詠唱のない業（時守・格闘家） */
 export const spells: readonly SpellDefinition[] = [
   fire,
   wind,
@@ -242,6 +301,9 @@ export const spells: readonly SpellDefinition[] = [
   rewind,
   gateSwap,
   timeDelay,
+  chakra,
+  shout,
+  earthWave,
 ];
 
 /** 強打: 通常攻撃のダメージ 1.5 倍、命中率 -15。近接武器（剣・杖）が必要 */
@@ -286,5 +348,50 @@ export const sweep: StrikeDefinition = {
   sweep: true,
 };
 
+// ---- 騎士（フェーズ2-6）: 武器による攻撃（通常攻撃の 60%）で、当たると状態変化を付ける。剣が必要 ----
+const breakStrike = (id: string, inflicts: StrikeDefinition['inflicts']): StrikeDefinition => ({
+  id,
+  damagePercent: 60,
+  hitBonus: 0,
+  weapons: ['sword'],
+  inflicts,
+});
+/** 武器破壊: 攻撃力低下を付ける */
+export const breakWeapon = breakStrike('breakWeapon', 'attackDown');
+/** 鎧破壊: 最大 HP 低下を付ける */
+export const breakArmor = breakStrike('breakArmor', 'maxHpDown');
+/** 速度破壊: 素早さ低下を付ける */
+export const breakSpeed = breakStrike('breakSpeed', 'speedDown');
+/** 魔力破壊: 魔力低下を付ける */
+export const breakMagic = breakStrike('breakMagic', 'magicDown');
+
+// ---- 格闘家（フェーズ2-6）----
+/** 連撃: 素手の通常攻撃を2回（1回は通常攻撃の 60%。1回ごとに命中を判定する）。素手が必要 */
+export const doubleStrike: StrikeDefinition = { id: 'doubleStrike', damagePercent: 60, hitBonus: 0, weapons: ['unarmed'], hits: 2 };
+
+// ---- 盗賊（フェーズ2-6）----
+/** ゴールドを盗む: 成功すると、戦闘の後にゴールドが増える（ダメージなし）。成功率は向きで決まる */
+export const stealGold: StrikeDefinition = { id: 'stealGold', damagePercent: 0, hitBonus: 0, steal: 'gold' };
+/** 装備を盗む: 成功すると、敵の装備をひとつ奪う（武器 → 防具 → 装飾品の順。ボスの専用の装備は盗めない） */
+export const stealGear: StrikeDefinition = { id: 'stealGear', damagePercent: 0, hitBonus: 0, steal: 'item' };
+/** 目くらまし: 通常攻撃の 50% のダメージを与え、目くらましを付ける。短剣が必要 */
+export const blindStrike: StrikeDefinition = { id: 'blindStrike', damagePercent: 50, hitBonus: 0, weapons: ['dagger'], inflicts: 'blind' };
+/** 不意打ち: 背面から攻撃した時だけ、通常攻撃の 200%（それ以外は通常攻撃と同じ）。短剣が必要 */
+export const backstab: StrikeDefinition = { id: 'backstab', damagePercent: 100, backDamagePercent: 200, hitBonus: 0, weapons: ['dagger'] };
+
 /** すぐに出る技 */
-export const strikes: readonly StrikeDefinition[] = [powerStrike, knockback, slowArrow, sweep];
+export const strikes: readonly StrikeDefinition[] = [
+  powerStrike,
+  knockback,
+  slowArrow,
+  sweep,
+  breakWeapon,
+  breakArmor,
+  breakSpeed,
+  breakMagic,
+  doubleStrike,
+  stealGold,
+  stealGear,
+  blindStrike,
+  backstab,
+];

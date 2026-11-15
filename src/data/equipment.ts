@@ -163,6 +163,9 @@ export const starterEquipment: Readonly<Record<string, readonly string[]>> = {
   mage: ['staff-1', 'robe-1'],
   healer: ['staff-1', 'robe-1'],
   timekeeper: ['sword-1', 'heavy-1'],
+  knight: ['sword-1', 'heavy-1'],
+  monk: ['light-1'],
+  thief: ['dagger-1', 'light-1'],
 };
 
 /** 最初の所持金 */

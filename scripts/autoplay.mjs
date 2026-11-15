@@ -256,7 +256,7 @@ async function main() {
         );
         console.log(
           `  育成: 戦闘中のレベルアップの表示 ✔、結果の画面 ✔、編成のタブ ${r.tabs}回・習得 ${r.learned}回・ジョブチェンジ ${r.jobChanges}回・副コマンド ${r.subChanges}回、再び出撃 ✔、` +
-            `強打 ✔、突き飛ばし ${r.knockbacks}回、時守の業 ${r.timekeeper}回、反撃 ${r.counters}回、受動的なアビリティの習得と付け替え ${r.passives}回、読み込み直し ✔、はじめから ✔`,
+            `強打 ✔、突き飛ばし ${r.knockbacks}回、時守の業 ${r.timekeeper}回、ジョブの解放の知らせ ${r.unlocks}回・新しいジョブへの転職 ${r.newJobs}回・新しいジョブの行動 ${r.newJobActions}回、反撃 ${r.counters}回、受動的なアビリティの習得と付け替え ${r.passives}回、読み込み直し ✔、はじめから ✔`,
         );
         console.log(
           `  勝敗条件・イベント・罠: 配置の入れ替え ${r.swaps}回、罠の発動 ${r.traps}回、増援の出現 ${r.appeared}体、到達で勝利 ${r.reached}回`,
@@ -336,6 +336,9 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
     subChanges: 0,
     knockbacks: 0,
     timekeeper: 0,
+    unlocks: 0,
+    newJobs: 0,
+    newJobActions: 0,
     counters: 0,
     passives: 0,
     swaps: 0,
@@ -767,7 +770,9 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
       const spell = unit.spells.find((s) => s.id === id);
       const weapons = spell?.weapons ?? unit.strikes.find((s) => s.id === id)?.weapons;
       const usable =
-        (!weapons || weapons.includes(unit.weapon)) && (!spell || unit.mp >= spell.mpCost) && (spell?.effect !== 'revive' || downAlly);
+        (!weapons || (unit.weapon === null ? weapons.includes('unarmed') : weapons.includes(unit.weapon))) &&
+        (!spell || unit.mp >= spell.mpCost) &&
+        (spell?.effect !== 'revive' || downAlly);
       const disabled = await page.getByRole('button', { name: text.abilities[id], exact: true }).isDisabled();
       check(disabled === !usable, `「${text.abilities[id]}」のボタンの押せる・押せないが、武器や MP と合いません`);
     }
@@ -1215,9 +1220,15 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
     const got = [await row.getAttribute('data-exp'), await row.getAttribute('data-jp')].map(Number);
     check(got[0] === u.exp && got[1] === u.jp, `${u.unitId} の得た経験値と JP の合計が core の計算と違います（画面 ${got} / core ${[u.exp, u.jp]}）`);
   }
-  const levelUps = await page.locator('.report-ups .report-chip:not(.down)').count();
+  const levelUps = await page.locator('.report-ups .report-chip:not(.down):not(.unlock)').count();
   const expectedUps = plan.report.units.filter((u) => u.levelAfter > u.levelBefore).length;
   check(levelUps === expectedUps, `レベルが上がったユニットの数が違います（画面 ${levelUps} / core ${expectedUps}）`);
+  // 新しく就けるようになったジョブの札（フェーズ2-6）
+  const unlockChips = await page.locator('.report-ups .report-chip.unlock').count();
+  const expectedUnlocks = plan.afterBattle.units.flatMap((u) =>
+    core.progression.newlyUnlockedJobs(core.data.roster.units.find((x) => x.id === u.id), u, core.data.catalog, core.data.progression),
+  ).length;
+  check(unlockChips === expectedUnlocks, `新しく就けるジョブの札の数が違います（画面 ${unlockChips} / core ${expectedUnlocks}）`);
   const jobUps = await page.locator('.report-job-up:not([hidden])').count();
   const expectedJobUps = plan.report.units.filter((u) => u.jobLevelAfter > u.jobLevelBefore).length;
   check(jobUps === expectedJobUps, `ジョブのレベルが上がった表示の数が違います（画面 ${jobUps} / core ${expectedJobUps}）`);
@@ -1811,6 +1822,92 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   await pressButton(text.report.toBase);
   await waitFor('拠点', () => window.__tactics.screen() === 'base');
   stats.retreats++;
+  check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
+
+  // ---- ジョブの解放と、新しいジョブ（フェーズ2-6）----
+  // (1) 戦闘中に解放条件を満たした瞬間の知らせ: 弓使いの JP がジョブ Lv 2 の直前のキリが攻撃すると、「盗賊に就けるようになった」と出る
+  const jd = jobDrills(core, pd.expected);
+  await page.evaluate((r) => window.__tactics.setRoster(r), jd.unlock.roster);
+  await waitFor('拠点', () => window.__tactics.screen() === 'base');
+  await page.evaluate((r) => window.__tactics.load(r), jd.unlock.start);
+  await waitFor('解放の場面', (id) => window.__tactics.mode() === 'main' && window.__tactics.state().turn?.unitId === id, jd.unlock.unitId);
+  await waitForInput();
+  const sawUnlock = page
+    .waitForFunction((msg) => document.querySelector('.message-banner')?.textContent === msg, jd.unlock.message, { timeout: 30000, polling: 20 })
+    .then(() => true)
+    .catch(() => false);
+  await pressButton('攻撃');
+  await waitFor('攻撃対象を選ぶ', () => window.__tactics.mode() === 'targeting');
+  await tapUnit(jd.unlock.targetId);
+  await pressButton('確定');
+  check(await sawUnlock, `ジョブの解放の知らせ（${jd.unlock.message}）が出ませんでした`);
+  await screenshot('job-unlocked-toast');
+  stats.unlocks++;
+
+  // (2) 編成の画面: まだ就けないジョブは条件と達成の具合を出し、押すと条件の一覧。就けるようになったジョブに転職する
+  await page.evaluate((r) => window.__tactics.setRoster(r), jd.jobs.roster);
+  await waitFor('拠点', () => window.__tactics.screen() === 'base');
+  await pressButton('編成');
+  await waitFor('編成の画面', () => window.__tactics.screen() === 'roster');
+  await pickUnit('fen');
+  await openTab('job');
+  const lockedKnight = page.locator('.job-choice[data-job-id="knight"]');
+  check((await lockedKnight.getAttribute('data-unlocked')) === 'false', '条件を満たしていない騎士が、就けるジョブとして出ています');
+  const lockedJobText = await lockedKnight.textContent();
+  check(lockedJobText.includes(text.roster.unlockProgress(text.jobs.warrior, 2, 1)), `騎士の解放条件と達成の具合が出ていません（${lockedJobText}）`);
+  check((await page.locator('.job-choice[data-job-id="timekeeper"]').count()) === 0, 'トウマの専用ジョブが、ほかの人物の一覧に出ています');
+  await tapLocator(lockedKnight);
+  await waitFor('解放条件の欄', () => document.querySelector('.sheet[data-sheet="job"]') !== null);
+  await waitSheetStill();
+  const lockedSheetText = await page.locator('.sheet').textContent();
+  check(lockedSheetText.includes(text.roster.lockedTitle(text.jobs.knight)) && lockedSheetText.includes(text.roster.lockedNote), `解放条件の欄が違います（${lockedSheetText}）`);
+  check((await page.getByRole('button', { name: text.roster.becomeJob(text.jobs.knight) }).count()) === 0, 'まだ就けないジョブに「〇〇になる」が出ています');
+  await screenshot('roster-job-locked');
+  await closeSheet();
+  // トウマの一覧には、専用ジョブの札が付いた時守が出る
+  await pickUnit('touma');
+  await openTab('job');
+  check((await page.locator('.job-choice[data-job-id="timekeeper"]').getAttribute('data-exclusive')) === 'true', '時守に専用ジョブの札がありません');
+  await screenshot('roster-job-list');
+  for (const change of jd.jobs.changes) {
+    await pickUnit(change.unitId);
+    await viaTwoTaps('job', `.job-choice[data-job-id="${change.jobId}"]`, 'job');
+    await pressButton(text.roster.becomeJob(text.jobs[change.jobId]));
+    await waitFor('転職', ([u, j]) => window.__tactics.roster().units.find((x) => x.id === u).jobId === j, [change.unitId, change.jobId]);
+    stats.jobChanges++;
+    stats.newJobs++;
+  }
+  await sameRoster(jd.jobs.expected, '新しいジョブに転職した後');
+  await pressButton(text.roster.back);
+  await waitFor('拠点', () => window.__tactics.screen() === 'base');
+
+  // (3) 新しいジョブの代表的な行動を1つずつ（騎士の武器破壊・格闘家の連撃・盗賊の装備を盗む）。予測の文言と、結果が core の計算と同じか
+  for (const d of jd.actions) {
+    await page.evaluate((r) => window.__tactics.load(r), d.start);
+    await waitFor('新しいジョブの手番', (id) => window.__tactics.mode() === 'main' && window.__tactics.state().turn?.unitId === id, d.unitId);
+    await waitForInput();
+    const me = (await getState()).units.find((u) => u.id === d.unitId);
+    await openCommandOf(me, d.abilityId);
+    await pressButton(text.abilities[d.abilityId]);
+    await waitFor(`「${d.abilityId}」の相手を選ぶ`, (id) => {
+      const m = window.__tactics.modeDetail();
+      return m.kind === 'targeting' && m.abilityId === id;
+    }, d.abilityId);
+    await tapUnit(d.targetId);
+    const previewText = await page.locator('.preview').textContent();
+    for (const want of d.previewIncludes) check(previewText.includes(want), `「${d.abilityId}」の予測に「${want}」がありません（${previewText}）`);
+    check(!(await overlaps('.preview', '.actions')), `「${d.abilityId}」の予測が行動のボタンに重なっています`);
+    await screenshot(`newjob-${d.abilityId}`);
+    await pressButton('確定');
+    await waitFor(`「${d.abilityId}」の後`, () => !['busy', 'confirm'].includes(window.__tactics.mode()));
+    const pick = (st) =>
+      JSON.stringify([st.stolen ?? null, ...st.units.filter((u) => [d.unitId, d.targetId].includes(u.id)).map((u) => [u.id, u.hp, u.statuses, u.equipment.map((e) => e.id), u.stats.attack])]);
+    check(pick(await getState()) === pick(d.expected), `「${d.abilityId}」の結果が core の計算と違います（画面 ${pick(await getState())} / core ${pick(d.expected)}）`);
+    stats.newJobActions++;
+  }
+  // 撤退の後の部隊に戻して、拠点へ戻る（用意した場面の戦闘は、部隊に反映しない）
+  await page.evaluate((r) => window.__tactics.setRoster(r), retreated);
+  await waitFor('拠点', () => window.__tactics.screen() === 'base');
   check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
 
   // ---- 「はじめから」: 確認の後、最初の部隊に戻る（読み込み直しても最初のまま） ----
@@ -2585,6 +2682,97 @@ function passiveDrill(core, roster) {
   if (P.jobLevel(u, jobId, rules) !== 3) throw new Error('受動的なアビリティの場面のジョブのレベルが想定と違います');
   const learned = P.setPassive(P.learnAbility(u, jobId, 'counter', catalog, rules), 'reaction', 'counter', catalog);
   return { unitId, jobId, abilityId: 'counter', lockedId: 'heavyArmor', lockedLevel: 4, start, expected: P.replaceUnit(start, learned) };
+}
+
+/**
+ * ジョブの解放と新しいジョブの場面（フェーズ2-6）。base は受動的なアビリティの場面の後の部隊（ゴードは戦士 Lv 3）。
+ * - unlock: キリ（弓使い）の弓使いの JP の累計を、ジョブ Lv 2 の 10 手前にした部隊と、キリが敵を撃つ手番（撃つと Lv 2 になり、盗賊が解放される）
+ * - jobs: 編成の画面で転職する部隊（ゴードは戦士 Lv 3、キリは弓使い Lv 2）と、ゴード → 騎士 → 格闘家、キリ → 盗賊 に変えた後の部隊（core だけで計算）
+ * - actions: 騎士の武器破壊・格闘家の連撃・盗賊の装備を盗む を、敵の戦士の背後で行う場面と、core だけで計算した結果
+ */
+function jobDrills(core, base) {
+  const P = core.progression;
+  const E = core.equipment;
+  const S = core.shop;
+  const { catalog, progression: rules } = core.data;
+  const t = core.data.text;
+  const lv2 = rules.jobLevelJp[0];
+  const withJp = (roster, unitId, jobId, jpTotal) => {
+    const u = P.findUnit(roster, unitId);
+    const p = P.jobProgress(u, jobId);
+    return P.replaceUnit(roster, { ...u, jobs: { ...u.jobs, [jobId]: { ...p, jp: Math.min(p.jp, jpTotal), jpTotal } } });
+  };
+  // (1) 解放の知らせ
+  const unlockRoster = withJp(base, 'kiri', 'archer', lv2 - 10);
+  if (P.findUnit(unlockRoster, 'kiri').jobId !== 'archer') throw new Error('解放の場面: キリが弓使いではありません');
+  const unlockBase = core.start(unlockRoster, 'easy', SEED + 8).state;
+  const unlockState = drillState(unlockBase, 'kiri', {
+    kiri: { x: 4, z: 8, facing: 'north' },
+    'e-warrior-1': { x: 4, z: 4, facing: 'south' },
+  });
+  checkFree(unlockState, '解放の場面');
+  // (2) 編成の画面で転職
+  const jobsRoster = withJp(withJp(base, 'kiri', 'archer', lv2), 'gord', 'warrior', Math.max(rules.jobLevelJp[1], P.jobProgress(P.findUnit(base, 'gord'), 'warrior').jpTotal));
+  let expected = jobsRoster;
+  const changes = [
+    { unitId: 'gord', jobId: 'knight' },
+    { unitId: 'gord', jobId: 'monk' },
+    { unitId: 'kiri', jobId: 'thief' },
+  ];
+  for (const c of changes) expected = E.changeJobWithEquipment(expected, c.unitId, c.jobId, catalog, rules).roster;
+  // (3) 代表的な行動: それぞれのジョブで、その技を覚えた部隊を作る
+  const learned = (roster, unitId, jobId, abilities) => {
+    let r = E.changeJobWithEquipment(roster, unitId, jobId, catalog, rules).roster;
+    const u = P.findUnit(r, unitId);
+    const p = P.jobProgress(u, jobId);
+    r = P.replaceUnit(r, { ...u, jobs: { ...u.jobs, [jobId]: { ...p, jpTotal: Math.max(p.jpTotal, 1000), learned: [...new Set([...p.learned, ...abilities])] } } });
+    return r;
+  };
+  // トウマは、格闘家の解放条件（戦士 Lv 3）を満たした状態にする
+  const monkReady = withJp(jobsRoster, 'touma', 'warrior', rules.jobLevelJp[1]);
+  let actionRoster = learned(learned(learned(monkReady, 'gord', 'knight', ['breakWeapon']), 'touma', 'monk', ['doubleStrike']), 'kiri', 'thief', ['stealGear']);
+  // 盗賊に短剣を持たせる
+  const bought = S.addItems(actionRoster, ['dagger-1']);
+  actionRoster = E.equipItem(bought.roster, 'kiri', 'weapon', bought.added[0].uid, catalog);
+  if (P.validateRoster(actionRoster, catalog, rules).length > 0) throw new Error(`新しいジョブの場面の部隊が正しくありません ${JSON.stringify(P.validateRoster(actionRoster, catalog, rules))}`);
+  const actionBase = core.start(actionRoster, 'easy', SEED + 9).state;
+  const scene = (unitId, abilityId, previewIncludes) => {
+    const state = drillState(actionBase, unitId, {
+      [unitId]: { x: 4, z: 7, facing: 'north' },
+      'e-warrior-1': { x: 4, z: 6, facing: 'north' },
+    });
+    checkFree(state, `「${abilityId}」の場面`);
+    return {
+      unitId,
+      abilityId,
+      targetId: 'e-warrior-1',
+      previewIncludes,
+      start: { state, events: [{ type: 'turnStarted', unitId, turnNumber: 1 }] },
+      expected: core.battle.applyAction(state, { type: 'attack', targetId: 'e-warrior-1', abilityId }).state,
+    };
+  };
+  const enemySword = actionBase.units.find((u) => u.id === 'e-warrior-1').equipment.find((e) => e.slot === 'weapon');
+  return {
+    unlock: {
+      roster: unlockRoster,
+      unitId: 'kiri',
+      targetId: 'e-warrior-1',
+      start: { state: unlockState, events: [{ type: 'turnStarted', unitId: 'kiri', turnNumber: 1 }] },
+      message: t.roster.unlockToast(t.unitNames.kiri, t.jobs.thief),
+    },
+    jobs: { roster: jobsRoster, changes, expected },
+    actions: [
+      scene('gord', 'breakWeapon', [t.preview.inflicts(t.statuses.attackDown)]),
+      scene('touma', 'doubleStrike', [t.preview.hits(2)]),
+      scene('kiri', 'stealGear', [t.preview.stealPercent, t.preview.stealItem(t.equipment[enemySword.id].name)]),
+    ],
+  };
+}
+
+/** 場面で、2体が同じマスにいないことを確かめる */
+function checkFree(state, what) {
+  const spots = state.units.map((u) => `${u.x},${u.z}`);
+  if (new Set(spots).size !== spots.length) throw new Error(`${what}で、ユニットが同じマスにいます`);
 }
 
 /** ブラウザの中で実行する: 点 (x, y) とその周り 16px が、すべてキャンバス（ボタンなどに隠れていない）か */

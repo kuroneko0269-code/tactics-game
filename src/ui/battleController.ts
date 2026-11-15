@@ -244,9 +244,20 @@ export function createBattleController(start: ActionResult, deps: BattleControll
   };
 
   /** 攻撃の予測を、予測欄の表示の形にする（補正の内訳、押し出し、合計、反撃） */
-  const attackPreviewView = (title: string, attacker: UnitState, target: UnitState, p: AttackPreview): AttackPreviewView => {
+  const attackPreviewView = (title: string, attacker: UnitState, chosen: UnitState, p: AttackPreview): AttackPreviewView => {
     const extraRows: { label: string; value: string; className?: string }[] = [];
     const notes: string[] = [];
+    // かばう: 予測の数値は、代わりに受ける味方に対するもの（フェーズ2-6）
+    const target = p.coveredBy ? getUnit(state, p.coveredBy) : chosen;
+    if (p.coveredBy) notes.push(TEXT.preview.cover(unitName(target.id, target.jobId), abilityName(passiveIdOf(target, 'cover') ?? '')));
+    if (p.parryPenalty > 0) notes.push(TEXT.preview.parry(abilityName(passiveIdOf(target, 'parry') ?? ''), p.parryPenalty));
+    if (p.hits > 1) notes.push(TEXT.preview.hits(p.hits));
+    if (p.steal === 'gold') {
+      const rules = state.rules.steal;
+      extraRows.push({ label: '', value: TEXT.preview.stealGold((rules?.goldBase ?? 0) + (rules?.goldPerLevel ?? 0) * target.level) });
+    } else if (p.steal === 'item') {
+      extraRows.push({ label: '', value: p.stealItemId ? TEXT.preview.stealItem(TEXT.equipment[p.stealItemId]?.name ?? p.stealItemId) : TEXT.preview.stealNothing });
+    }
     if (p.focusBonus > 0) notes.push(TEXT.preview.focus(abilityName(passiveIdOf(attacker, 'weaponHitBonus') ?? ''), p.focusBonus));
     if (p.evadePenalty > 0) notes.push(TEXT.preview.evade(abilityName(passiveIdOf(target, 'evade') ?? ''), p.evadePenalty));
     if (p.protectPercent !== 100) notes.push(TEXT.preview.protect(p.protectPercent));
@@ -300,6 +311,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
       targetMaxHp: target.stats.maxHp,
       extraRows,
       notes,
+      ...(p.steal ? { steal: true } : {}),
     };
   };
 
@@ -669,6 +681,32 @@ export function createBattleController(start: ActionResult, deps: BattleControll
           if (isAlive(u)) labels.setHp(ev.unitId, u.hp, u.stats.maxHp);
           break;
         }
+        case 'stole': {
+          // 盗み（フェーズ2-6）
+          const u = getUnit(state, ev.targetId);
+          labels.popText(
+            ev.thiefId,
+            !ev.success
+              ? TEXT.stole.failed
+              : ev.kind === 'gold'
+                ? TEXT.stole.gold(ev.gold ?? 0)
+                : TEXT.stole.item(TEXT.equipment[ev.itemId ?? '']?.name ?? ev.itemId ?? ''),
+            ev.success ? 'reaction' : 'note',
+          );
+          labels.setHp(u.id, u.hp, u.stats.maxHp);
+          await view.wait(0.45);
+          break;
+        }
+        case 'fled':
+          // 逃げ足: 1マス離れる
+          await view.animateMove(ev.unitId, [ev.from, ev.to]);
+          showReserved();
+          break;
+        case 'statusCleared':
+          labels.popText(ev.unitId, TEXT.cleared, 'reaction');
+          labels.setStatuses(ev.unitId, statusesAfter(ev.unitId));
+          await view.wait(0.3);
+          break;
         case 'endured':
           // 踏みとどまる: HP 1 で耐えた
           labels.popText(ev.unitId, abilityName(ev.abilityId), 'reaction');
@@ -1008,7 +1046,8 @@ export function createBattleController(start: ActionResult, deps: BattleControll
           return setMode({ kind: 'spellConfirm', spellId: spell.id, target: { kind: 'unit', unitId: down.id } });
         }
         // ユニットのいるマスなら、ユニットを狙うかマスを狙うかを選ばせる
-        const there = unitAt(state, c.x, c.z);
+        // 詠唱のない業（地走りなど）は、その場で発動するのでマスを狙う
+        const there = spell.instant ? undefined : unitAt(state, c.x, c.z);
         if (there) return setMode({ kind: 'spellTargetKind', spellId: spell.id, x: c.x, z: c.z, unitId: there.id });
         return setMode({ kind: 'spellConfirm', spellId: spell.id, target: { kind: 'tile', x: c.x, z: c.z } });
       }

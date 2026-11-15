@@ -108,7 +108,7 @@ export const healer: JobDefinition = {
 export const timekeeper: JobDefinition = {
   id: 'timekeeper',
   eligibility: { kind: 'characters', characterIds: [characterIds.touma] },
-  stats: { maxHp: 64, attack: 10, speed: 7, move: 4, jump: 2, maxMp: 12, magic: 3 },
+  stats: { maxHp: 64, attack: 10, speed: 6, move: 4, jump: 2, maxMp: 12, magic: 3 },
   attack: { kind: 'melee', maxHeightDiff: 2 },
   weaponTypes: ['sword'],
   armorTypes: ['heavy'],
@@ -122,8 +122,80 @@ export const timekeeper: JobDefinition = {
     { id: 'endure', jpCost: 200, jobLevel: 3 },
     { id: 'timekeeperWisdom', jpCost: 180, jobLevel: 2 },
   ],
-  growth: { maxHp: 270, maxMp: 50, attack: 55, magic: 25, speed: 6 },
+  growth: { maxHp: 270, maxMp: 50, attack: 55, magic: 25, speed: 15 },
   unlock: [],
 };
 
-export const jobs: readonly JobDefinition[] = [warrior, archer, mage, healer, timekeeper];
+/**
+ * 騎士「破壊術」（フェーズ2-6。戦士 Lv 2 で解放）: 敵を弱らせる役。剣と鎧。
+ * 4つの破壊は武器による攻撃で、ダメージは通常攻撃より低く（60%）、当たると状態変化を付ける
+ */
+export const knight: JobDefinition = {
+  id: 'knight',
+  stats: { maxHp: 64, attack: 10, speed: 6, move: 3, jump: 2, maxMp: 0, magic: 0 },
+  attack: { kind: 'melee', maxHeightDiff: 2 },
+  weaponTypes: ['sword'],
+  armorTypes: ['heavy'],
+  abilities: [
+    { id: 'breakWeapon', jpCost: 100 },
+    { id: 'breakArmor', jpCost: 120 },
+    { id: 'breakMagic', jpCost: 120 },
+    { id: 'breakSpeed', jpCost: 150, jobLevel: 2 },
+  ],
+  passives: [
+    { id: 'cover', jpCost: 180, jobLevel: 2 },
+    { id: 'backGuard', jpCost: 220, jobLevel: 3 },
+  ],
+  growth: { maxHp: 300, maxMp: 30, attack: 55, magic: 15, speed: 4 },
+  unlock: [{ jobId: 'warrior', level: 2 }],
+};
+
+/**
+ * 格闘家「拳法」（フェーズ2-6。戦士 Lv 3 で解放）: 素手で戦い、自分で立て直せる役。武器は持てず、防具は軽装。
+ * 素手の時に攻撃力 +6（unarmedBonus）
+ */
+export const monk: JobDefinition = {
+  id: 'monk',
+  unarmedBonus: { attack: 6 },
+  stats: { maxHp: 60, attack: 8, speed: 6, move: 4, jump: 3, maxMp: 12, magic: 4 },
+  attack: { kind: 'melee', maxHeightDiff: 2 },
+  weaponTypes: [],
+  armorTypes: ['light'],
+  abilities: [
+    { id: 'doubleStrike', jpCost: 120 },
+    { id: 'chakra', jpCost: 100 },
+    { id: 'shout', jpCost: 100 },
+    { id: 'earthWave', jpCost: 150, jobLevel: 2 },
+  ],
+  passives: [
+    { id: 'parry', jpCost: 160, jobLevel: 2 },
+    { id: 'ironFist', jpCost: 200, jobLevel: 3 },
+  ],
+  growth: { maxHp: 280, maxMp: 40, attack: 60, magic: 20, speed: 6 },
+  unlock: [{ jobId: 'warrior', level: 3 }],
+};
+
+/**
+ * 盗賊「盗術」（フェーズ2-6。弓使い Lv 2 で解放）: 背面を取り、物を奪う役。短剣と軽装（短剣は素早さ +1）
+ */
+export const thief: JobDefinition = {
+  id: 'thief',
+  stats: { maxHp: 50, attack: 8, speed: 6, move: 4, jump: 3, maxMp: 0, magic: 0 },
+  attack: { kind: 'melee', maxHeightDiff: 2 },
+  weaponTypes: ['dagger'],
+  armorTypes: ['light'],
+  abilities: [
+    { id: 'stealGold', jpCost: 80 },
+    { id: 'blindStrike', jpCost: 100 },
+    { id: 'backstab', jpCost: 130 },
+    { id: 'stealGear', jpCost: 150, jobLevel: 2 },
+  ],
+  passives: [
+    { id: 'flee', jpCost: 150 },
+    { id: 'swiftFeet', jpCost: 250, jobLevel: 3 },
+  ],
+  growth: { maxHp: 240, maxMp: 30, attack: 55, magic: 20, speed: 8 },
+  unlock: [{ jobId: 'archer', level: 2 }],
+};
+
+export const jobs: readonly JobDefinition[] = [warrior, archer, mage, healer, timekeeper, knight, monk, thief];
