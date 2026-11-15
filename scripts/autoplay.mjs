@@ -2293,11 +2293,11 @@ async function storyRun(browser, baseUrl, name, core) {
       check(rts.join(',') === 'かいわ,しく', `ルビが出ていません（${rts.join(',')}）`);
       checkedRuby = true;
     }
-    if (!checkedBacklog && d.text.startsWith('教官「') === false && d.text.includes('椀を、もうひとつ')) {
+    if (!checkedBacklog && d.text.includes('椀が、ふたつに戻って')) {
       await press(text.dialogue.backlog);
       await until(() => document.querySelector('.sheet[data-sheet="backlog"]') !== null);
       const rows = await T(() => [...document.querySelectorAll('.backlog-row')].map((r) => r.textContent));
-      check(rows.length === 4 && rows[3].includes('椀を、もうひとつ'), `読み返しの一覧が違います（${rows.length}行）`);
+      check(rows.length === 8 && rows[7].includes('椀が、ふたつに戻って'), `読み返しの一覧が違います（${rows.length}行）`);
       await press(text.dialogue.close);
       checkedBacklog = true;
       // ここから早送り（台詞を待たずに進む）
