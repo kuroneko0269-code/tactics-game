@@ -58,4 +58,9 @@ export const battleRules: BattleRules = {
    * ゴールドは 20 + 10 × 相手のレベル
    */
   steal: { percent: { front: 30, side: 55, back: 80 }, goldBase: 20, goldPerLevel: 10 },
+  /**
+   * 膠着（フェーズ2-6）: 両軍を合わせて 30 手番のあいだ、ダメージ・回復・状態変化の付与が起きなければ、戦闘を終える
+   * （残っているユニットの HP の合計 ÷ 最大 HP の合計 が高い側の勝ち。同じならプレイヤー側の負け）。残り 10 手番から画面に出す
+   */
+  stalemate: { turns: 30, warnTurns: 10 },
 };

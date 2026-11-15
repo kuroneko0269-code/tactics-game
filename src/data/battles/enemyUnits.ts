@@ -1,5 +1,27 @@
 import type { EquipmentDefinition, GrowthValues, JobDefinition, UnitPlacement, UnitStats } from '../../core/battleTypes';
-import { bow1, bow2, bow3, heavy1, heavy2, heavy3, light1, light2, light3, robe1, robe2, robe3, staff1, staff2, staff3, sword1, sword2, sword3 } from '../equipment';
+import {
+  bow1,
+  bow2,
+  bow3,
+  dagger1,
+  dagger2,
+  dagger3,
+  heavy1,
+  heavy2,
+  heavy3,
+  light1,
+  light2,
+  light3,
+  robe1,
+  robe2,
+  robe3,
+  staff1,
+  staff2,
+  staff3,
+  sword1,
+  sword2,
+  sword3,
+} from '../equipment';
 
 /** ジョブと強さの段階ごとの、武器と防具の組（敵の装備に使う） */
 const KITS: Readonly<Record<string, readonly (readonly EquipmentDefinition[])[]>> = {
@@ -7,6 +29,14 @@ const KITS: Readonly<Record<string, readonly (readonly EquipmentDefinition[])[]>
   archer: [[bow1, light1], [bow2, light2], [bow3, light3]],
   mage: [[staff1, robe1], [staff2, robe2], [staff3, robe3]],
   healer: [[staff1, robe1], [staff2, robe2], [staff3, robe3]],
+  // フェーズ2-6
+  timekeeper: [[sword1, heavy1], [sword2, heavy2], [sword3, heavy3]],
+  knight: [[sword1, heavy1], [sword2, heavy2], [sword3, heavy3]],
+  monk: [[light1], [light2], [light3]],
+  thief: [[dagger1, light1], [dagger2, light2], [dagger3, light3]],
+  timeMage: [[staff1, robe1], [staff2, robe2], [staff3, robe3]],
+  summoner: [[staff1, robe1], [staff2, robe2], [staff3, robe3]],
+  magicKnight: [[sword1, light1], [sword2, light2], [sword3, light3]],
 };
 
 /** そのジョブの、tier 段階目（1〜3）の武器と防具 */

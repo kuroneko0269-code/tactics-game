@@ -150,10 +150,12 @@ export function statusBlocker(
 /** 詠唱中のユニットが受けるダメージの倍率（%）。詠唱中でない時と、装備で打ち消している時は 100 */
 export function chargingPercentOf(
   rules: BattleRules,
-  target: Pick<UnitState, 'charging'> & { readonly equipment?: readonly EquipmentDefinition[] },
+  target: Pick<UnitState, 'charging'> & { readonly equipment?: readonly EquipmentDefinition[]; readonly passives?: readonly PassiveDefinition[] },
 ): number {
   if (!target.charging) return 100;
   if (equipmentWithEffect(target, (e) => e.kind === 'steadyCasting')) return 100;
+  // 精霊の守り（受動的なアビリティ。フェーズ2-6）
+  if ((target.passives ?? []).some((p) => p.effect.kind === 'steadyCasting')) return 100;
   return rules.chargingDamagePercent;
 }
 
@@ -165,6 +167,8 @@ export function applyPassiveStats(stats: UnitStats, passives: readonly PassiveDe
     if (e.kind === 'maxHpPercent') result = { ...result, maxHp: Math.floor((result.maxHp * e.percent) / 100) };
     else if (e.kind === 'moveBonus') result = { ...result, move: result.move + e.amount };
     else if (e.kind === 'jumpBonus') result = { ...result, jump: result.jump + e.amount };
+    // 魔力の刃（フェーズ2-6）: 魔力の一部を攻撃力に足す
+    else if (e.kind === 'magicToAttack') result = { ...result, attack: result.attack + Math.floor((result.magic * e.percent) / 100) };
   }
   return result;
 }

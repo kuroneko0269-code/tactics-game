@@ -286,6 +286,7 @@ function withBestStrike(state: BattleState, unit: UnitState, plan: AttackPlan, c
   let best: { abilityId?: string; value: number } = { value: expected() };
   for (const strike of unit.strikes) {
     if (!weaponFits(strike.weapons, unit.weapon)) continue;
+    if ((strike.mpCost ?? 0) > unit.mp) continue;
     const value = expected(strike);
     if (value > best.value) best = { abilityId: strike.id, value };
   }
@@ -511,6 +512,87 @@ export function chooseRewind(state: BattleState, unit: UnitState, canMove: boole
   return best?.plan;
 }
 
+/** 味方の詠唱中の魔法のうち、ユニットを狙っていて、効果の種類が合うものが向かっている相手 */
+function pendingTargets(state: BattleState, unit: UnitState, match: (s: UnitState['spells'][number]) => boolean): Set<string> {
+  const pending = new Set<string>();
+  for (const u of state.units) {
+    if (u.team !== unit.team || !u.charging || u.charging.target.kind !== 'unit') continue;
+    const sp = u.spells.find((x) => x.id === u.charging!.spellId);
+    if (sp && match(sp)) pending.add(u.charging.target.unitId);
+  }
+  return pending;
+}
+
+/**
+ * 加速・減速・停止のような、1体に状態変化を付ける魔法（守り・沈黙を除く。フェーズ2-6）を使う相手を選ぶ。
+ * 不利な状態変化は、まだ付いていない敵に（攻撃力と魔力の高い相手を優先）。有利な状態変化（加速）は、まだ付いていない味方に
+ * （治癒師以外 → 攻撃力の高い味方を優先）。相手の攻撃を届かせられる相手が sealMaxDanger 体以下のマスからだけ使う
+ */
+export function chooseStatusSpell(state: BattleState, unit: UnitState, canMove: boolean, config: AiConfig): SpellPlan | undefined {
+  const spells = unit.spells.filter(
+    (s) => s.effect === 'status' && s.areaRadius === 0 && s.inflicts && s.inflicts !== 'silence' && s.inflicts !== 'protect' && canCast(unit, s),
+  );
+  if (spells.length === 0) return undefined;
+  const threat = threatMap(state, unit.team);
+  let best: { plan: SpellPlan; score: number[] } | undefined;
+  for (const spell of spells) {
+    const status = spell.inflicts!;
+    const harmful = state.rules.status[status].harmful;
+    const pending = pendingTargets(state, unit, (s) => s.inflicts === status);
+    const targets = state.units.filter(
+      (u) =>
+        isAlive(u) &&
+        (harmful ? u.team !== unit.team : u.team === unit.team && !isHealer(u)) &&
+        !hasStatus(u, status) &&
+        !statusBlocker(u, status) &&
+        !pending.has(u.id),
+    );
+    for (const pos of candidatePositions(state, unit, canMove)) {
+      const reach = threat.get(keyOf(state, pos)) ?? 0;
+      if (reach > (config.sealMaxDanger ?? 0)) continue;
+      for (const t of targets) {
+        const d = manhattan(pos, t);
+        if (d < (spell.minRange ?? 0) || d > spell.range) continue;
+        const score = [reach, -(t.stats.attack + t.stats.magic), pos.steps, tieBreak(state, pos.x, pos.z, t.x, t.z)];
+        if (!best || compareScores(score, best.score) < 0) {
+          best = { plan: { position: { x: pos.x, z: pos.z }, spellId: spell.id, target: { kind: 'unit', unitId: t.id } }, score };
+        }
+      }
+    }
+  }
+  return best?.plan;
+}
+
+/**
+ * 早送り（味方の CT を満たす魔法。フェーズ2-6）を使う相手を選ぶ。治癒師以外の味方（自分以外）で、詠唱中でなく、
+ * CT が半分以下の相手。攻撃力の高い味方 → 攻撃の届かない位置 の順
+ */
+export function chooseQuicken(state: BattleState, unit: UnitState, canMove: boolean): SpellPlan | undefined {
+  const spells = unit.spells.filter((s) => s.effect === 'quicken' && canCast(unit, s));
+  if (spells.length === 0) return undefined;
+  const pending = pendingTargets(state, unit, (s) => s.effect === 'quicken');
+  const threat = threatMap(state, unit.team);
+  const half = state.rules.ctThreshold / 2;
+  const targets = state.units.filter(
+    (u) => u.id !== unit.id && u.team === unit.team && isAlive(u) && !isHealer(u) && !u.charging && u.ct <= half && !pending.has(u.id),
+  );
+  let best: { plan: SpellPlan; score: number[] } | undefined;
+  for (const spell of spells) {
+    for (const pos of candidatePositions(state, unit, canMove)) {
+      const reach = threat.get(keyOf(state, pos)) ?? 0;
+      for (const t of targets) {
+        const d = manhattan(pos, t);
+        if (d < (spell.minRange ?? 0) || d > spell.range) continue;
+        const score = [reach > 0 ? 1 : 0, -t.stats.attack, pos.steps, tieBreak(state, pos.x, pos.z, t.x, t.z)];
+        if (!best || compareScores(score, best.score) < 0) {
+          best = { plan: { position: { x: pos.x, z: pos.z }, spellId: spell.id, target: { kind: 'unit', unitId: t.id } }, score };
+        }
+      }
+    }
+  }
+  return best?.plan;
+}
+
 /** 回復か蘇生の魔法を持つ相手か（蘇生役は倒す価値が高い。フェーズ2-5）。格闘家の気功のような技は数えない */
 const isSupportCaster = (u: UnitState) => u.spells.some((s) => s.kind === 'magic' && (s.effect === 'heal' || s.effect === 'revive'));
 
@@ -659,8 +741,10 @@ export function isStalemate(state: BattleState, config: AiConfig): boolean {
 /** 治癒師として振る舞うか（主コマンドに回復魔法がある） */
 const isHealer = (unit: UnitState) => {
   const main = unit.commands[0];
-  // 回復の魔法だけを数える（格闘家の気功のような技では、治癒師として振る舞わない。フェーズ2-6）
-  return unit.spells.some((s) => s.kind === 'magic' && s.effect === 'heal' && (!main || main.abilityIds.includes(s.id)));
+  // 回復の魔法だけを数える（格闘家の気功のような技、召喚士の癒しの精霊では、治癒師として振る舞わない。フェーズ2-6）
+  return unit.spells.some(
+    (s) => s.kind === 'magic' && s.effect === 'heal' && s.affects === undefined && (!main || main.abilityIds.includes(s.id)),
+  );
 };
 
 /** unit の陣営で、生きているのが治癒師だけか */
@@ -775,12 +859,17 @@ function choosePlan(state: BattleState, unit: UnitState, canMove: boolean, confi
   if (seal && (isChargingMagic(state, seal) || isHealerTarget(state, seal))) return { kind: 'cast', ...seal };
   const spell = damageSpellChoice(state, unit, canMove);
   if (spell && spell.net >= 2) return { kind: 'cast', ...spell.plan };
+  // 時魔道士（フェーズ2-6）: 加速・減速・停止、早送り
+  const status = chooseStatusSpell(state, unit, canMove, config);
+  if (status) return { kind: 'cast', ...status };
+  const quicken = chooseQuicken(state, unit, canMove);
+  if (quicken) return { kind: 'cast', ...quicken };
   if (seal) return { kind: 'cast', ...seal };
   if (spell) return { kind: 'cast', ...spell.plan };
   const rewind = chooseRewind(state, unit, canMove, config);
   if (rewind) return { kind: 'cast', ...rewind };
-  // 格闘家（フェーズ2-6）: 自分か隣の味方が弱っていれば気功で回復し、不利な状態変化が重なっていれば喝で解く
-  if (unit.spells.some((s) => s.instant && s.effect === 'heal')) {
+  // 格闘家・召喚士など（フェーズ2-6）: 自分か味方が弱っていれば回復し（気功・癒しの精霊）、不利な状態変化が重なっていれば喝で解く
+  if (unit.spells.some((s) => s.effect === 'heal')) {
     const heal = chooseHealSpell(state, unit, canMove, config);
     if (heal) return { kind: 'cast', ...heal };
   }

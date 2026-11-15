@@ -1,3 +1,4 @@
+import type { UnitState } from '../../core/battleTypes';
 import { describe, expect, it } from 'vitest';
 import { runAutoBattle } from '../../core/ai';
 import { startBattle } from '../../core/battle';
@@ -76,11 +77,17 @@ describe('ふたつの丘の戦場と最初の部隊', () => {
     expect(normal!.every((u) => u.level === 8)).toBe(true);
     expect(hard!.every((u) => u.level === 18)).toBe(true);
     const warrior = (list: typeof easy) => list!.find((u) => u.id === 'e-warrior-1')!;
-    expect(warrior(normal).stats.maxHp).toBeGreaterThan(warrior(easy).stats.maxHp);
-    expect(warrior(hard).stats.attack).toBeGreaterThan(warrior(normal).stats.attack);
+    expect(warrior(hard).stats.attack).toBeGreaterThan(warrior(easy).stats.attack);
+    expect(warrior(hard).stats.maxHp).toBeGreaterThan(warrior(easy).stats.maxHp);
     expect(warrior(easy).strikes).toEqual([]);
-    expect(warrior(normal).strikes.map((s) => s.id)).toEqual(['powerStrike', 'knockback']);
-    expect(hard!.find((u) => u.jobId === 'mage')!.spells.map((s) => s.id)).toContain('thunder');
+    expect(warrior(hard).strikes.map((s) => s.id)).toEqual(['powerStrike', 'knockback']);
+    // フェーズ2-6: 「ふつう」「むずかしい」には新しいジョブを混ぜる（「やさしい」は今までの編成のまま）
+    const jobsOf = (list: typeof easy) => list!.map((u) => u.jobId).sort();
+    expect(jobsOf(easy)).toEqual(['archer', 'healer', 'mage', 'warrior', 'warrior']);
+    expect(jobsOf(normal)).toEqual(['healer', 'knight', 'mage', 'magicKnight', 'thief']);
+    expect(jobsOf(hard)).toEqual(['healer', 'monk', 'summoner', 'timeMage', 'warrior']);
+    expect(normal!.find((u) => u.jobId === 'magicKnight')!.strikes.map((s) => s.id)).toEqual(['fireBlade', 'iceBlade']);
+    expect(hard!.find((u) => u.jobId === 'summoner')!.spells.map((s) => s.id)).toContain('healSpirit');
     // 「やさしい」には受動的なアビリティを付けない。段階が上がるほど多い
     const passiveCount = (list: typeof easy) => list!.reduce((n, u) => n + u.passives.length, 0);
     expect(passiveCount(easy)).toBe(0);
@@ -90,9 +97,17 @@ describe('ふたつの丘の戦場と最初の部隊', () => {
     // 「ふつう」は2段階目の武器と防具、「むずかしい」は3段階目の武器と防具と装飾品。能力値の補正は使わない
     const gear = (list: typeof easy) => list!.map((u) => u.equipment.map((e) => e.id));
     expect(gear(easy)).toEqual([['sword-1'], ['sword-1'], ['bow-1'], ['staff-1'], []]);
-    expect(gear(normal)!.every((ids) => ids.length === 2 && ids.every((id) => id.endsWith('-2')))).toBe(true);
-    expect(gear(hard)!.every((ids) => ids.length === 3 && ids.slice(0, 2).every((id) => id.endsWith('-3')))).toBe(true);
-    expect([...easy!, ...normal!, ...hard!].every((u) => Object.keys(u.statBonus).every((k) => u.equipment.some((e) => k in e.stats)))).toBe(true);
+    // 格闘家は武器を持たない（防具だけ）
+    const weaponArmor = (u: UnitState) => u.equipment.filter((e) => e.slot !== 'accessory').map((e) => e.id);
+    expect(normal!.every((u) => weaponArmor(u).length === (u.jobId === 'monk' ? 1 : 2) && weaponArmor(u).every((id) => id.endsWith('-2')))).toBe(true);
+    expect(hard!.every((u) => weaponArmor(u).length === (u.jobId === 'monk' ? 1 : 2) && weaponArmor(u).every((id) => id.endsWith('-3')))).toBe(true);
+    expect(hard!.every((u) => u.equipment.some((e) => e.slot === 'accessory'))).toBe(true);
+    // 能力値の補正は装備の分だけ（格闘家の素手の補正を除く）
+    expect(
+      [...easy!, ...normal!, ...hard!]
+        .filter((u) => u.jobId !== 'monk')
+        .every((u) => Object.keys(u.statBonus).every((k) => u.equipment.some((e) => k in e.stats))),
+    ).toBe(true);
     // 「やさしい」の敵の治癒師は杖を持たないので、素手（武器の種類なし）で、魔力が低い
     const healer = easy!.find((u) => u.jobId === 'healer')!;
     expect(healer.weapon).toBeNull();
@@ -144,12 +159,13 @@ describe('ふたつの丘の戦場と最初の部隊', () => {
     expect(a.events).toEqual(b.events);
   }, 30_000);
 
-  it('敵 AI の封じ: 「ふつう」以上で、魔法を使う相手（育てていない部隊）がいる戦闘では、1戦に平均 0.5 回以上使う', () => {
+  it('敵 AI の封じ: 「ふつう」（封じを使う魔道士がいる）で、魔法を使う相手（育てていない部隊）がいる戦闘では、1戦に平均 0.5 回以上使う', () => {
     // 敵 AI の動きを確かめるので、味方はフェーズ2-5 までと同じ構成（トウマも戦士）にする。
     // 時守のトウマ（素早さ 7）だと、育てていない部隊は「むずかしい」に早く負けて、封じを使う前に決着することが多いため
     const touma = changeJob(initialRoster.units[0]!, 'warrior', catalog, progressionRules);
     const warriors: Roster = { ...initialRoster, units: [touma, ...initialRoster.units.slice(1)] };
-    for (const tierId of ['normal', 'hard']) {
+    // フェーズ2-6 で「むずかしい」の魔道士は召喚士に替わったので、「ふつう」だけを数える
+    for (const tierId of ['normal']) {
       let seals = 0;
       const n = 12;
       for (let seed = 1; seed <= n; seed++) {

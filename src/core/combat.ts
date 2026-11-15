@@ -300,7 +300,9 @@ export function previewAttack(
   // 背水: 背面からのダメージの補正を受けない。不意打ち: 背面からの時だけ倍率が上がる
   const damageSide = side === 'back' && passiveEffect(target, 'backGuard') ? 'side' : side;
   const abilityPercent = side === 'back' && strike?.backDamagePercent !== undefined ? strike.backDamagePercent : (strike?.damagePercent ?? 100);
-  const raw = computeDamage(rules, attacker.stats.attack, damageSide, heightPercent, 100, abilityPercent);
+  // 魔法剣（フェーズ2-6）: ダメージの元は攻撃力と魔力の合計
+  const power = strike?.magicBlend ? attacker.stats.attack + attacker.stats.magic : attacker.stats.attack;
+  const raw = computeDamage(rules, power, damageSide, heightPercent, 100, abilityPercent);
   // 「踏みとどまる」: HP が 0 になるダメージなら、HP 1 で耐える（1戦に1度）
   const full = damageTaken(rules, target, raw);
   const hitResult = enduredDamage(target, full);

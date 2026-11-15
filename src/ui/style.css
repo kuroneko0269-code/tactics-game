@@ -2752,3 +2752,20 @@ body {
   border-color: #7fd6ff;
   color: #d9f3ff;
 }
+
+/* 氷と土（フェーズ2-6） */
+.element-ice {
+  --element: #9fe8ff;
+}
+
+.element-earth {
+  --element: #b08a4a;
+}
+
+.element-text-ice {
+  color: #c9f3ff;
+}
+
+.element-text-earth {
+  color: #e2c48c;
+}

@@ -71,6 +71,8 @@ export const mage: JobDefinition = {
     { id: 'fire', jpCost: 120 },
     { id: 'thunder', jpCost: 170 },
     { id: 'seal', jpCost: 140 },
+    { id: 'ice', jpCost: 130 },
+    { id: 'earth', jpCost: 150, jobLevel: 2 },
   ],
   passives: [
     { id: 'magicShell', jpCost: 180, jobLevel: 2 },
@@ -198,4 +200,80 @@ export const thief: JobDefinition = {
   unlock: [{ jobId: 'archer', level: 2 }],
 };
 
-export const jobs: readonly JobDefinition[] = [warrior, archer, mage, healer, timekeeper, knight, monk, thief];
+/** 時魔道士「時魔法」（フェーズ2-6。魔道士 Lv 2 で解放）: 行動順を操作する。杖とローブ */
+export const timeMage: JobDefinition = {
+  id: 'timeMage',
+  stats: { maxHp: 38, attack: 6, speed: 6, move: 3, jump: 2, maxMp: 34, magic: 9 },
+  attack: { kind: 'melee', maxHeightDiff: 2 },
+  weaponTypes: ['staff'],
+  armorTypes: ['robe'],
+  abilities: [
+    { id: 'haste', jpCost: 0, starter: true },
+    { id: 'decelerate', jpCost: 120 },
+    { id: 'stop', jpCost: 200, jobLevel: 3 },
+    { id: 'quicken', jpCost: 250, jobLevel: 3 },
+  ],
+  passives: [
+    { id: 'criticalHaste', jpCost: 180, jobLevel: 2 },
+    { id: 'teleport', jpCost: 300, jobLevel: 4 },
+  ],
+  growth: { maxHp: 190, maxMp: 110, attack: 30, magic: 60, speed: 6 },
+  unlock: [{ jobId: 'mage', level: 2 }],
+};
+
+/** 召喚士「召喚」（フェーズ2-6。魔道士 Lv 3 と時魔道士 Lv 3 で解放）: 広い範囲に、敵と味方を区別して効かせる。杖とローブ */
+export const summoner: JobDefinition = {
+  id: 'summoner',
+  stats: { maxHp: 36, attack: 5, speed: 6, move: 3, jump: 2, maxMp: 44, magic: 10 },
+  attack: { kind: 'melee', maxHeightDiff: 2 },
+  weaponTypes: ['staff'],
+  armorTypes: ['robe'],
+  abilities: [
+    { id: 'fireSpirit', jpCost: 0, starter: true },
+    { id: 'healSpirit', jpCost: 150 },
+    { id: 'iceSpirit', jpCost: 180 },
+    { id: 'thunderSpirit', jpCost: 200, jobLevel: 2 },
+    { id: 'earthSpirit', jpCost: 220, jobLevel: 3 },
+  ],
+  passives: [{ id: 'spiritWard', jpCost: 200, jobLevel: 2 }],
+  growth: { maxHp: 180, maxMp: 130, attack: 25, magic: 70, speed: 4 },
+  unlock: [
+    { jobId: 'mage', level: 3 },
+    { jobId: 'timeMage', level: 3 },
+  ],
+};
+
+/** 魔法剣士「魔法剣」（フェーズ2-6。戦士 Lv 3 と魔道士 Lv 3 で解放）: 物理と魔法の両立。剣と軽装 */
+export const magicKnight: JobDefinition = {
+  id: 'magicKnight',
+  stats: { maxHp: 54, attack: 9, speed: 6, move: 4, jump: 2, maxMp: 20, magic: 7 },
+  attack: { kind: 'melee', maxHeightDiff: 2 },
+  weaponTypes: ['sword'],
+  armorTypes: ['light'],
+  abilities: [
+    { id: 'fireBlade', jpCost: 100 },
+    { id: 'iceBlade', jpCost: 100 },
+    { id: 'thunderBlade', jpCost: 120 },
+    { id: 'sealBlade', jpCost: 150, jobLevel: 2 },
+  ],
+  passives: [{ id: 'manaBlade', jpCost: 220, jobLevel: 3 }],
+  growth: { maxHp: 250, maxMp: 70, attack: 50, magic: 45, speed: 4 },
+  unlock: [
+    { jobId: 'warrior', level: 3 },
+    { jobId: 'mage', level: 3 },
+  ],
+};
+
+export const jobs: readonly JobDefinition[] = [
+  warrior,
+  archer,
+  mage,
+  healer,
+  timekeeper,
+  knight,
+  monk,
+  thief,
+  timeMage,
+  summoner,
+  magicKnight,
+];

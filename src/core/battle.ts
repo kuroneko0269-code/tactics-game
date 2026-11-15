@@ -93,6 +93,7 @@ import {
   DEFAULT_OBJECTIVES,
   enterTriggerDue,
   judgeOutcome,
+  judgeStalemate,
   judgeTurnOutcome,
   spawnTile,
   stateTriggerDue,
@@ -170,6 +171,7 @@ export function startBattle(
     turnNumber: 0,
     lastAggressionTurn: 0,
     scenario,
+    lastActivityTurn: 0,
   };
   const out: BattleEvent[] = [];
   return { state: beginNextTurn(state, out), events: out };
@@ -326,8 +328,36 @@ export function activeUnit(state: BattleState): UnitState | undefined {
   return state.turn ? getUnit(state, state.turn.unitId) : undefined;
 }
 
+/**
+ * ダメージ・回復・状態変化の付与が起きた出来事か（膠着の判定。フェーズ2-6）
+ */
+function isActivity(e: BattleEvent): boolean {
+  switch (e.type) {
+    case 'attacked':
+      return e.hit && e.damage > 0;
+    case 'knockedBack':
+    case 'trapTriggered':
+      return e.damage > 0;
+    case 'spellResolved':
+      return (e.effect === 'damage' || e.effect === 'heal' || e.effect === 'rewind' || e.effect === 'revive') && e.results.some((r) => r.amount > 0);
+    case 'statusAdded':
+    case 'revived':
+      return true;
+    default:
+      return false;
+  }
+}
+
 /** 行動を1つ適用する。ルール上できない行動ならエラーにする */
 export function applyAction(state: BattleState, action: BattleAction): ActionResult {
+  const result = applyActionInner(state, action);
+  // 膠着の判定のため、ダメージ・回復・状態変化の付与が起きた手番を覚える（次の手番の前に発動した魔法の分も）
+  if (!result.events.some(isActivity)) return result;
+  const last = Math.max(result.state.lastActivityTurn ?? 0, state.turnNumber);
+  return { state: { ...result.state, lastActivityTurn: last }, events: result.events };
+}
+
+function applyActionInner(state: BattleState, action: BattleAction): ActionResult {
   if (!state.turn || state.winner) throw new Error('戦闘は終わっています');
   const events: BattleEvent[] = [];
   const original = state;
@@ -384,7 +414,8 @@ export function applyAction(state: BattleState, action: BattleAction): ActionRes
       const strike = action.abilityId === undefined ? undefined : strikeOf(unit, action.abilityId);
       // 斬り分け: 正面の左右のマスの敵を先に、選んだ相手（正面）を最後に攻撃する（反撃は正面の相手だけなので、最後に起きる）
       const extras = strike?.sweep ? sweepExtraTargets(state, unit, unit, target) : [];
-      let next = state;
+      // 魔法剣など、MP を使う技（フェーズ2-6）
+      let next = strike?.mpCost ? updateUnit(state, unit.id, { mp: unit.mp - strike.mpCost }) : state;
       if (strike?.steal) {
         next = resolveSteal(next, unit.id, target.id, strike, events);
       } else {
@@ -475,6 +506,7 @@ function validateBeforeInterrupt(state: BattleState, action: BattleAction): void
     if (action.abilityId !== undefined) {
       const strike = strikeOf(unit, action.abilityId);
       if (!weaponFits(strike.weapons, unit.weapon)) throw new Error(`武器が合いません（${strike.id}）`);
+      if ((strike.mpCost ?? 0) > unit.mp) throw new Error(`MP が足りません（${strike.id}）`);
     }
   } else if (action.type === 'cast') {
     if (turn.acted) throw new Error('この手番ではもう行動しています');
@@ -532,8 +564,21 @@ function inflict(state: BattleState, unitId: string, status: StatusId, events: B
   return next;
 }
 
-/** ダメージを受けて生き残ったユニットの「瞑想」（MP を回復する。最大 MP まで） */
+/** ダメージを受けて生き残ったユニットの「瞑想」（MP を回復する。最大 MP まで）と「危機の加速」（フェーズ2-6） */
 function meditate(state: BattleState, unitId: string, events: BattleEvent[]): BattleState {
+  return criticalHaste(meditateOnly(state, unitId, events), unitId, events);
+}
+
+/** 危機の加速: HP が最大 HP の 1/divisor 以下になったら、自分に加速が付く（すでに付いていれば何もしない） */
+function criticalHaste(state: BattleState, unitId: string, events: BattleEvent[]): BattleState {
+  const unit = getUnit(state, unitId);
+  const effect = passiveEffect(unit, 'criticalHaste');
+  if (!effect || !isAlive(unit) || hasStatus(unit, 'haste') || unit.hp * effect.divisor > unit.stats.maxHp) return state;
+  events.push({ type: 'reaction', unitId, abilityId: passiveIdOf(unit, 'criticalHaste')! });
+  return inflict(state, unitId, 'haste', events);
+}
+
+function meditateOnly(state: BattleState, unitId: string, events: BattleEvent[]): BattleState {
   const unit = getUnit(state, unitId);
   const effect = passiveEffect(unit, 'meditate');
   if (!effect || !isAlive(unit)) return state;
@@ -716,6 +761,7 @@ function isSupportive(state: BattleState, spell: SpellDefinition): boolean {
     spell.effect === 'rewind' ||
     spell.effect === 'swap' ||
     spell.effect === 'cleanse' ||
+    spell.effect === 'quicken' ||
     (spell.effect === 'status' && !state.rules.status[spell.inflicts!].harmful)
   );
 }
@@ -937,7 +983,13 @@ function runStateEvents(state: BattleState, events: BattleEvent[]): BattleState 
  */
 function turnBoundary(state: BattleState, events: BattleEvent[]): BattleState {
   const finished = state.turnNumber;
-  let next = decide(state, judgeTurnOutcome(state.scenario.objectives, finished), events);
+  // この手番の中でダメージ・回復・状態変化の付与が起きていれば、膠着の数え直し
+  const active = events.some(isActivity);
+  let next: BattleState = active ? { ...state, lastActivityTurn: finished } : state;
+  next = decide(next, judgeTurnOutcome(state.scenario.objectives, finished), events);
+  if (next.winner) return next;
+  // 膠着（フェーズ2-6）: 手番数の勝敗条件がある戦闘では、そちらを優先する（judgeStalemate が null を返す）
+  next = decide(next, judgeStalemate(next, finished), events);
   if (next.winner) return next;
   for (let i = 0; i < next.scenario.events.length; i++) {
     if (turnTriggerDue(next.scenario.events[i]!, finished)) next = fireEvent(next, i, events);
@@ -1020,6 +1072,11 @@ function resolveSpellAt(state: BattleState, casterId: string, spell: SpellDefini
   // 引き戻し: 最後に手番が始まった時の HP に戻す（今の方が高ければ何もしない）
   if (spell.effect === 'rewind') {
     for (const r of preview.results) next = updateUnit(next, r.unitId, { hp: r.hp });
+    return grant(next);
+  }
+  // 早送り（フェーズ2-6）: 味方の CT を満たし、すぐに行動させる
+  if (spell.effect === 'quicken') {
+    for (const r of preview.results) next = updateUnit(next, r.unitId, { ct: Math.max(getUnit(next, r.unitId).ct, next.rules.ctThreshold) });
     return grant(next);
   }
   // 時送り: 相手の CT を減らす（次の行動が遅れる）

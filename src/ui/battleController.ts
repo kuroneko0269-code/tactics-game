@@ -28,12 +28,21 @@ import type { UnitLabels } from './unitLabels';
  *
  * 3D 表示（src/render）には直接依存せず、main.ts から渡される BattleViewPort を通して動かす。
  */
-export type MarkKind = 'move' | 'attack' | 'target' | 'selected' | 'spellRange' | 'spellArea' | 'push';
+export type MarkKind =
+  | 'move'
+  | 'attack'
+  | 'target'
+  | 'selected'
+  | 'spellRange'
+  | 'spellArea'
+  | 'push'
+  | 'spellAreaEnemies'
+  | 'spellAreaAllies';
 
 export interface BattleViewPort {
   sync(state: BattleState): void;
   setMarks(marks: readonly { x: number; z: number; kind: MarkKind }[]): void;
-  setReserved(tiles: readonly { x: number; z: number; element: SpellElement }[]): void;
+  setReserved(tiles: readonly { x: number; z: number; element: SpellElement; affects?: 'enemies' | 'allies' }[]): void;
   setCharging(unitId: string, element: SpellElement | undefined): void;
   setActive(unitId: string | undefined): void;
   showFacingArrows(unitId: string | undefined, selected?: Direction): void;
@@ -177,11 +186,13 @@ export function createBattleController(start: ActionResult, deps: BattleControll
 
   /** 詠唱中の魔法が予約している範囲を、マップに薄く表示し続ける（敵の魔法も） */
   const showReserved = () => {
-    const tiles: { x: number; z: number; element: SpellElement }[] = [];
+    const tiles: { x: number; z: number; element: SpellElement; affects?: 'enemies' | 'allies' }[] = [];
     for (const u of state.units) {
       if (!u.charging) continue;
-      const element = spellOf(u, u.charging.spellId).element;
-      for (const t of chargeArea(state, u)) tiles.push({ ...t, element });
+      const spell = spellOf(u, u.charging.spellId);
+      // 敵だけ・味方だけに効く魔法は、詠唱者から見た敵・味方で、枠の色を変える
+      const affects = spell.affects;
+      for (const t of chargeArea(state, u)) tiles.push({ ...t, element: spell.element, ...(affects ? { affects } : {}) });
     }
     view.setReserved(tiles);
   };
@@ -240,6 +251,9 @@ export function createBattleController(start: ActionResult, deps: BattleControll
       const cost = mpCostOf(unit, spell);
       return { disabled: !hasMpFor(unit, spell), detail: cost > 0 ? `${TEXT.mp} ${cost}` : undefined };
     }
+    // MP を使う技（魔法剣。フェーズ2-6）
+    const cost = strike?.mpCost ?? 0;
+    if (cost > 0) return { disabled: unit.mp < cost, detail: `${TEXT.mp} ${cost}` };
     return { disabled: false };
   };
 
@@ -495,7 +509,8 @@ export function createBattleController(start: ActionResult, deps: BattleControll
         // 確定前の予測: 範囲、巻き込まれる全員と予測の効果量、発動が行動順の何番目か、味方を巻き込む警告
         const center = targetCenter(state, mode.target)!;
         const preview = previewSpellAt(state, unit, spell, center, { ...unit, charging: null });
-        const area = preview.tiles.map((c) => ({ ...c, kind: 'spellArea' as const }));
+        const areaKind: MarkKind = spell.affects === 'enemies' ? 'spellAreaEnemies' : spell.affects === 'allies' ? 'spellAreaAllies' : 'spellArea';
+        const area = preview.tiles.map((c) => ({ ...c, kind: areaKind }));
         view.setMarks([...range, ...area]);
         hud.setHint('');
         const timeline = predictTimeline(state, TIMING_LOOKAHEAD, { pendingSpellId: spell.id });
@@ -536,11 +551,14 @@ export function createBattleController(start: ActionResult, deps: BattleControll
           element: spell.element,
           effect: spell.effect,
           targetText:
-            target.kind === 'unit'
-              ? (spell.instant ? TEXT.spellPreview.targetInstant : TEXT.spellPreview.targetUnit)(
-                  unitName(target.unitId, getUnit(state, target.unitId).jobId),
-                )
-              : TEXT.spellPreview.targetTile,
+            [
+              target.kind === 'unit'
+                ? (spell.instant ? TEXT.spellPreview.targetInstant : TEXT.spellPreview.targetUnit)(
+                    unitName(target.unitId, getUnit(state, target.unitId).jobId),
+                  )
+                : TEXT.spellPreview.targetTile,
+              ...(spell.affects ? [TEXT.spellPreview.affects[spell.affects]] : []),
+            ].join(' ・ '),
           timing,
           mpText: mpCostOf(unit, spell) > 0 ? TEXT.spellPreview.mp(mpCostOf(unit, spell), unit.mp) : '',
           results: affected.map((r) => {
@@ -682,8 +700,13 @@ export function createBattleController(start: ActionResult, deps: BattleControll
           break;
         }
         case 'stole': {
-          // 盗み（フェーズ2-6）
+          // 盗み（フェーズ2-6）。盗んだ物は勝った時だけ持ち帰れる（PR #17 の回答）ので、味方が盗んだ時はそれを知らせる
           const u = getUnit(state, ev.targetId);
+          if (ev.success && getUnit(state, ev.thiefId).team === 'player') {
+            hud.showMessage(
+              ev.kind === 'gold' ? TEXT.stole.keepGold(ev.gold ?? 0) : TEXT.stole.keepItem(TEXT.equipment[ev.itemId ?? '']?.name ?? ev.itemId ?? ''),
+            );
+          }
           labels.popText(
             ev.thiefId,
             !ev.success
@@ -889,8 +912,11 @@ export function createBattleController(start: ActionResult, deps: BattleControll
           }
           break;
         }
-        case 'eventFired':
         case 'battleEnded':
+          // 膠着で決着した時は、その旨を出す（フェーズ2-6）
+          if (ev.reason === 'stalemate') hud.showMessage(TEXT.objectives.stalemateResult);
+          break;
+        case 'eventFired':
           break;
       }
     }

@@ -286,6 +286,78 @@ export const earthWave: SpellDefinition = {
   castSpeed: 0,
 };
 
+// ---- 魔道士の追加（フェーズ2-6）----
+
+/** 氷: 単体の攻撃魔法。威力は炎（200%）と風（125%）の間 */
+export const ice: SpellDefinition = {
+  id: 'ice',
+  kind: 'magic',
+  element: 'ice',
+  effect: 'damage',
+  power: 160,
+  mpCost: 9,
+  range: 4,
+  areaRadius: 0,
+  heightTolerance: 0,
+  castSpeed: 34,
+};
+
+/** 土: 単体の攻撃魔法。相手が詠唱者より低い位置にいるほど威力が上がる（1 段ごとに +25%、上限 +100%） */
+export const earth: SpellDefinition = {
+  id: 'earth',
+  kind: 'magic',
+  element: 'earth',
+  effect: 'damage',
+  power: 120,
+  heightPowerPerStep: 25,
+  heightPowerCap: 100,
+  mpCost: 10,
+  range: 4,
+  areaRadius: 0,
+  heightTolerance: 0,
+  castSpeed: 34,
+};
+
+// ---- 時魔道士（フェーズ2-6）: 行動順を操作する ----
+const timeMagic = (
+  id: string,
+  rest: Pick<SpellDefinition, 'effect' | 'mpCost' | 'castSpeed'> & Partial<SpellDefinition>,
+): SpellDefinition => ({ id, kind: 'magic', element: 'none', power: 0, range: 4, areaRadius: 0, heightTolerance: 0, ...rest });
+/** 加速: 加速（素早さ +50%）を付ける */
+export const haste = timeMagic('haste', { effect: 'status', inflicts: 'haste', mpCost: 8, castSpeed: 50 });
+/** 減速: 素早さ低下を付ける */
+export const decelerate = timeMagic('decelerate', { effect: 'status', inflicts: 'speedDown', mpCost: 8, castSpeed: 50 });
+/** 停止: 停止（次の手番が何もできずに過ぎる）を付ける。詠唱は長い */
+export const stop = timeMagic('stop', { effect: 'status', inflicts: 'stop', mpCost: 14, castSpeed: 15 });
+/** 早送り: 味方ひとり（自分以外）の CT を満たし、すぐに行動させる。詠唱あり。消費 MP が大きい */
+export const quicken = timeMagic('quicken', { effect: 'quicken', targets: 'ally', mpCost: 20, castSpeed: 34 });
+
+// ---- 召喚士（フェーズ2-6）: 中心から 2 マス以内の、敵だけ（または味方だけ）に効く。詠唱は長く、消費 MP が大きい ----
+const spirit = (id: string, element: SpellDefinition['element']): SpellDefinition => ({
+  id,
+  kind: 'magic',
+  element,
+  effect: 'damage',
+  affects: 'enemies',
+  power: 150,
+  mpCost: 24,
+  range: 4,
+  areaRadius: 2,
+  heightTolerance: 3,
+  castSpeed: 12,
+});
+export const fireSpirit = spirit('fireSpirit', 'fire');
+export const iceSpirit = spirit('iceSpirit', 'ice');
+export const thunderSpirit = spirit('thunderSpirit', 'thunder');
+export const earthSpirit = spirit('earthSpirit', 'earth');
+/** 癒しの精霊: 中心から 2 マス以内の、味方だけを回復 */
+export const healSpirit: SpellDefinition = {
+  ...spirit('healSpirit', 'light'),
+  effect: 'heal',
+  affects: 'allies',
+  castSpeed: 15,
+};
+
 /** 詠唱のある行動アビリティ（魔法と狙い撃ち）と、詠唱のない業（時守・格闘家） */
 export const spells: readonly SpellDefinition[] = [
   fire,
@@ -304,6 +376,17 @@ export const spells: readonly SpellDefinition[] = [
   chakra,
   shout,
   earthWave,
+  ice,
+  earth,
+  haste,
+  decelerate,
+  stop,
+  quicken,
+  fireSpirit,
+  iceSpirit,
+  thunderSpirit,
+  earthSpirit,
+  healSpirit,
 ];
 
 /** 強打: 通常攻撃のダメージ 1.5 倍、命中率 -15。近接武器（剣・杖）が必要 */
@@ -379,8 +462,28 @@ export const blindStrike: StrikeDefinition = { id: 'blindStrike', damagePercent:
 /** 不意打ち: 背面から攻撃した時だけ、通常攻撃の 200%（それ以外は通常攻撃と同じ）。短剣が必要 */
 export const backstab: StrikeDefinition = { id: 'backstab', damagePercent: 100, backDamagePercent: 200, hitBonus: 0, weapons: ['dagger'] };
 
+// ---- 魔法剣士（フェーズ2-6）: 隣の敵に武器で攻撃。ダメージの元は攻撃力 + 魔力。MP を使う。剣が必要 ----
+const blade = (id: string, element: StrikeDefinition['element']): StrikeDefinition => ({
+  id,
+  damagePercent: 70,
+  hitBonus: 0,
+  weapons: ['sword'],
+  magicBlend: true,
+  element,
+  mpCost: 6,
+});
+export const fireBlade = blade('fireBlade', 'fire');
+export const iceBlade = blade('iceBlade', 'ice');
+export const thunderBlade = blade('thunderBlade', 'thunder');
+/** 魔封剣: 通常攻撃の 60% のダメージで、当たると沈黙を付ける。MP 6 */
+export const sealBlade: StrikeDefinition = { id: 'sealBlade', damagePercent: 60, hitBonus: 0, weapons: ['sword'], inflicts: 'silence', mpCost: 6 };
+
 /** すぐに出る技 */
 export const strikes: readonly StrikeDefinition[] = [
+  fireBlade,
+  iceBlade,
+  thunderBlade,
+  sealBlade,
   powerStrike,
   knockback,
   slowArrow,

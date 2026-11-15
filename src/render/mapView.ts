@@ -49,7 +49,18 @@ const SIDE_COLORS: Record<Terrain, number> = {
 };
 
 /** マスの色分けの種類（spellRange: 魔法の射程、spellArea: 魔法の範囲、push: 突き飛ばしで押し出す先） */
-export type TileMarkKind = 'move' | 'attack' | 'target' | 'selected' | 'spellRange' | 'spellArea' | 'push';
+export type TileMarkKind =
+  | 'move'
+  | 'attack'
+  | 'target'
+  | 'selected'
+  | 'spellRange'
+  | 'spellArea'
+  | 'push'
+  /** 敵だけに効く範囲（召喚・地走り。フェーズ2-6） */
+  | 'spellAreaEnemies'
+  /** 味方だけに効く範囲（癒しの精霊） */
+  | 'spellAreaAllies';
 
 export interface TileMark extends TileCoord {
   readonly kind: TileMarkKind;
@@ -58,6 +69,8 @@ export interface TileMark extends TileCoord {
 /** 予約されている魔法の範囲（color は属性の色） */
 export interface ReservedTile extends TileCoord {
   readonly color: number;
+  /** 枠の色（敵だけ・味方だけに効く魔法の時。省くと属性の色を明るくしたもの） */
+  readonly frame?: number;
 }
 
 const MARK_STYLE: Record<TileMarkKind, { color: number; opacity: number; pulse: number }> = {
@@ -68,6 +81,8 @@ const MARK_STYLE: Record<TileMarkKind, { color: number; opacity: number; pulse: 
   spellRange: { color: 0xa45bff, opacity: 0.3, pulse: 0.06 },
   spellArea: { color: 0xff3df0, opacity: 0.7, pulse: 0.2 },
   push: { color: 0xffa21f, opacity: 0.8, pulse: 0.25 },
+  spellAreaEnemies: { color: 0xff3b3b, opacity: 0.7, pulse: 0.2 },
+  spellAreaAllies: { color: 0x3ddc84, opacity: 0.7, pulse: 0.2 },
 };
 /** 戦闘の間ずっと出しておく目印の種類（goal: 到達するマス、warning: 増援の予告、trap-*: 見えている罠） */
 export type OverlayKind = 'goal' | 'warning' | 'trap-rockfall' | 'trap-mud' | 'trap-drain';
@@ -210,7 +225,8 @@ export function createMapView(map: BattleMap): MapView {
         const m = reservedMeshes[t.z * map.width + t.x];
         if (!m) continue;
         m.material.color.setHex(t.color);
-        m.frameMaterial.color.setHex(t.color).offsetHSL(0, 0, 0.15);
+        if (t.frame !== undefined) m.frameMaterial.color.setHex(t.frame);
+        else m.frameMaterial.color.setHex(t.color).offsetHSL(0, 0, 0.15);
         m.plate.visible = true;
       }
     },
