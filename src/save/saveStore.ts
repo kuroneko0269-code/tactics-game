@@ -49,9 +49,13 @@ export interface SaveStore {
 }
 
 const STORAGE_KEY = 'tactics-game.save';
+const SETTINGS_KEY = 'tactics-game.settings';
 
-/** 端末の中（localStorage）に保存する。使えない環境（プライベートブラウズの一部など）では保存しない */
-export function localStorageBackend(): SaveBackend {
+/**
+ * 端末の中（localStorage）に保存する。使えない環境（プライベートブラウズの一部など）では保存しない。
+ * key を省くとセーブデータの置き場所。設定（音量など）は別の置き場所（settingsBackend）に置く
+ */
+export function localStorageBackend(key: string = STORAGE_KEY): SaveBackend {
   const storage = (() => {
     try {
       return window.localStorage;
@@ -62,21 +66,21 @@ export function localStorageBackend(): SaveBackend {
   return {
     read: () => {
       try {
-        return storage?.getItem(STORAGE_KEY) ?? null;
+        return storage?.getItem(key) ?? null;
       } catch {
         return null;
       }
     },
     write: (text) => {
       try {
-        storage?.setItem(STORAGE_KEY, text);
+        storage?.setItem(key, text);
       } catch (e) {
         console.warn('セーブできませんでした', e);
       }
     },
     remove: () => {
       try {
-        storage?.removeItem(STORAGE_KEY);
+        storage?.removeItem(key);
       } catch {
         // 消せなくても続ける
       }
@@ -121,6 +125,59 @@ export function createSaveStore(
     },
     clear() {
       backend.remove();
+    },
+  };
+}
+
+/**
+ * 端末ごとの設定（序章に足りない仕組み）: 音量・消音・手ほどき。セーブデータとは別に置き、「はじめから」でも消さない。
+ * - volume: 0〜100、muted: 消音
+ * - skipSeenTutorials: 一度見た手ほどきは、次から出さない（はじめから遊び直しても）
+ * - seenTutorials: 見た手ほどきの戦場の id
+ */
+export interface GameSettings {
+  readonly volume: number;
+  readonly muted: boolean;
+  readonly skipSeenTutorials: boolean;
+  readonly seenTutorials: readonly string[];
+}
+
+export const DEFAULT_SETTINGS: GameSettings = { volume: 70, muted: false, skipSeenTutorials: true, seenTutorials: [] };
+
+export interface SettingsStore {
+  load(): GameSettings;
+  save(settings: GameSettings): void;
+}
+
+/** 設定の置き場所（端末の中） */
+export const settingsBackend = (): SaveBackend => localStorageBackend(SETTINGS_KEY);
+
+/** 読み込んだ設定を、正しい形にそろえる（読めない値は初期値に） */
+export function normalizeSettings(raw: unknown): GameSettings {
+  if (typeof raw !== 'object' || raw === null) return DEFAULT_SETTINGS;
+  const r = raw as Record<string, unknown>;
+  const volume = typeof r.volume === 'number' && Number.isFinite(r.volume) ? Math.max(0, Math.min(100, Math.round(r.volume))) : DEFAULT_SETTINGS.volume;
+  return {
+    volume,
+    muted: typeof r.muted === 'boolean' ? r.muted : DEFAULT_SETTINGS.muted,
+    skipSeenTutorials: typeof r.skipSeenTutorials === 'boolean' ? r.skipSeenTutorials : DEFAULT_SETTINGS.skipSeenTutorials,
+    seenTutorials: Array.isArray(r.seenTutorials) ? r.seenTutorials.filter((x): x is string => typeof x === 'string') : [],
+  };
+}
+
+export function createSettingsStore(backend: SaveBackend): SettingsStore {
+  return {
+    load() {
+      const text = backend.read();
+      if (text === null) return DEFAULT_SETTINGS;
+      try {
+        return normalizeSettings(JSON.parse(text));
+      } catch {
+        return DEFAULT_SETTINGS;
+      }
+    },
+    save(settings) {
+      backend.write(JSON.stringify(normalizeSettings(settings)));
     },
   };
 }

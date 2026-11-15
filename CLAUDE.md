@@ -160,6 +160,11 @@ npm run balance      # バランス確認: 画面を使わず AI 同士を戦わ
   会話の進行と舞台の様子は `src/core/dialogue.ts`、会話の枠と操作の場面は `src/ui/dialogue.ts`、舞台の見た目は `src/render/sceneView.ts`。
   台本は `src/data/story/scripts/`、仕草・物・人物の見た目の名前は `src/data/story/stageDefs.ts`、会話用のマップは `src/data/story/stages.ts`。
   対象物（陣営 `neutral` の行動しない物。ジョブの欄は `object:種類`）は戦場の定義の `objects`、見た目は `src/render/props.ts`。
+- 序章に足りない仕組み（序章の PR A）: 倒れない敵（配置の `minHp`）と戦わない背景の人々（`bystanders`）は `src/core/battle.ts`・`movement.ts`、
+  台本の新しい指示（光・節・音・章題・持つ・離す・姿勢）は `src/core/script.ts`・`dialogue.ts`、戦場の定義の `cast`・`looks`・`afterVictory`・`tutorial` は `src/core/sortie.ts`。
+  物の形は `src/data/story/models.ts`、人物の見た目は `src/data/story/looks.ts`、旋律と効果音の名前は `src/data/sounds.ts`、章のために決めた部隊は `src/data/story/parties.ts`。
+  音の合成は `src/ui/sound.ts`、手ほどきは `src/ui/tutorial.ts`、設定の欄と音の印は `src/ui/settingsSheet.ts`。
+  設定（音量・消音・見た手ほどき）はセーブデータとは別に `src/save/saveStore.ts` の `createSettingsStore` で保存する（「はじめから」でも消さない）。
 - 勝敗条件・マップ上のイベント・罠の判定は `src/core/scenario.ts`、起こす処理は `src/core/battle.ts`。戦場ごとの定義は `src/data/battles/`（ダンジョンは `ruins/`）。
 - ダンジョンの進み具合・クリアの記録・報酬は `src/core/dungeon.ts`。セーブデータは版 6（部隊（所持金・所持品・装備を含む）とダンジョンの記録と訓練戦の記録、途中の戦闘、物語の進み具合）。
 - 人物（フェーズ2-6）: 部隊のユニットの id が、その人物の変わらない id（`src/data/characters.ts`。名前は text.ts に id で引く）。

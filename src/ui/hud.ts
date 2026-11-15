@@ -80,6 +80,8 @@ export interface HudAction {
   readonly disabled?: boolean;
   /** 目立たせたい注意のボタン（詠唱の中断など） */
   readonly danger?: boolean;
+  /** ボタンの種類（手ほどきで指し示す時と、押した時の音に使う。序章に足りない仕組み） */
+  readonly key?: string;
 }
 
 export interface SpellPreviewView {
@@ -380,6 +382,8 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
       ].join(' ・ ');
       info.append(name, job, hp, ...(growthLine ? [growthLine] : []), stats);
       if (infoState.targets.includes(unit.id)) info.append(Object.assign(el('div', 'info-target'), { textContent: TEXT.objectives.targetTag }));
+      // 倒れないユニット（序章に足りない仕組み）
+      if (unit.minHp) info.append(Object.assign(el('div', 'info-target info-unbreakable'), { textContent: TEXT.objectives.unbreakableTag }));
       // 戦闘不能（フェーズ2-5）: 残りのカウント
       if (unit.hp <= 0) {
         const line = el('div', `info-knockout${unit.retired ? ' retired' : ''}`);
@@ -429,6 +433,7 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
           b.append(d);
         }
         b.disabled = a.disabled ?? false;
+        if (a.key) b.dataset.key = a.key;
         actions.append(b);
       }
       // 向きのボタンは行動のボタンを避けて置くので、行動のボタンが変わったら置き直す
@@ -524,6 +529,7 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
       undoArea.innerHTML = '';
       if (!onClick) return;
       const b = button('↩', TEXT.buttons.undoMove, onClick, 'hud-button action undo-move');
+      b.dataset.key = 'undoMove';
       undoArea.append(b);
     },
     showFacingPad(unitId, selected, onPick) {

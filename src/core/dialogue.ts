@@ -7,12 +7,24 @@
  * - スキップ: 最後まで飛ばす。舞台は、最後まで指示を行った後の様子になる（操作の場面も飛ばす）。
  */
 import type { Direction } from './geometry';
-import { isInteractive, plainText, type Directive, type RubySegment, type Script, type ScriptStep } from './script';
+import { isInteractive, plainText, type Directive, type ItemSlot, type RubySegment, type Script, type ScriptStep } from './script';
 
 export interface ActorState {
   readonly x: number;
   readonly z: number;
   readonly facing: Direction;
+  /** 持ち物（付ける所 → 物の種類の名前。空の文字なら何も持たない）。省いた所は、見た目の決まりのまま */
+  readonly items?: Readonly<Partial<Record<ItemSlot, string>>>;
+  /** 続く姿勢（座る など。省くと立っている） */
+  readonly posture?: string;
+}
+
+/** 立っている光（マスか人物に立てる） */
+export interface LightState {
+  readonly x?: number;
+  readonly z?: number;
+  readonly actor?: string;
+  readonly color: string;
 }
 
 export interface PropState {
@@ -27,6 +39,8 @@ export interface StageState {
   readonly props: Readonly<Record<string, PropState>>;
   /** 暗転している */
   readonly dark: boolean;
+  /** 立っている光（呼び名 → 光）。省くとなし */
+  readonly lights?: Readonly<Record<string, LightState>>;
 }
 
 export const EMPTY_STAGE: StageState = { actors: {}, props: {}, dark: false };
@@ -60,7 +74,7 @@ export function applyDirective(stage: StageState, d: Directive): StageState {
       const last = d.path[d.path.length - 1];
       if (!a || !last) return stage;
       const prev = d.path[d.path.length - 2] ?? a;
-      return { ...stage, actors: { ...stage.actors, [d.actor]: { x: last.x, z: last.z, facing: toward(prev, last, a.facing) } } };
+      return { ...stage, actors: { ...stage.actors, [d.actor]: { ...a, x: last.x, z: last.z, facing: toward(prev, last, a.facing) } } };
     }
     case 'face': {
       const a = stage.actors[d.actor];
@@ -91,9 +105,39 @@ export function applyDirective(stage: StageState, d: Directive): StageState {
       const opposite: Record<Direction, Direction> = { north: 'south', south: 'north', east: 'west', west: 'east' };
       return { ...stage, actors: { ...stage.actors, [d.actor]: { ...a, facing: opposite[a.facing] } } };
     }
+    case 'light': {
+      const light: LightState = d.actor ? { actor: d.actor, color: d.color } : { x: d.x, z: d.z, color: d.color };
+      return { ...stage, lights: { ...stage.lights, [d.name]: light } };
+    }
+    case 'lightOff': {
+      const lights = { ...stage.lights };
+      delete lights[d.name];
+      return { ...stage, lights };
+    }
+    case 'carry':
+    case 'release': {
+      const a = stage.actors[d.actor];
+      if (!a) return stage;
+      const items = { ...a.items };
+      // 外した所は空の文字にする（見た目の決まりで持っている物も外す）
+      items[d.slot] = d.kind === 'carry' ? d.item : '';
+      return { ...stage, actors: { ...stage.actors, [d.actor]: { ...a, items } } };
+    }
+    case 'posture': {
+      const a = stage.actors[d.actor];
+      if (!a) return stage;
+      const { posture: _old, ...rest } = a;
+      void _old;
+      return { ...stage, actors: { ...stage.actors, [d.actor]: d.posture === '立つ' ? rest : { ...rest, posture: d.posture } } };
+    }
     case 'camera':
     case 'wait':
     case 'hold':
+    case 'melody':
+    case 'melodyWait':
+    case 'melodyStop':
+    case 'sound':
+    case 'chapterTitle':
       return stage;
   }
 }
@@ -109,9 +153,9 @@ export function stageAt(script: Script, index: number, initial: StageState = EMP
   return script.steps.slice(0, index).reduce(applyStep, initial);
 }
 
-/** 止まる手順か（台詞・語りと、操作の場面） */
+/** 止まる手順か（台詞・語りと、操作の場面と、章の題） */
 export function isStop(step: ScriptStep): boolean {
-  return step.kind === 'line' || isInteractive(step.directive);
+  return step.kind === 'line' || isInteractive(step.directive) || step.directive.kind === 'chapterTitle';
 }
 
 /**

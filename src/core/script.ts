@@ -49,10 +49,33 @@ export type Directive =
   /** 操作の場面: 押し続ける（steps 段まで進むと次へ。labelId は手の近くに出す文の id） */
   | { readonly kind: 'hold'; readonly steps: number; readonly label: string }
   /** 操作の場面: 人物を1マスずつ歩かせる（path の順に進める。最後のマスが行き先） */
-  | { readonly kind: 'walkControl'; readonly actor: string; readonly path: readonly Coord[] };
+  | { readonly kind: 'walkControl'; readonly actor: string; readonly path: readonly Coord[] }
+  /** 光を立てる（帰りの門の光など）。マスか人物に立てる。name は台本の中の呼び名（消す時に使う）。color は色の名前 */
+  | { readonly kind: 'light'; readonly name: string; readonly x?: number; readonly z?: number; readonly actor?: string; readonly color: string }
+  | { readonly kind: 'lightOff'; readonly name: string }
+  /** 旋律を鳴らす（待たずに次へ進む）。melody は旋律の名前、timbre は音色の名前。mark は鳴っている間の印に添える文（省くと音色の名前） */
+  | { readonly kind: 'melody'; readonly melody: string; readonly timbre: string; readonly mark?: string }
+  /** 鳴っている旋律が、残り remaining 個の音になるまで待つ（0 なら終わるまで。鳴っていなければ待たない） */
+  | { readonly kind: 'melodyWait'; readonly remaining: number }
+  | { readonly kind: 'melodyStop' }
+  /** 効果音を鳴らす */
+  | { readonly kind: 'sound'; readonly sound: string }
+  /** 章の題を画面いっぱいに出す（タップか、少し待つと次へ） */
+  | { readonly kind: 'chapterTitle'; readonly title: string; readonly subtitle: string }
+  /** 人物に持ち物を持たせる（slot は 手・左手・腰・背）・外す */
+  | { readonly kind: 'carry'; readonly actor: string; readonly item: string; readonly slot: ItemSlot }
+  | { readonly kind: 'release'; readonly actor: string; readonly slot: ItemSlot }
+  /** 続く姿勢（座る・膝をついたまま、など）。「立つ」で元に戻す */
+  | { readonly kind: 'posture'; readonly actor: string; readonly posture: string };
+
+/** 持ち物を付ける所（右手・左手・腰・背） */
+export type ItemSlot = 'hand' | 'handL' | 'waist' | 'back';
+export const ITEM_SLOTS_JA: Readonly<Record<string, ItemSlot>> = { 手: 'hand', 右手: 'hand', 左手: 'handL', 腰: 'waist', 背: 'back' };
 
 /** 操作の場面の指示か（プレイヤーの操作を待つ） */
 export const isInteractive = (d: Directive) => d.kind === 'hold' || d.kind === 'walkControl';
+/** 台詞の後ろには書けない指示か（操作の場面と章の題。1行に分けて書く） */
+const isStandalone = (d: Directive) => isInteractive(d) || d.kind === 'chapterTitle';
 
 /** 台本の手順 */
 export type ScriptStep =
@@ -85,6 +108,13 @@ export interface ScriptCatalog {
   readonly props: readonly string[];
   /** 仕草のうち、終えた後も向きが反対に変わったままになるもの（背を向ける） */
   readonly turnAway?: readonly string[];
+  /** 旋律の名前・音色の名前・効果音の名前・光の色の名前（序章に足りない仕組み。省くと、その指示は使えない） */
+  readonly melodies?: readonly string[];
+  readonly timbres?: readonly string[];
+  readonly sounds?: readonly string[];
+  readonly lightColors?: readonly string[];
+  /** 続く姿勢の名前（「立つ」は元の姿勢） */
+  readonly postures?: readonly string[];
 }
 
 export type ParseResult = { readonly ok: true; readonly script: Script } | { readonly ok: false; readonly errors: readonly ScriptError[] };
@@ -109,6 +139,16 @@ export const DIRECTIVE_USAGE: Readonly<Record<string, string>> = {
   変える: '@変える 物の名前 種類',
   押し続ける: '@押し続ける 段数 [手の近くに出す文]',
   歩かせる: '@歩かせる 名前 x,z x,z …（進める順。最後が行き先）',
+  光: '@光 呼び名 x,z [色] か @光 呼び名 人物の名前 [色]',
+  光を消す: '@光を消す 呼び名',
+  節: '@節 旋律の名前 音色 [印に添える文]',
+  節を待つ: '@節を待つ [残りの音の数]',
+  節を止める: '@節を止める',
+  音: '@音 効果音の名前',
+  章題: '@章題 題 副題',
+  持つ: '@持つ 名前 物の種類 [手・左手・腰・背]',
+  離す: '@離す 名前 [手・左手・腰・背]',
+  姿勢: '@姿勢 名前 姿勢の名前（立つ で元に戻す）',
 };
 
 /** 台本のテキストを読む。id は台本の名前（エラーの知らせと、場面からの参照に使う） */
@@ -136,7 +176,7 @@ export function parseScript(id: string, text: string, catalog: ScriptCatalog): P
     for (const part of rest) {
       const d = parseDirective(part, catalog);
       if (typeof d === 'string') fail(d);
-      else if (isInteractive(d)) fail('操作の場面（押し続ける・歩かせる）は、台詞の後ろではなく1行に分けて書いてください');
+      else if (isStandalone(d)) fail('操作の場面（押し続ける・歩かせる）と章題は、台詞の後ろではなく1行に分けて書いてください');
       else directives.push(d);
     }
     const speech = /^([^\s「」@＠{}|]+)「(.*)」$/.exec(body);
@@ -298,6 +338,65 @@ function parseDirective(text: string, catalog: ScriptCatalog): Directive | strin
       const steps = Number(args[0]);
       if (!Number.isInteger(steps) || steps < 1 || steps > 100) return bad(`段数「${args[0]}」は 1〜100 の整数で書きます`);
       return { kind: 'hold', steps, label: args.slice(1).join(' ') };
+    }
+    case '光': {
+      const e = need(2);
+      if (e) return e;
+      const color = args[2] ?? '白';
+      if (catalog.lightColors && !catalog.lightColors.includes(color)) return bad(`光の色「${color}」はありません（使える色: ${catalog.lightColors.join('・')}）`);
+      const c = coord(args[1]!);
+      return c ? { kind: 'light', name: args[0]!, ...c, color } : { kind: 'light', name: args[0]!, actor: args[1]!, color };
+    }
+    case '光を消す':
+      return need(1) ?? { kind: 'lightOff', name: args[0]! };
+    case '節': {
+      const e = need(2);
+      if (e) return e;
+      if (!(catalog.melodies ?? []).includes(args[0]!)) return bad(`旋律「${args[0]}」はありません（使える旋律: ${(catalog.melodies ?? []).join('・')}）`);
+      if (!(catalog.timbres ?? []).includes(args[1]!)) return bad(`音色「${args[1]}」はありません（使える音色: ${(catalog.timbres ?? []).join('・')}）`);
+      const mark = args.slice(2).join(' ');
+      return { kind: 'melody', melody: args[0]!, timbre: args[1]!, ...(mark ? { mark } : {}) };
+    }
+    case '節を待つ': {
+      const n = args[0] === undefined ? 0 : Number(args[0]);
+      if (!Number.isInteger(n) || n < 0 || n > 50) return bad(`残りの音の数「${args[0]}」は 0〜50 の整数で書きます`);
+      return { kind: 'melodyWait', remaining: n };
+    }
+    case '節を止める':
+      return { kind: 'melodyStop' };
+    case '音': {
+      const e = need(1);
+      if (e) return e;
+      if (!(catalog.sounds ?? []).includes(args[0]!)) return bad(`効果音「${args[0]}」はありません（使える効果音: ${(catalog.sounds ?? []).join('・')}）`);
+      return { kind: 'sound', sound: args[0]! };
+    }
+    case '章題': {
+      const e = need(2);
+      if (e) return e;
+      return { kind: 'chapterTitle', title: args[0]!, subtitle: args.slice(1).join(' ') };
+    }
+    case '持つ': {
+      const e = need(2);
+      if (e) return e;
+      if (!catalog.props.includes(args[1]!)) return bad(`物の種類「${args[1]}」はありません（使える種類: ${catalog.props.join('・')}）`);
+      const slot = ITEM_SLOTS_JA[args[2] ?? '手'];
+      if (!slot) return bad(`持つ所「${args[2]}」は 手・左手・腰・背 のどれかです`);
+      return { kind: 'carry', actor: args[0]!, item: args[1]!, slot };
+    }
+    case '離す': {
+      const e = need(1);
+      if (e) return e;
+      const slot = ITEM_SLOTS_JA[args[1] ?? '手'];
+      if (!slot) return bad(`持つ所「${args[1]}」は 手・左手・腰・背 のどれかです`);
+      return { kind: 'release', actor: args[0]!, slot };
+    }
+    case '姿勢': {
+      const e = need(2);
+      if (e) return e;
+      if (args[1] !== '立つ' && !(catalog.postures ?? []).includes(args[1]!)) {
+        return bad(`姿勢「${args[1]}」はありません（使える姿勢: ${['立つ', ...(catalog.postures ?? [])].join('・')}）`);
+      }
+      return { kind: 'posture', actor: args[0]!, posture: args[1]! };
     }
     case '歩かせる': {
       const e = need(2);

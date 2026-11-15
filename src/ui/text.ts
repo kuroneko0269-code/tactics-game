@@ -55,6 +55,7 @@ export const TEXT = {
     retry: 'やり直す',
     battleWon: '勝利！ 物語を進めます',
     battleLost: '敗北……',
+    lostNote: 'この戦闘を始めからやり直せます',
     baseNote: '編成と店を使えます。準備ができたら「物語を進める」',
   },
 
@@ -72,6 +73,46 @@ export const TEXT = {
     holdDefault: '押し続ける',
     holdHint: 'ボタンを押し続けると、少しずつ進みます。指を離すと止まります。',
     walkHint: '光っているマスを押すと、1マスずつ歩きます。',
+    /** 章の題の画面で、次へ進むための案内 */
+    titleNext: 'タップで進む',
+  },
+
+  /** 音（序章に足りない仕組み）。音がなくても伝わるように、鳴っている間は画面に印を出す */
+  sound: {
+    /** 旋律が鳴っている間の印（音色の名前ごと。台本で文を添えた時はそちら） */
+    melodyMark: (label: string) => `♪ ${label}`,
+    timbres: { 鼻歌: '鼻歌', 石: '石の音', 歌声: '歌声' } as Readonly<Record<string, string>>,
+    /** 台本の効果音のうち、画面にも短く出すもの */
+    effectMarks: { gate: '光の音', chime: '石の鳴る音', water: '水の音', break: '折れる音' } as Readonly<Record<string, string>>,
+  },
+
+  /** 設定（序章に足りない仕組み） */
+  settings: {
+    open: '設定',
+    title: '設定',
+    volume: (v: number) => `音量 ${v}`,
+    volumeDown: '音量を下げる',
+    volumeUp: '音量を上げる',
+    mute: '消音にする',
+    unmute: '消音をやめる',
+    mutedNote: '消音中です（音で伝える事柄は、画面にも ♪ の印で出ます）',
+    tutorialOn: '見た手ほどきは出さない: はい',
+    tutorialOff: '見た手ほどきは出さない: いいえ',
+    tutorialNote: '「いいえ」にすると、手ほどきのある戦闘で毎回出します',
+    close: '閉じる',
+  },
+
+  /** 戦闘の手ほどき（序章に足りない仕組み）。段の id で引く */
+  tutorial: {
+    skip: '手ほどきを飛ばす',
+    label: '手ほどき',
+    steps: {
+      'trial-move': '光っているマスを押すと、そこへ移動します。',
+      'trial-attack': '「攻撃」を押してから、攻撃する相手を押します。',
+      'trial-target': '赤く光っている相手を押します。',
+      'trial-confirm': '予測を確かめて「確定」を押します。',
+      'trial-facing': '最後に向きを選んで「手番を終える」を押します。',
+    } as Readonly<Record<string, string>>,
   },
 
   /** ダンジョンの名前（名称は仮） */
@@ -105,6 +146,8 @@ export const TEXT = {
     tallyPop: (count: number, times: number) => `${Math.min(count, times)} / ${times}`,
     /** 対象物の情報の欄の札 */
     objectTag: '◆ 壊す物',
+    /** 倒れないユニットの情報の欄の札（序章に足りない仕組み） */
+    unbreakableTag: '◇ 倒れない（HP は一定より下がらない）',
     allDefeated: '味方の全滅',
     unitDefeated: (name: string) => `${name}が倒れる`,
     turnLimit: (n: number) => `${n}手番を過ぎる`,
@@ -159,6 +202,7 @@ export const TEXT = {
     dirt: '土',
     stone: '岩場',
     water: '水辺',
+    wood: '板張り',
   } satisfies Record<Terrain, string>,
 
   jobs: {

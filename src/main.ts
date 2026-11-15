@@ -45,7 +45,7 @@ import { createMapView, type MapView } from './render/mapView';
 import { createBattleView, type BattleView } from './render/battleView';
 import { createPicker } from './render/picker';
 import { attachCameraInput } from './render/cameraInput';
-import { createSaveStore, localStorageBackend } from './save/saveStore';
+import { createSaveStore, createSettingsStore, localStorageBackend, settingsBackend, type GameSettings } from './save/saveStore';
 import { createBaseScreen } from './ui/baseScreen';
 import { createBattleController, type BattleController } from './ui/battleController';
 import { createDeployController, type DeployController } from './ui/deployController';
@@ -63,13 +63,19 @@ import { parseScriptOrThrow, type Directive, type Script } from './core/script';
 import { advanceScene, currentScene, normalizeProgress, recapFor, STORY_START, type BookDefinition, type StoryProgress } from './core/story';
 import { books } from './data/story/books';
 import { scriptTexts } from './data/story/scripts';
-import { ACTOR_LOOKS as ACTOR_LOOK_IDS, GESTURES, PROP_KINDS, scriptCatalog } from './data/story/stageDefs';
+import { ACTOR_LOOKS as ACTOR_LOOK_IDS, GESTURES, LIGHT_COLORS, POSTURES, PROP_KINDS, scriptCatalog } from './data/story/stageDefs';
 import { stages } from './data/story/stages';
+import { parties } from './data/story/parties';
+import { DEFAULT_LOOK, LOOKS } from './data/story/looks';
+import { SOUND_EFFECTS } from './data/sounds';
 import { trialWeirBattle } from './data/battles/trialWeir';
-import { ACTOR_LOOKS, DEFAULT_ACTOR_LOOK } from './render/actorLooks';
 import { createSceneView, type SceneView } from './render/sceneView';
-import { runDialogue, type DialogueRun, type StagePort } from './ui/dialogue';
-import { showRecapScreen, showStoryEndScreen, showTitleScreen } from './ui/titleScreen';
+import { facingToward, runDialogue, type DialogueRun, type DialogueSound, type StagePort } from './ui/dialogue';
+import { showRecapScreen, showStoryBattleLost, showStoryEndScreen, showTitleScreen } from './ui/titleScreen';
+import { createSoundSystem } from './ui/sound';
+import { createSoundMark, showSettingsSheet } from './ui/settingsSheet';
+import { createTutorial, type TutorialScreen } from './ui/tutorial';
+import { chapterStartRecap } from './core/story';
 
 /**
  * 入口。定義データ（data）を戦闘ルールと育成の計算（core）に渡し、
@@ -98,6 +104,8 @@ interface ActiveBattle {
   deploy?: DeployController;
   /** 戦闘が始まったらある */
   controller?: BattleController;
+  /** 戦闘の手ほどき（手ほどきのある戦場で、まだ見ていない時だけある） */
+  tutorial?: TutorialScreen;
 }
 
 function main(): void {
@@ -132,6 +140,50 @@ function main(): void {
   /** 出したことのある操作の手引き（初めての時だけ出す） */
   let seenHints: readonly string[] = loaded?.seenHints ?? [];
   const persist = () => store.save({ roster, dungeon: dungeonState, records, battle: suspended, story, seenHints });
+
+  // ---- 音と設定（序章に足りない仕組み） ----
+  const settingsStore = createSettingsStore(settingsBackend());
+  let settings: GameSettings = settingsStore.load();
+  const sound = createSoundSystem();
+  sound.setVolume(settings.volume, settings.muted);
+  const updateSettings = (next: GameSettings) => {
+    settings = next;
+    settingsStore.save(next);
+    sound.setVolume(next.volume, next.muted);
+  };
+  // ブラウザは最初のタップがあるまで音を鳴らせないので、最初のタップで音の仕組みを起こす
+  const unlockSound = () => sound.unlock();
+  document.addEventListener('pointerdown', unlockSound, { capture: true });
+  document.addEventListener('keydown', unlockSound, { capture: true });
+  // 画面のボタンを押した時の音（決定・取り消し・選ぶ）
+  document.addEventListener(
+    'click',
+    (e) => {
+      const b = (e.target as HTMLElement | null)?.closest?.('button');
+      if (!b || b.disabled) return;
+      const back = b.dataset.key === 'back' || b.classList.contains('quiet') || b.classList.contains('sheet-close');
+      sound.effect(back ? 'cancel' : b.classList.contains('primary') ? 'confirm' : 'select');
+    },
+    { capture: true },
+  );
+  const soundMark = createSoundMark(document.getElementById('app') ?? document.body);
+  sound.onMelodyChange(() => {
+    const m = sound.melody();
+    soundMark.show(m ? TEXT.sound.melodyMark(m.mark ?? TEXT.sound.timbres[m.timbre] ?? m.timbre) : null);
+  });
+  /** 会話から使う音の口 */
+  const dialogueSound: DialogueSound = {
+    playMelody: (melody, timbre, mark) => sound.playMelody(melody, timbre, mark),
+    stopMelody: () => sound.stopMelody(),
+    waitMelody: (remaining) => sound.waitMelody(remaining),
+    effect: (name) => {
+      const id = SOUND_EFFECTS[name];
+      if (!id) return;
+      sound.effect(id);
+      const mark = TEXT.sound.effectMarks[id];
+      if (mark) soundMark.flash(TEXT.sound.melodyMark(mark));
+    },
+  };
   /** 戦闘の状態が変わった（行動がひとつ確定した）: 途中の戦闘として保存する */
   const saveBattle = (origin: BattleOrigin, state: BattleState) => {
     suspended = { origin, state };
@@ -185,6 +237,8 @@ function main(): void {
     view.setOverlays(tiles);
   };
   let battle: ActiveBattle | undefined;
+  /** 今の戦闘の戦場（見た目・手ほどき・台本の人物の名前に使う） */
+  let currentSite: BattleSite | undefined;
   /** 開発中だけ: 今の戦闘が決着した時に呼ぶ処理（自動プレイで、ダンジョンの流れを確かめる時に決着を早める） */
   let currentFinish: ((state: BattleState) => void) | undefined;
   const setScreen = (name: ScreenName) => {
@@ -203,6 +257,7 @@ function main(): void {
 
   const endBattle = () => {
     if (!battle) return;
+    battle.tutorial?.dispose();
     battle.controller?.dispose();
     battle.view.dispose();
     hudEl.innerHTML = '';
@@ -474,6 +529,7 @@ function main(): void {
     if (!s) return showBase();
     endBattle();
     const def = siteOf(s.origin);
+    currentSite = def;
     const onFinished = finisherOf(s.origin);
     if (s.state.winner) return onFinished(s.state);
     useMap(def.map);
@@ -520,11 +576,14 @@ function main(): void {
     origin: BattleOrigin,
     onFinished: (state: BattleState) => void,
     onBack: () => void = showBase,
+    party?: Roster,
   ) => {
     endBattle();
+    currentSite = target;
     const seed = nextSeed;
     nextSeed = randomSeed();
-    const setup = buildSortie(target, tierId, roster, catalog, progressionRules);
+    // 章のために決めた部隊（序章など）で戦う時は、育てた部隊を使わず、経験値と JP も入れない
+    const setup = party ? buildSortie(target, tierId, party, catalog) : buildSortie(target, tierId, roster, catalog, progressionRules);
     const begin = (s: typeof setup): ActionResult =>
       startBattle(s, catalog.jobs, battleRules, seed, catalog.spells, catalog.strikes, catalog.passives);
     useMap(target.map);
@@ -554,12 +613,19 @@ function main(): void {
 
   /** 戦闘の表示（ユニットの見た目・情報欄とボタン・頭上の HP）を作る */
   const createBattleShell = (start: ActionResult) => {
+    const looks = currentSite?.looks ?? {};
     const view = createBattleView({
       scene: stage.scene,
       mapView,
       initial: start.state,
       camera: () => rig.camera,
       canvas: stage.renderer.domElement,
+      // 部隊の人物と物語の相手は、人物の見た目で出す（序章に足りない仕組み）
+      lookOf: (u) => {
+        const id = looks[u.id] ?? (u.team === 'player' ? u.id : undefined);
+        return id ? LOOKS[id] : undefined;
+      },
+      bystanderLook: (look) => LOOKS[look] ?? DEFAULT_LOOK,
     });
     view.sync(start.state);
     const hud = createHud(
@@ -602,6 +668,27 @@ function main(): void {
           return [top, top.clone().add(new THREE.Vector3(0, 1.2, 0))];
         }),
       );
+    // 戦闘の手ほどき（序章に足りない仕組み）: 手ほどきのある戦場で、まだ見ていないか、見たものも出す設定の時
+    const site = currentSite;
+    const steps = site?.tutorial ?? [];
+    const tutorial =
+      site && steps.length > 0 && !(settings.skipSeenTutorials && settings.seenTutorials.includes(site.id))
+        ? createTutorial(hudEl, steps, {
+            tileScreen: (x, z) => view.tileScreenPosition(x, z),
+            unitScreen: (id) => {
+              try {
+                return view.unitScreenPosition(id);
+              } catch {
+                return undefined;
+              }
+            },
+            onFinished: () => {
+              if (!settings.seenTutorials.includes(site.id)) updateSettings({ ...settings, seenTutorials: [...settings.seenTutorials, site.id] });
+            },
+          })
+        : undefined;
+    if (battle) battle.tutorial = tutorial;
+    pendingTutorial = tutorial;
     return createBattleController(start, {
       view: { ...view, focusTiles, setMarks: (m) => setMarks(view, m), setOverlays: (t) => setOverlays(view, t) },
       hud: shell.hud,
@@ -611,6 +698,8 @@ function main(): void {
       onStateChanged,
       unlockedJobs: unlockedInBattle,
       playDialogue: (scriptId) => playBattleDialogue(scriptId),
+      sound: (id) => sound.effect(id),
+      ...(tutorial ? { onModeChange: (key, info) => tutorial.onMode(key, info) } : {}),
       ...(import.meta.env.DEV ? { autoPlayer: () => devAutoPlayer } : {}),
     });
   };
@@ -621,8 +710,11 @@ function main(): void {
     onStateChanged?: (state: BattleState) => void,
   ): ActiveBattle => {
     const shell = createBattleShell(start);
-    return { ...shell, controller: createController(shell, start, onFinished, onStateChanged) };
+    const controller = createController(shell, start, onFinished, onStateChanged);
+    return { ...shell, controller, ...(pendingTutorial ? { tutorial: pendingTutorial } : {}) };
   };
+  /** createController が作った手ほどき（ActiveBattle に入れるまでの受け渡し） */
+  let pendingTutorial: TutorialScreen | undefined;
 
   // ---- 物語（物語の土台）: 題名の画面、章と場面の流れ、会話の場面、戦闘中の会話 ----
 
@@ -661,16 +753,18 @@ function main(): void {
     });
   const zoomOf = (d: Extract<Directive, { kind: 'camera' }>) => (d.zoom ? SCENE_ZOOM[d.zoom] : undefined);
   /** 台本を進める（終わるか飛ばすと解決する） */
-  const playScript = async (scriptId: string, port: StagePort) => {
+  const playScript = async (scriptId: string, port: StagePort, initial?: StageState) => {
     const run = runDialogue(scriptOf(scriptId), {
       root: dialogueEl,
       port,
+      ...(initial ? { initial } : {}),
       hintSeen: (id) => seenHints.includes(id),
       markHint: (id) => {
         seenHints = [...seenHints, id];
         persist();
       },
       setDark,
+      sound: dialogueSound,
       ...(import.meta.env.DEV ? { autoAdvance: () => devAutoDialogue } : {}),
     });
     dialogueRun = run;
@@ -679,6 +773,7 @@ function main(): void {
     } finally {
       if (dialogueRun === run) dialogueRun = undefined;
       await setDark(false, 0);
+      sound.stopMelody();
     }
   };
 
@@ -718,6 +813,14 @@ function main(): void {
           return view.removeProp(d.name);
         case 'propChange':
           return view.changeProp(d.name, d.prop);
+        case 'carry':
+        case 'release':
+          return view.setItems(d.actor, after.actors[d.actor]?.items);
+        case 'posture':
+          return view.setPosture(d.actor, after.actors[d.actor]?.posture);
+        case 'light':
+        case 'lightOff':
+          return view.setLight(d.name, after.lights?.[d.name]);
         default:
           return;
       }
@@ -733,11 +836,69 @@ function main(): void {
     },
   });
 
-  /** 戦闘中の会話の舞台（人形は戦闘のユニットなので、カメラだけを動かす） */
+  /**
+   * 戦闘中の会話と戦闘の後の台本の舞台（序章に足りない仕組み）。人形は戦闘のユニットと背景の人。
+   * 台本の人物の名前は、戦場の cast（名前 → id）か、部隊の人物の名前で、ユニットの id に直す。
+   * 動きは見せ方だけで、戦闘の状態は変えない（歩く・退場も見た目だけ。戦闘の後の台本で使う）
+   */
+  const battleActorId = (name: string): string | undefined => {
+    const fromCast = currentSite?.cast?.[name];
+    if (fromCast) return fromCast;
+    const id = Object.entries(TEXT.unitNames).find(([, n]) => n === name)?.[0];
+    return id;
+  };
   const battlePort: StagePort = {
     sync: () => {},
     async run(d) {
-      if (d.kind === 'camera' && d.x !== undefined && d.z !== undefined) await rig.lookAt(mapView.tileTop(d.x, d.z), zoomOf(d));
+      const view = battle?.view;
+      if (!view) return;
+      switch (d.kind) {
+        case 'camera': {
+          const id = d.actor ? battleActorId(d.actor) : undefined;
+          const point = id ? view.actorPoint(id) : d.x !== undefined && d.z !== undefined ? mapView.tileTop(d.x, d.z) : undefined;
+          if (point) await rig.lookAt(point, zoomOf(d));
+          return;
+        }
+        case 'gesture': {
+          const id = battleActorId(d.actor);
+          const g = GESTURES[d.gesture];
+          if (id && g) await view.gesture(id, g);
+          return;
+        }
+        case 'face': {
+          const id = battleActorId(d.actor);
+          const st = battle?.controller?.state;
+          const self = id ? st?.units.find((u) => u.id === id) ?? st?.bystanders?.find((b) => b.id === id) : undefined;
+          const otherId = d.toward ? battleActorId(d.toward) : undefined;
+          const other = otherId ? st?.units.find((u) => u.id === otherId) ?? st?.bystanders?.find((b) => b.id === otherId) : undefined;
+          const facing = d.facing ?? (self && other ? facingToward(self, other, self.facing) : undefined);
+          if (id && facing) await view.turnActor(id, facing);
+          return;
+        }
+        case 'walk': {
+          const id = battleActorId(d.actor);
+          const st = battle?.controller?.state;
+          const from = id ? st?.units.find((u) => u.id === id) ?? st?.bystanders?.find((b) => b.id === id) : undefined;
+          if (id && from) await view.walkActor(id, walkPath(from, d));
+          return;
+        }
+        case 'exit': {
+          const id = battleActorId(d.actor);
+          if (id) await view.vanish(id);
+          return;
+        }
+        case 'light': {
+          const actor = d.actor ? battleActorId(d.actor) : undefined;
+          const color = LIGHT_COLORS[d.color] ?? 0xffffff;
+          await view.setLight(d.name, actor ? { actor, color } : { ...(d.x !== undefined ? { x: d.x, z: d.z } : {}), color });
+          return;
+        }
+        case 'lightOff':
+          await view.setLight(d.name, undefined);
+          return;
+        default:
+          return;
+      }
     },
   };
 
@@ -768,6 +929,7 @@ function main(): void {
       onStory: () => playBook('main', false),
       onPlay: () => showBase(),
       onTrial: (fresh) => playBook('trial', fresh),
+      onSettings: () => showSettingsSheet(screenEl, () => settings, updateSettings),
     });
   };
 
@@ -787,7 +949,7 @@ function main(): void {
     story = { ...story, [bookId]: progress };
     const go = () => {
       if (suspended?.origin.kind === 'story' && suspended.origin.bookId === bookId) return resumeBattle();
-      runScene(bookId);
+      runScene(bookId, true);
     };
     const recap = recapFor(book, progress);
     if (recap.length === 0) return go();
@@ -796,10 +958,16 @@ function main(): void {
     showRecapScreen(screenEl, recap, go);
   };
 
-  /** 今の場面を始める */
-  const runScene = (bookId: string) => {
+  /** 今の場面を始める。章の最初の場面なら、先に章の「これまで」を出す（再開の「これまで」を出した直後は出さない） */
+  const runScene = (bookId: string, recapShown = false) => {
     const book = bookOf(bookId);
     const progress = story[bookId] ?? STORY_START;
+    const startRecap = recapShown ? [] : chapterStartRecap(book, progress);
+    if (startRecap.length > 0) {
+      endBattle();
+      setScreen('recap');
+      return showRecapScreen(screenEl, startRecap, () => runScene(bookId, true));
+    }
     const now = currentScene(book, progress);
     if (!now) {
       setScreen('story-end');
@@ -819,11 +987,19 @@ function main(): void {
         mapView,
         camera: () => rig.camera,
         canvas: stage.renderer.domElement,
-        lookOf: (name) => ACTOR_LOOKS[ACTOR_LOOK_IDS[name] ?? ''] ?? DEFAULT_ACTOR_LOOK,
+        lookOf: (name) => LOOKS[ACTOR_LOOK_IDS[name] ?? ''] ?? DEFAULT_LOOK,
         propModelOf: (kind) => PROP_KINDS[kind] ?? 'box',
+        postureOf: (name) => POSTURES[name],
+        lightColorOf: (name) => LIGHT_COLORS[name] ?? 0xffffff,
       });
       sceneView = view;
-      void playScript(scene.scriptId, scenePort(view)).then(() => {
+      // 会話のマップに置いておく物（家具など）を、舞台の最初の様子にする
+      const initial: StageState = {
+        actors: {},
+        props: Object.fromEntries((stageDef.props ?? []).map((p) => [p.id, { prop: p.kind, x: p.x, z: p.z }])),
+        dark: false,
+      };
+      void playScript(scene.scriptId, scenePort(view), initial).then(() => {
         if (sceneView === view) completeScene(bookId);
       });
       return;
@@ -832,7 +1008,9 @@ function main(): void {
       const target = storySites.find((x) => x.id === scene.battleId);
       if (!target) throw new Error(`物語の戦闘 ${scene.battleId} が見つかりません`);
       const origin: BattleOrigin = { kind: 'story', bookId, chapter: progress.chapter, scene: progress.scene };
-      return startSortie(target, 'main', origin, (state) => finishStoryBattle(bookId, state), showTitle);
+      const party = scene.partyId ? parties[scene.partyId] : undefined;
+      if (scene.partyId && !party) throw new Error(`章のための部隊 ${scene.partyId} が見つかりません`);
+      return startSortie(target, 'main', origin, (state) => finishStoryBattle(bookId, state), showTitle, party);
     }
     // 拠点: 編成と店を使い、「物語を進める」で次へ
     showBase();
@@ -847,18 +1025,66 @@ function main(): void {
     runScene(bookId);
   };
 
-  /** 物語の戦闘が終わった: 経験値と JP（勝てばゴールドと戦利品）を部隊に入れ、勝てば次の場面へ。負ければやり直すかタイトルへ */
+  /** 今の物語の戦闘の場面（章のための部隊で戦うか、戦闘の後の台本を知るため） */
+  const storyBattleScene = (bookId: string) => {
+    const now = currentScene(bookOf(bookId), story[bookId] ?? STORY_START);
+    return now?.scene.kind === 'battle' ? now.scene : undefined;
+  };
+
+  /**
+   * 勝った後の台本を、戦闘のマップの上で流す（序章に足りない仕組み。帰りの門の光・人物が消える、など）。
+   * 決着した直後に閉じて再開した時は、戦闘の見た目を作り直してから流す
+   */
+  const playAfterVictory = async (target: BattleSite, state: BattleState) => {
+    if (!target.afterVictory) return;
+    if (!battle) {
+      useMap(target.map);
+      setScreen('battle');
+      rig.reset();
+      currentSite = target;
+      const shell = createBattleShell({ state, events: [] });
+      battle = { ...shell };
+      void shell.view.updateMap(state.map);
+    }
+    hudEl.hidden = true;
+    labelsEl.hidden = true;
+    await playScript(target.afterVictory, battlePort);
+  };
+
+  /**
+   * 物語の戦闘が終わった: 経験値と JP（勝てばゴールドと戦利品）を部隊に入れ、勝てば次の場面へ。負ければやり直すかタイトルへ。
+   * 章のために決めた部隊で戦った時（序章など）は、部隊に何も入れず、結果の画面も出さない（勝てば台本の後に次の場面へ）
+   */
   const finishStoryBattle = (bookId: string, state: BattleState) => {
-    const before = roster;
     const origin = suspended?.origin;
-    const target = origin?.kind === 'story' ? siteOf(origin) : undefined;
+    const target = origin?.kind === 'story' ? siteOf(origin) : storySites.find((x) => x.id === storyBattleScene(bookId)?.battleId);
+    const won = state.winner === 'player';
+    if (storyBattleScene(bookId)?.partyId) {
+      // 勝った時は、台本を流し終えるまで途中の戦闘を残す（台本の途中で閉じても、もう一度流せるように）
+      if (!won) {
+        suspended = null;
+        persist();
+      }
+      window.setTimeout(() => {
+        void (async () => {
+          if (won && target) await playAfterVictory(target, state);
+          suspended = null;
+          persist();
+          endBattle();
+          if (won) return completeScene(bookId);
+          setScreen('result');
+          showStoryBattleLost(screenEl, () => runScene(bookId, true), showTitle);
+        })();
+      }, 900);
+      return;
+    }
+    const before = roster;
     const result = applyBattleResult(roster, state, catalog, progressionRules);
     const spoils = takeSpoils(result.roster, target?.tiers[0]?.reward, state);
     suspended = null;
     updateRoster(spoils.roster);
-    afterResultPause(() => {
+    const showResult = () => {
       setScreen('result');
-      const won = result.report.victory;
       showReportScreen(
         screenEl,
         result.report,
@@ -867,12 +1093,22 @@ function main(): void {
         won
           ? [{ label: TEXT.story.next, onClick: () => completeScene(bookId), primary: true }]
           : [
-              { label: TEXT.story.retry, onClick: () => runScene(bookId), primary: true },
+              { label: TEXT.story.retry, onClick: () => runScene(bookId, true), primary: true },
               { label: TEXT.title.toTitle, onClick: showTitle },
             ],
         { heading: TEXT.books[bookId] ?? bookId, spoils: spoils.view, unlocks: unlockNotes(before, roster) },
       );
-    });
+    };
+    if (won && target?.afterVictory) {
+      window.setTimeout(() => {
+        void playAfterVictory(target, state).then(() => {
+          endBattle();
+          showResult();
+        });
+      }, 900);
+      return;
+    }
+    afterResultPause(showResult);
   };
 
   const canvas = stage.renderer.domElement;
@@ -934,6 +1170,12 @@ function main(): void {
       },
       /** 今の会話の様子（会話がなければ null。物語の土台） */
       dialogue: () => dialogueRun?.status() ?? null,
+      /** 鳴っている旋律と、最近の効果音（序章に足りない仕組み） */
+      sound: () => ({ melody: sound.melody(), recent: sound.recent() }),
+      /** 手ほどきの様子（なければ null） */
+      tutorial: () => battle?.tutorial?.status() ?? null,
+      /** 設定 */
+      settings: () => settings,
       /** 物語の進み具合 */
       story: () => story,
       /** 暗転しているか */
@@ -1015,6 +1257,7 @@ function main(): void {
     if (battle) {
       battle.labels.setPositions(battle.view.unitAnchors());
       battle.hud.update();
+      battle.tutorial?.update();
     }
   });
 

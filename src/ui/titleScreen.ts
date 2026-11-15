@@ -13,6 +13,8 @@ export interface TitleHandlers {
   onStory(): void;
   onPlay(): void;
   onTrial(fresh: boolean): void;
+  /** 設定の欄を開く（序章に足りない仕組み） */
+  onSettings?(): void;
 }
 
 export function showTitleScreen(root: HTMLElement, handlers: TitleHandlers): void {
@@ -39,6 +41,7 @@ export function showTitleScreen(root: HTMLElement, handlers: TitleHandlers): voi
   } else {
     actions.append(screenButton(TEXT.title.trial, () => handlers.onTrial(true), { className: 'big title-trial', sub: TEXT.title.trialHelp }));
   }
+  if (handlers.onSettings) actions.append(screenButton(TEXT.settings.open, () => handlers.onSettings!(), { className: 'quiet title-settings' }));
   box.append(info, actions);
   root.append(box);
 }
@@ -68,6 +71,23 @@ export function showStoryEndScreen(root: HTMLElement, title: string, onTitle: ()
   info.append(el('h1', 'screen-title', TEXT.story.finished(title)));
   const actions = el('div', 'screen-col');
   actions.append(screenButton(TEXT.title.toTitle, onTitle, { className: 'primary big' }));
+  box.append(info, actions);
+  root.append(box);
+}
+
+/** 章のために決めた部隊で戦った物語の戦闘に負けた（序章に足りない仕組み）。「やり直す」か「タイトルへ」 */
+export function showStoryBattleLost(root: HTMLElement, onRetry: () => void, onTitle: () => void): void {
+  root.innerHTML = '';
+  root.hidden = false;
+  const box = el('div', 'screen-box two-col story-lost-screen');
+  box.dataset.screen = 'story-lost';
+  const info = el('div', 'screen-col');
+  info.append(el('h1', 'screen-title', TEXT.story.battleLost), el('p', 'screen-note', TEXT.story.lostNote));
+  const actions = el('div', 'screen-col');
+  actions.append(
+    screenButton(TEXT.story.retry, onRetry, { className: 'primary big story-retry' }),
+    screenButton(TEXT.title.toTitle, onTitle, { className: 'big' }),
+  );
   box.append(info, actions);
   root.append(box);
 }

@@ -43,11 +43,17 @@ export function occupantAt(state: BattleState, x: number, z: number): UnitState 
   return unitAt(state, x, z) ?? state.units.find((u) => isKnockedOut(u) && u.x === x && u.z === z);
 }
 
-/** 隣り合う2マスの間を、ジャンプ力 jump のユニットが行き来できるか（地形の高さだけで判断） */
+/** 戦わない背景の人が立っているマスか（そのマスは、段差と同じく通れず止まれない。序章に足りない仕組み） */
+export function isBystanderTile(state: Pick<BattleState, 'bystanders'>, c: Coord): boolean {
+  return (state.bystanders ?? []).some((b) => b.x === c.x && b.z === c.z);
+}
+
+/** 隣り合う2マスの間を、ジャンプ力 jump のユニットが行き来できるか（地形の高さと、背景の人が立つマスで判断） */
 export function canStep(state: BattleState, from: Coord, to: Coord, jump: number): boolean {
   const a = getTile(state.map, from.x, from.z);
   const b = getTile(state.map, to.x, to.z);
   if (!a || !b) return false;
+  if (isBystanderTile(state, to)) return false;
   return Math.abs(a.height - b.height) <= jump;
 }
 
@@ -66,7 +72,7 @@ export function reachableTiles(state: BattleState, unit: UnitState): ReachableTi
   // 瞬間移動（フェーズ2-6）: 段差とほかのユニットを無視して、移動力の歩数以内の空いたマスへ
   if (unit.passives.some((p) => p.effect.kind === 'teleport')) {
     return state.map.tiles
-      .filter((t) => manhattan(start, t) >= 1 && manhattan(start, t) <= move && !occupantAt(state, t.x, t.z))
+      .filter((t) => manhattan(start, t) >= 1 && manhattan(start, t) <= move && !occupantAt(state, t.x, t.z) && !isBystanderTile(state, t))
       .map((t) => ({ x: t.x, z: t.z, path: [start, { x: t.x, z: t.z }] }));
   }
   for (let step = 0; step < move; step++) {

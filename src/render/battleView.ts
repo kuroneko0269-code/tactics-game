@@ -2,8 +2,9 @@ import * as THREE from 'three';
 import type { BattleEvent, BattleState, SpellElement, Team, TrapKind, UnitState } from '../core/battleTypes';
 import { DIRECTION_VECTORS, DIRECTIONS, type Coord, type Direction } from '../core/geometry';
 import type { MapView, OverlayTile, ReservedTile, TileCoord, TileMark } from './mapView';
-import { createPuppet, YAW_OF, type Puppet, type PuppetLook } from './puppet';
+import { createPuppet, YAW_OF, type Puppet, type PuppetLook, type PuppetPose } from './puppet';
 import { createPropModel } from './props';
+import { createLightPillar, playGesture, type GestureMotion, type LightPillar } from './motion';
 import type { BattleMap } from '../core/map';
 import { judgeTap, type TapCandidates, type TapHit } from './tapJudge';
 import { createTweens, easeInOut, easeOutCubic } from './tweens';
@@ -76,6 +77,19 @@ export interface BattleView {
   animateTrap(event: Extract<BattleEvent, { type: 'trapTriggered' }>): Promise<void>;
   /** ユニットや目印をシーンから取り除く（戦闘を終えて拠点へ戻る時） */
   dispose(): void;
+  // ---- 戦闘中の会話と、戦闘の後の台本（序章に足りない仕組み。戦闘の結果は変えず、見せ方だけ） ----
+  /** ユニットか背景の人の、頭上のあたりの位置（カメラを向ける先）。いなければ undefined */
+  actorPoint(id: string): THREE.Vector3 | undefined;
+  /** 仕草をさせる */
+  gesture(id: string, motion: GestureMotion): Promise<void>;
+  /** 向きを変える（背景の人も） */
+  turnActor(id: string, facing: Direction): Promise<void>;
+  /** 歩かせる（見た目だけ。道順は始めのマスを含む） */
+  walkActor(id: string, path: readonly Coord[]): Promise<void>;
+  /** 光にさらわれるように消える */
+  vanish(id: string): Promise<void>;
+  /** 光を立てる（マスかユニットに）・消す */
+  setLight(name: string, light: { x?: number; z?: number; actor?: string; color: number } | undefined): Promise<void>;
 }
 
 const TEAM_COLORS: Record<Team, { body: number; ring: number }> = {
@@ -84,18 +98,18 @@ const TEAM_COLORS: Record<Team, { body: number; ring: number }> = {
   neutral: { body: 0xb0a890, ring: 0xffc857 },
 };
 const JOB_LOOKS: Record<string, Omit<PuppetLook, 'body'>> = {
-  warrior: { accent: 0xf2c14e, weapon: 'sword' },
-  archer: { accent: 0x8fd66b, weapon: 'bow' },
-  mage: { accent: 0x8a5cf0, weapon: 'staff' },
-  healer: { accent: 0xf4f1e8, weapon: 'staff' },
+  warrior: { accent: 0xf2c14e, weapon: 'sword', hat: 'helm' },
+  archer: { accent: 0x8fd66b, weapon: 'bow', hat: 'hood' },
+  mage: { accent: 0x8a5cf0, weapon: 'staff', hat: 'wizard' },
+  healer: { accent: 0xf4f1e8, weapon: 'staff', hat: 'wizard' },
   // フェーズ2-6 のジョブ（仮の人形は、帽子と武器の形を3種類から選び、色で見分ける）
-  timekeeper: { accent: 0x5fd0e0, weapon: 'sword' },
-  knight: { accent: 0xb8c4d6, weapon: 'sword' },
-  monk: { accent: 0xe07a3a, weapon: 'bow' },
-  thief: { accent: 0x5a6a52, weapon: 'bow' },
-  timeMage: { accent: 0x3fc1c9, weapon: 'staff' },
-  summoner: { accent: 0x2f9e5a, weapon: 'staff' },
-  magicKnight: { accent: 0xc0404f, weapon: 'sword' },
+  timekeeper: { accent: 0x5fd0e0, weapon: 'sword', hat: 'helm' },
+  knight: { accent: 0xb8c4d6, weapon: 'sword', hat: 'helm' },
+  monk: { accent: 0xe07a3a, weapon: 'bow', hat: 'hood' },
+  thief: { accent: 0x5a6a52, weapon: 'bow', hat: 'hood' },
+  timeMage: { accent: 0x3fc1c9, weapon: 'staff', hat: 'wizard' },
+  summoner: { accent: 0x2f9e5a, weapon: 'staff', hat: 'wizard' },
+  magicKnight: { accent: 0xc0404f, weapon: 'sword', hat: 'helm' },
 };
 /** 属性の色（仮） */
 export const ELEMENT_COLORS: Record<SpellElement, number> = {
@@ -144,6 +158,13 @@ export function createBattleView(options: {
   initial: BattleState;
   camera: () => THREE.Camera;
   canvas: HTMLCanvasElement;
+  /**
+   * ユニットの人物としての見た目（序章に足りない仕組み。部隊の人物と、物語の相手）。
+   * undefined なら、ジョブの形と陣営の色の人形
+   */
+  lookOf?: (unit: Pick<UnitState, 'id' | 'jobId' | 'team'>) => PuppetLook | undefined;
+  /** 背景の人の見た目の名前 → 見た目 */
+  bystanderLook?: (look: string) => PuppetLook;
 }): BattleView {
   const { scene, mapView } = options;
   const tweens = createTweens();
@@ -154,7 +175,10 @@ export function createBattleView(options: {
     const look = JOB_LOOKS[unit.jobId] ?? JOB_LOOKS.warrior!;
     // 対象物（物語の土台）は、物の見た目に足もとの輪だけを付ける（向きの目印は付けない）
     const isObject = unit.team === 'neutral';
-    const puppet = isObject ? createPropModel(unit.jobId.replace(/^object:/, '')) : createPuppet({ ...look, body: TEAM_COLORS[unit.team].body });
+    const personal = isObject ? undefined : options.lookOf?.(unit);
+    const puppet = isObject
+      ? createPropModel(unit.jobId.replace(/^object:/, ''))
+      : createPuppet(personal ?? { ...look, body: TEAM_COLORS[unit.team].body });
     puppet.group.add(teamRing(TEAM_COLORS[unit.team].ring));
     if (!isObject) puppet.group.add(facingPointer(TEAM_COLORS[unit.team].ring));
     puppet.group.userData.unitId = unit.id;
@@ -204,6 +228,28 @@ export function createBattleView(options: {
   };
 
   for (const unit of options.initial.units) addVisual(unit);
+
+  // 戦わない背景の人々（序章に足りない仕組み）: 人形だけを立てる（タップの対象にしない。陣営の輪も付けない）
+  const bystanders = new Map<string, { puppet: Puppet; coord: Coord }>();
+  for (const b of options.initial.bystanders ?? []) {
+    const puppet = createPuppet(options.bystanderLook?.(b.look) ?? { body: 0x8a7a6a, accent: 0xd8c8a8, hair: 0x3a3028 });
+    puppet.group.position.copy(mapView.tileTop(b.x, b.z));
+    puppet.setFacing(b.facing);
+    puppet.group.traverse((o) => (o.raycast = () => {}));
+    scene.add(puppet.group);
+    bystanders.set(b.id, { puppet, coord: { x: b.x, z: b.z } });
+  }
+  /** 台本が動かす人形（ユニットか背景の人） */
+  const actorPuppet = (id: string): { puppet: Puppet; coord: Coord } | undefined => {
+    const v = visuals.get(id);
+    if (v) return v;
+    return bystanders.get(id);
+  };
+  const lights = new Map<string, { pillar: LightPillar; actor?: string }>();
+  const dropLight = (name: string) => {
+    lights.get(name)?.pillar.dispose();
+    lights.delete(name);
+  };
 
   // 落石の岩（使い回す）
   const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.22), new THREE.MeshLambertMaterial({ color: 0x7d6f60 }));
@@ -650,8 +696,76 @@ export function createBattleView(options: {
       const s = screenOf(v.puppet.group.position.clone().add(offset));
       return { x: s.x, y: s.y };
     },
+    actorPoint(id) {
+      const a = actorPuppet(id);
+      return a ? a.puppet.group.position.clone().add(new THREE.Vector3(0, 0.6, 0)) : undefined;
+    },
+    async gesture(id, motion) {
+      const a = actorPuppet(id);
+      if (a) await playGesture(tweens, a.puppet, motion, {} as PuppetPose);
+    },
+    async turnActor(id, facing) {
+      const a = actorPuppet(id);
+      if (!a) return;
+      const from = a.puppet.yaw;
+      let to = YAW_OF[facing];
+      while (to - from > Math.PI) to -= Math.PI * 2;
+      while (to - from < -Math.PI) to += Math.PI * 2;
+      if (Math.abs(to - from) < 0.001) return;
+      await tweens.play(0.2, (t) => a.puppet.setYaw(from + (to - from) * t));
+      a.puppet.setFacing(facing);
+    },
+    async walkActor(id, path) {
+      const a = actorPuppet(id);
+      if (!a) return;
+      for (let i = 1; i < path.length; i++) {
+        const from = mapView.tileTop(path[i - 1]!.x, path[i - 1]!.z);
+        const to = mapView.tileTop(path[i]!.x, path[i]!.z);
+        const dx = path[i]!.x - path[i - 1]!.x;
+        const dz = path[i]!.z - path[i - 1]!.z;
+        a.puppet.setFacing(dx > 0 ? 'east' : dx < 0 ? 'west' : dz > 0 ? 'south' : 'north');
+        await tweens.play(0.28, (t) => a.puppet.group.position.lerpVectors(from, to, t));
+        a.coord = { x: path[i]!.x, z: path[i]!.z };
+      }
+    },
+    async vanish(id) {
+      const a = actorPuppet(id);
+      if (!a) return;
+      const glow = new THREE.Color(0xffffff);
+      const y0 = a.puppet.body.position.y;
+      await tweens.play(1.1, (t) => {
+        a.puppet.setGlow(glow, Math.min(1, t * 2));
+        a.puppet.setOpacity(1 - t);
+        a.puppet.body.position.y = y0 + 0.5 * t * t;
+      });
+      a.puppet.group.visible = false;
+      a.puppet.setGlow(glow, 0);
+    },
+    async setLight(name, light) {
+      if (!light) {
+        const entry = lights.get(name);
+        if (!entry) return;
+        await tweens.play(0.5, (t) => entry.pillar.setOpacity(1 - t));
+        dropLight(name);
+        return;
+      }
+      dropLight(name);
+      const pillar = createLightPillar(light.color);
+      const c = light.actor ? actorPuppet(light.actor)?.coord : light.x !== undefined && light.z !== undefined ? { x: light.x, z: light.z } : undefined;
+      if (!c) return pillar.dispose();
+      pillar.group.position.copy(mapView.tileTop(c.x, c.z));
+      scene.add(pillar.group);
+      lights.set(name, { pillar, ...(light.actor ? { actor: light.actor } : {}) });
+      await tweens.play(0.6, (t) => pillar.setOpacity(t));
+    },
     update(dt, elapsed) {
       tweens.update(dt);
+      for (const b of bystanders.values()) b.puppet.update(elapsed);
+      for (const l of lights.values()) {
+        const at = l.actor ? actorPuppet(l.actor) : undefined;
+        if (at) l.pillar.group.position.set(at.puppet.group.position.x, l.pillar.group.position.y, at.puppet.group.position.z);
+        l.pillar.update(elapsed);
+      }
       for (const v of visuals.values()) {
         v.puppet.update(elapsed);
         if (v.chargeRing.visible) {
@@ -668,6 +782,8 @@ export function createBattleView(options: {
     },
     dispose() {
       for (const v of visuals.values()) scene.remove(v.puppet.group);
+      for (const b of bystanders.values()) scene.remove(b.puppet.group);
+      for (const name of [...lights.keys()]) dropLight(name);
       for (const m of bursts) scene.remove(m);
       scene.remove(activeMarker, arrowGroup, projectile, rock);
       mapView.setMarks([]);

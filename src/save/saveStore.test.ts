@@ -156,3 +156,17 @@ describe('セーブの出入口', () => {
     expect(storeOf(backend).load()).toEqual({ roster, dungeon: v3.dungeon, records: v3.records, battle: null, story: {} });
   });
 });
+
+describe('端末ごとの設定（序章に足りない仕組み）', () => {
+  it('保存して読み込むと戻る。読めない値は初期値にそろえる', async () => {
+    const { createSettingsStore, normalizeSettings, DEFAULT_SETTINGS } = await import('./saveStore');
+    let text: string | null = null;
+    const store = createSettingsStore({ read: () => text, write: (t) => (text = t), remove: () => (text = null) });
+    expect(store.load()).toEqual(DEFAULT_SETTINGS);
+    store.save({ volume: 30, muted: true, skipSeenTutorials: false, seenTutorials: ['a'] });
+    expect(store.load()).toEqual({ volume: 30, muted: true, skipSeenTutorials: false, seenTutorials: ['a'] });
+    expect(normalizeSettings({ volume: 250, muted: 'x', seenTutorials: [1, 'b'] })).toEqual({ ...DEFAULT_SETTINGS, volume: 100, seenTutorials: ['b'] });
+    text = '{壊れた';
+    expect(store.load()).toEqual(DEFAULT_SETTINGS);
+  });
+});

@@ -80,7 +80,12 @@ export function canEndure(unit: Pick<UnitState, 'passives' | 'endureUsed'>): boo
 /**
  * 受けるダメージ（HP まで）を、「踏みとどまる」で耐える場合に直す。damage が HP 以上で、耐えられるなら HP 1 を残す
  */
-export function enduredDamage(unit: Pick<UnitState, 'passives' | 'endureUsed' | 'hp'>, damage: number): { damage: number; endured: boolean } {
+export function enduredDamage(
+  unit: Pick<UnitState, 'passives' | 'endureUsed' | 'hp' | 'minHp'>,
+  damage: number,
+): { damage: number; endured: boolean } {
+  // 倒れないユニット（序章に足りない仕組み）: HP は下限より下がらない
+  if (unit.minHp !== undefined && unit.minHp > 0) return { damage: Math.max(0, Math.min(damage, unit.hp - unit.minHp)), endured: false };
   const d = Math.min(damage, unit.hp);
   if (d >= unit.hp && unit.hp > 0 && canEndure(unit)) return { damage: unit.hp - 1, endured: true };
   return { damage: d, endured: false };

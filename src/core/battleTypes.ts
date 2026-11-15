@@ -701,6 +701,23 @@ export interface UnitPlacement {
   readonly equipment?: readonly EquipmentDefinition[];
   /** 部隊のユニットの経験値と JP（渡すと、戦闘中に経験値と JP を得てレベルが上がる。敵には渡さない） */
   readonly progress?: PlacementProgress;
+  /**
+   * 倒れないユニット（序章に足りない仕組み）: HP はこの値より下がらず、戦闘不能にならない（1 以上の整数）。
+   * 物語で、討てずに終わる相手に使う。情報の欄に「倒れない」と出す
+   */
+  readonly minHp?: number;
+}
+
+/**
+ * 戦わない背景の人々（序章に足りない仕組み）。マップに立つだけで、攻撃や魔法の対象にならず、行動順にも入らない。
+ * 立っているマスは、だれも通れず止まれない（段差と同じ扱い）。look は人形の見た目の名前（画面だけが使う）
+ */
+export interface BystanderPlacement {
+  readonly id: string;
+  readonly x: number;
+  readonly z: number;
+  readonly facing: Direction;
+  readonly look: string;
 }
 
 /**
@@ -789,6 +806,8 @@ export interface BattleSetup {
   readonly traps?: readonly TrapPlacement[];
   /** 対象物（物語の土台） */
   readonly objects?: readonly ObjectPlacement[];
+  /** 戦わない背景の人々 */
+  readonly bystanders?: readonly BystanderPlacement[];
   /** 育成の数値。渡すと、progress を持つユニットが戦闘中に経験値と JP を得る */
   readonly progression?: ProgressionRules;
 }
@@ -859,6 +878,8 @@ export interface UnitState {
   readonly endureUsed: boolean;
   /** 対象物なら、その種類（見た目と名前の id）。ユニットなら省く（物語の土台） */
   readonly object?: { readonly kind: string };
+  /** 倒れないユニットの HP の下限（UnitPlacement の minHp）。省くと倒れる */
+  readonly minHp?: number;
 }
 
 /** いま手番を持っているユニットの進み具合 */
@@ -909,6 +930,8 @@ export interface BattleState {
    * 最後にダメージ・回復・状態変化の付与が起きた手番（膠着の判定。フェーズ2-6）。省いた状態（以前の途中の戦闘）は、今の手番として扱う
    */
   readonly lastActivityTurn?: number;
+  /** 戦わない背景の人々（立っているマスは通れない）。省いた状態は、いないものとして扱う */
+  readonly bystanders?: readonly BystanderPlacement[];
 }
 
 /** プレイヤーや AI が選ぶ行動 */

@@ -35,12 +35,23 @@ export interface DialogueDeps {
   readonly initial?: StageState;
   /** 開発中の自動テスト用: true なら台詞をタップを待たずに進める（今までの確認で、戦闘中の会話に止められないように） */
   readonly autoAdvance?: () => boolean;
+  /** 旋律と効果音（序章に足りない仕組み）。省くと鳴らさない */
+  readonly sound?: DialogueSound;
+}
+
+/** 会話から使う音の口 */
+export interface DialogueSound {
+  playMelody(melody: string, timbre: string, mark?: string): void;
+  stopMelody(): void;
+  waitMelody(remaining: number): Promise<void>;
+  /** 台本の効果音（台本に書く名前） */
+  effect(name: string): void;
 }
 
 /** 自動プレイが読む、今の会話の様子 */
 export interface DialogueStatus {
   readonly active: boolean;
-  readonly waiting: 'line' | 'hold' | 'walk' | 'busy' | 'none';
+  readonly waiting: 'line' | 'hold' | 'walk' | 'title' | 'busy' | 'none';
   readonly index: number;
   readonly speaker: string | null;
   readonly text: string;
@@ -262,6 +273,33 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       release = finish;
     });
 
+  /** 章の題を画面いっぱいに出す（タップか、少し待つと次へ。早送りなら短く） */
+  const chapterTitle = (title: string, subtitle: string) =>
+    new Promise<void>((resolve) => {
+      const card = el('div', 'chapter-title-card');
+      card.dataset.screen = 'chapter-title';
+      card.append(el('div', 'chapter-title-main', title), el('div', 'chapter-title-sub', subtitle), el('div', 'chapter-title-next', TEXT.dialogue.titleNext));
+      document.body.append(card);
+      let closed = false;
+      const close = () => {
+        if (closed) return;
+        closed = true;
+        window.clearTimeout(timer);
+        card.classList.add('closing');
+        window.setTimeout(() => card.remove(), 300);
+        release = undefined;
+        resolve();
+      };
+      // 文字が出そろうまでの間は、タップで閉じない（誤って飛ばさないように）
+      let ready = false;
+      window.setTimeout(() => (ready = true), fast ? 0 : 700);
+      card.addEventListener('click', () => {
+        if (ready) close();
+      });
+      const timer = window.setTimeout(close, fast || deps.autoAdvance?.() ? 500 : 4200);
+      release = close;
+    });
+
   const walkStep = (actor: string, path: readonly Coord[]) =>
     new Promise<void>((resolve) => {
       let at = 0;
@@ -312,6 +350,10 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
           box.hidden = true;
           waiting = 'hold';
           await holdStep(d.steps, d.label);
+        } else if (d.kind === 'chapterTitle') {
+          box.hidden = true;
+          waiting = 'title';
+          await chapterTitle(d.title, d.subtitle);
         } else if (d.kind === 'walkControl') {
           waiting = 'walk';
           await walkStep(d.actor, d.path);
@@ -337,6 +379,7 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       index = advance(script, nextStop(script, index));
     }
     if (skipped) {
+      deps.sound?.stopMelody();
       const r = skipToEnd(script, index, stage);
       stage = r.stage;
       index = r.index;
@@ -358,6 +401,25 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
     }
     if (d.kind === 'wait') {
       await wait(fast ? Math.min(d.ms, 120) : d.ms);
+      return;
+    }
+    // 旋律と効果音（序章に足りない仕組み）。旋律は待たずに次へ進む（待つ時は 節を待つ）
+    if (d.kind === 'melody') return deps.sound?.playMelody(d.melody, d.timbre, d.mark);
+    if (d.kind === 'melodyStop') return deps.sound?.stopMelody();
+    if (d.kind === 'sound') return deps.sound?.effect(d.sound);
+    if (d.kind === 'melodyWait') {
+      // 早送りの時は待たない（節はそのまま鳴り続ける）
+      if (fast || !deps.sound) return;
+      const p = deps.sound.waitMelody(d.remaining);
+      // スキップされたら、待つのをやめる
+      await new Promise<void>((resolve) => {
+        const prev = release;
+        release = () => {
+          resolve();
+          prev?.();
+        };
+        void p.then(resolve);
+      });
       return;
     }
     await port.run(d, stage, fast);
