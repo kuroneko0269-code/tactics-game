@@ -5,7 +5,7 @@
  * - 隣のマスとの高さの差がジャンプ力以下なら進める（上りも下りも同じ）。
  * - 味方のいるマスは通過できるが、止まれない。
  * - 敵のいるマスは通過もできない。
- * - 戦闘不能のユニットは邪魔にならない。
+ * - 戦闘不能のユニット（敵味方とも）がいるマスは、通過できるが止まれない（フェーズ2-5）。退場したユニットは邪魔にならない。
  * - 鈍足が付いていると、移動力が下がる（effects.ts）。
  */
 import type { BattleState, UnitState } from './battleTypes';
@@ -18,12 +18,29 @@ export interface ReachableTile extends Coord {
   readonly path: readonly Coord[];
 }
 
+/** 立っている（行動できる）か */
 export function isAlive(unit: UnitState): boolean {
   return unit.hp > 0;
 }
 
+/** 戦闘不能で、まだマスに残っている（退場していない。蘇生できる）か */
+export function isKnockedOut(unit: UnitState): boolean {
+  return unit.hp <= 0 && !unit.retired;
+}
+
+/** マップの上にいるか（立っているか、戦闘不能でマスに残っている） */
+export function isOnMap(unit: UnitState): boolean {
+  return !unit.retired;
+}
+
+/** マスに立っているユニット（戦闘不能のユニットは含まない） */
 export function unitAt(state: BattleState, x: number, z: number): UnitState | undefined {
   return state.units.find((u) => isAlive(u) && u.x === x && u.z === z);
+}
+
+/** マスにいるユニット（立っているか、戦闘不能でマスに残っている）。そのマスには止まれない */
+export function occupantAt(state: BattleState, x: number, z: number): UnitState | undefined {
+  return unitAt(state, x, z) ?? state.units.find((u) => isKnockedOut(u) && u.x === x && u.z === z);
 }
 
 /** 隣り合う2マスの間を、ジャンプ力 jump のユニットが行き来できるか（地形の高さだけで判断） */
@@ -67,7 +84,7 @@ export function reachableTiles(state: BattleState, unit: UnitState): ReachableTi
   for (const path of paths.values()) {
     const end = path[path.length - 1]!;
     if (path.length === 1) continue;
-    if (unitAt(state, end.x, end.z)) continue;
+    if (occupantAt(state, end.x, end.z)) continue;
     result.push({ x: end.x, z: end.z, path });
   }
   return result;

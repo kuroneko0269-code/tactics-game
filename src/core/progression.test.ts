@@ -13,6 +13,10 @@ import {
   gainExp,
   gainJp,
   growthPoints,
+  growthTotalCapOf,
+  isJobMastered,
+  isJobUnlocked,
+  masteredJobs,
   isGrowthCapped,
   jobLevel,
   learnAbility,
@@ -31,6 +35,7 @@ import {
   type Roster,
   type RosterUnit,
 } from './progression';
+import { applyAction } from './battle';
 import { makeState, testArcher, testHealer, testMage, testPassives, testSpells, testStrikes, testWarrior } from './testSupport';
 
 /** HP がよく伸びるジョブ（成長率 HP 3.0、攻撃力 0.6） */
@@ -79,6 +84,7 @@ const rules: ProgressionRules = {
   growthCap: { maxHp: 2000, maxMp: 2000, attack: 600, magic: 600, speed: 100 },
   growthWeights: { maxHp: 1, maxMp: 1, attack: 4, magic: 4, speed: 20 },
   growthTotalCap: 60,
+  masteryGrowthCapPercent: 5,
 };
 
 const recruit = (jobId = 'warrior', patch: Partial<RosterUnit> = {}): RosterUnit => ({
@@ -143,7 +149,7 @@ describe('キャラクターのレベルと成長値', () => {
     expect(down.level).toBe(3);
     expect(down.exp).toBe(0);
     expect(down.growth).toEqual({ maxHp: 600, maxMp: 0, attack: 120, magic: 20, speed: 8 });
-    // 伸びの悪いジョブ（MP の成長率 1.2 の魔術師）で下げても、0 より下にはならない
+    // 伸びの悪いジョブ（MP の成長率 1.2 の魔道士）で下げても、0 より下にはならない
     expect(levelDown({ ...grown, jobId: 'mage' }, catalog).growth.maxMp).toBe(0);
     expect(levelDown(recruit(), catalog)).toEqual(recruit());
   });
@@ -212,7 +218,7 @@ describe('JP とジョブのレベル', () => {
   });
 
   /** 戦闘中の進み具合（戦闘中に得た経験値と JP を、戦闘の後に部隊へ書き戻す） */
-  const progressOf = (exp: number, jp: number, jpTotal: number, gainedExp: number, gainedJp: number) => ({ exp, jp, jpTotal, gainedExp, gainedJp });
+  const progressOf = (exp: number, jp: number, jpTotal: number, gainedExp: number, gainedJp: number) => ({ exp, jp, jpTotal, gainedExp, gainedJp, growthTotalCap: 60, masteryPending: false });
 
   it('戦闘の結果: 戦闘中に得た経験値・JP・レベルを部隊へ書き戻し、勝てば倒れたユニットを含む全員に勝利のボーナス。負けても戦闘中の分は持ち帰れる', () => {
     const roster: Roster = { gold: 0, items: [], nextItemSeq: 1, units: [recruit(), { ...recruit('archer'), id: 'u2', jobs: { archer: { jp: 0, jpTotal: 0, learned: [] } } }] };
@@ -386,7 +392,7 @@ describe('受動的なアビリティ（リアクション・サポート・ム�
     expect(passiveChoices(u, 'reaction', catalog)).toEqual(['counter', 'magicShell']);
     expect(passiveChoices(u, 'movement', catalog)).toEqual(['quickStep']);
     expect(passiveChoices(u, 'support', catalog)).toEqual([]);
-    // 魔術師のまま、戦士で覚えた反撃と早足を付ける
+    // 魔道士のまま、戦士で覚えた反撃と早足を付ける
     u = setPassive(setPassive(u, 'reaction', 'counter', catalog), 'movement', 'quickStep', catalog);
     expect(equippedPassives(u)).toEqual(['counter', 'quickStep']);
     // 付け替えると前のものは外れる。null で外す
@@ -448,5 +454,87 @@ describe('編成の検証', () => {
         'duplicateUnit',
       ]),
     );
+  });
+});
+
+describe('ジョブのマスター（フェーズ2-5）', () => {
+  /** sturdy（戦士）のレベルが上限（JP の累計 1750）で、アビリティ（強打・反撃・早足）をすべて習得したユニット */
+  const master = (patch: Partial<RosterUnit> = {}) =>
+    recruit('warrior', { jobs: { warrior: { jp: 0, jpTotal: 1750, learned: ['powerStrike', 'counter', 'quickStep'] } }, ...patch });
+
+  it('マスターの条件: そのジョブのレベルが 8 で、そのジョブのアビリティ（行動・受動的）をすべて習得している', () => {
+    expect(isJobMastered(master(), sturdy, rules)).toBe(true);
+    // レベルが足りない
+    expect(isJobMastered(recruit('warrior', { jobs: { warrior: { jp: 0, jpTotal: 1749, learned: ['powerStrike', 'counter', 'quickStep'] } } }), sturdy, rules)).toBe(false);
+    // 受動的なアビリティが1つ足りない
+    expect(isJobMastered(recruit('warrior', { jobs: { warrior: { jp: 0, jpTotal: 1750, learned: ['powerStrike', 'counter'] } } }), sturdy, rules)).toBe(false);
+    expect(masteredJobs(master(), catalog, rules)).toEqual(['warrior']);
+  });
+
+  it('マスターしたジョブ1つにつき、成長の合計の上限が今の上限の 5%（切り捨て）増える', () => {
+    expect(growthTotalCapOf(recruit(), catalog, rules)).toBe(60);
+    expect(growthTotalCapOf(master(), catalog, rules)).toBe(63);
+    const two = master({
+      jobs: {
+        warrior: { jp: 0, jpTotal: 1750, learned: ['powerStrike', 'counter', 'quickStep'] },
+        healer: { jp: 0, jpTotal: 1750, learned: ['heal'] },
+      },
+    });
+    expect(growthTotalCapOf(two, catalog, rules)).toBe(66);
+    // レベルが上がった時の成長も、増えた上限まで入る（上限 60 のままなら 60 点で止まる）
+    let plain = recruit();
+    let mastered = master();
+    for (let i = 0; i < 30; i++) {
+      plain = levelUp(plain, catalog, rules);
+      mastered = levelUp(mastered, catalog, rules);
+    }
+    expect(growthPoints(plain.growth, rules)).toBe(60);
+    expect(growthPoints(mastered.growth, rules)).toBe(63);
+    expect(isGrowthCapped(mastered.growth, rules, 63)).toBe(true);
+    // 上限が増えた分は、編成の検証でも正しい
+    const roster: Roster = { gold: 0, items: [], nextItemSeq: 1, units: [mastered] };
+    expect(validateRoster(roster, catalog, rules)).toEqual([]);
+    expect(validateRoster({ ...roster, units: [{ ...mastered, jobs: { warrior: { jp: 0, jpTotal: 0, learned: [] } } }] }, catalog, rules)).toContainEqual({
+      kind: 'growthOverTotal',
+      unitId: 'u1',
+    });
+  });
+
+  it('ジョブの解放条件に「あるジョブをマスターしている」を指定できる', () => {
+    const hidden: JobDefinition = { ...testWarrior, id: 'hidden', unlock: [{ jobId: 'warrior', mastered: true }] };
+    const withHidden: GameCatalog = { ...catalog, jobs: [...catalog.jobs, hidden] };
+    expect(isJobUnlocked(recruit(), hidden, rules, withHidden)).toBe(false);
+    expect(isJobUnlocked(master(), hidden, rules, withHidden)).toBe(true);
+    expect(() => changeJob(recruit(), 'hidden', withHidden, rules)).toThrow();
+    expect(changeJob(master(), 'hidden', withHidden, rules).jobId).toBe('hidden');
+    // レベルの条件と両方書いたら、両方満たす必要がある
+    const both: JobDefinition = { ...hidden, unlock: [{ jobId: 'warrior', mastered: true }, { jobId: 'healer', level: 2 }] };
+    expect(isJobUnlocked(master(), both, rules, withHidden)).toBe(false);
+  });
+
+  it('戦闘中にジョブのレベルが上限に届くとマスターになり（出来事 jobMastered）、結果の報告にも出る', () => {
+    const before = recruit('warrior', { jobs: { warrior: { jp: 0, jpTotal: 1740, learned: ['powerStrike', 'counter', 'quickStep'] } } });
+    const s = makeState({
+      heights: [[0, 0, 0, 0]],
+      progression: rules,
+      units: [
+        {
+          id: 'u1',
+          team: 'player',
+          job: sturdy,
+          x: 0,
+          z: 0,
+          progress: { exp: 0, jp: 0, jpTotal: 1740, gainedExp: 0, gainedJp: 0, growthTotalCap: 60, masteryPending: true },
+        },
+        { id: 'e', team: 'enemy', x: 1, z: 0, hp: 999 },
+        { id: 'e2', team: 'enemy', x: 3, z: 0 },
+      ],
+    });
+    const r = applyAction(s, { type: 'attack', targetId: 'e' });
+    expect(r.events).toContainEqual({ type: 'jobMastered', unitId: 'u1', jobId: 'warrior' });
+    expect(r.state.units[0]!.progress).toMatchObject({ growthTotalCap: 63, masteryPending: false });
+    const result = applyBattleResult({ gold: 0, items: [], nextItemSeq: 1, units: [before] }, { ...r.state, winner: 'enemy', turn: null }, catalog, rules);
+    expect(result.report.units[0]!.mastered).toBe(true);
+    expect(isJobMastered(result.roster.units[0]!, sturdy, rules)).toBe(true);
   });
 });

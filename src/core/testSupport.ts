@@ -48,6 +48,7 @@ export const testRules: BattleRules = {
   knockback: { fallDamagePercentPerHeight: 10, blockedDamagePercent: 10 },
   trap: { rockfallDamagePercent: 20 },
   unarmedAttack: { kind: 'melee', maxHeightDiff: 1 },
+  knockout: { count: 3, ctAfterTick: 0 },
 };
 
 export const testWarrior: JobDefinition = {
@@ -199,7 +200,21 @@ export const testKnockback: StrikeDefinition = {
 /** 足止めの矢: ダメージ 60%、鈍足を付ける。弓が必要 */
 export const testSlowArrow: StrikeDefinition = { id: 'slowArrow', damagePercent: 60, hitBonus: 0, weapons: ['bow'], inflicts: 'slow' };
 
-export const testSpells = [testFire, testWind, testHeal, testAimedShot, testThunder, testBigHeal, testSeal, testProtectPrayer];
+/** 蘇生: 最大 HP の 25% で復帰。単体、射程 4、詠唱の速さ 20 */
+export const testRevive: SpellDefinition = {
+  id: 'revive',
+  kind: 'magic',
+  element: 'light',
+  effect: 'revive',
+  power: 25,
+  mpCost: 10,
+  range: 4,
+  areaRadius: 0,
+  heightTolerance: 0,
+  castSpeed: 20,
+};
+
+export const testSpells = [testFire, testWind, testHeal, testAimedShot, testThunder, testBigHeal, testSeal, testProtectPrayer, testRevive];
 export const testStrikes = [testPowerStrike, testKnockback, testSlowArrow];
 
 /** テスト用の受動的なアビリティ（本番の数値は src/data/passives.ts） */
@@ -248,6 +263,25 @@ export const testHealer: JobDefinition = {
 
 export const testJobs = [testWarrior, testArcher, testMage, testHealer];
 
+/** 育成の数値（テスト用） */
+export const testProgressionRules: ProgressionRules = {
+  maxLevel: 50,
+  expBase: 100,
+  expPerLevel: 10,
+  expPerAction: 10,
+  expPerSupportAction: 15,
+  expVictory: 20,
+  expLevelOffset: 10,
+  expLevelPercentMax: 200,
+  jpPerAction: 20,
+  jpVictoryBonus: 50,
+  jobLevelJp: [100, 250, 450, 700, 1000, 1350, 1750],
+  growthCap: { maxHp: 5000, maxMp: 5000, attack: 1000, magic: 1000, speed: 500 },
+  growthWeights: { maxHp: 1, maxMp: 1, attack: 4, magic: 4, speed: 20 },
+  growthTotalCap: 900,
+  masteryGrowthCapPercent: 5,
+};
+
 export const testAi: AiConfig = { advanceAfterIdleTurns: 12, healBelowPercent: 50, supportRange: 3, slowValue: 6, protectMinAllies: 2 };
 export const testAiConfigs: AiConfigs = { player: testAi, enemy: testAi };
 
@@ -260,6 +294,10 @@ export interface TestUnit {
   facing?: Direction;
   hp?: number;
   ct?: number;
+  /** 戦闘不能のカウント（省くと、HP が 0 なら 3、そうでなければ 0） */
+  knockoutCount?: number;
+  /** 退場したか */
+  retired?: boolean;
   mp?: number;
   charging?: ChargeState;
   movedLastTurn?: boolean;
@@ -316,6 +354,8 @@ export function makeState(options: {
       facing: u.facing ?? 'south',
       hp: u.hp ?? job.stats.maxHp,
       ct: u.ct ?? 0,
+      knockoutCount: u.knockoutCount ?? ((u.hp ?? job.stats.maxHp) <= 0 && !u.retired ? 3 : 0),
+      retired: u.retired ?? false,
       stats: job.stats,
       attack: job.attack,
       mp: u.mp ?? job.stats.maxMp,

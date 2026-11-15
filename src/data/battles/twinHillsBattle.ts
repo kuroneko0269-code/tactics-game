@@ -9,12 +9,12 @@ import { kit, weaponOf } from './enemyUnits';
 /**
  * 「ふたつの丘」の戦場: 味方5体 対 敵5体。数値はすべて仮。
  * 配置は上下対称。味方は手前（z が大きい側）で奥を向き、敵は奥で手前を向く。前列に2体、後列に3体。
- * 味方は部隊の並び順（最初の5人なら 戦士・戦士・弓使い・魔術師・癒し手）に、playerSlots の順で置く。
+ * 味方は部隊の並び順（最初の5人なら 戦士・戦士・弓使い・魔道士・治癒師）に、playerSlots の順で置く。
  *
  * 敵の強さは3段階。段階ごとに、敵は決まったレベル・成長値・習得済みアビリティを持つ
  * （プレイヤーのレベルに合わせて変えない。育てる目的を作るため）。
  * 成長値は、そのジョブだけで (レベル − 1) 回レベルを上げた場合と同じにしている。
- * 装備（フェーズ2-4）: やさしい は1段階目の武器だけ（防具なし。癒し手は杖もなし）、ふつう は2段階目の武器と防具、
+ * 装備（フェーズ2-4）: やさしい は1段階目の武器だけ（防具なし。治癒師は杖もなし）、ふつう は2段階目の武器と防具、
  * むずかしい は3段階目の武器と防具と装飾品。勝った時の報酬（ゴールドと戦利品の候補）も段階ごとに決める。
  */
 
@@ -88,8 +88,8 @@ export const twinHillsBattle: BattleSite = {
   ],
   tiers: [
     // やさしい: 最初の部隊とほぼ同じ（レベル 1、最初から使えるアビリティだけ、受動的なアビリティなし）。
-    // ただし防具を付けておらず、癒し手は杖も持たない（ほかは1段階目の武器だけ）。育てていない部隊でも7割ほど勝てるように
-    // （フェーズ2-1b では「敵の癒し手の MP 16」という能力値の補正で表していた調整を、フェーズ2-4 で装備に置き換えた）
+    // ただし防具を付けておらず、治癒師は杖も持たない（ほかは1段階目の武器だけ）。育てていない部隊でも7割ほど勝てるように
+    // （フェーズ2-1b では「敵の治癒師の MP 16」という能力値の補正で表していた調整を、フェーズ2-4 で装備に置き換えた）
     tier('easy', 1, { mage: ['wind', 'fire'], healer: ['heal'] }, {}, (job) => (job.id === 'healer' ? [] : weaponOf(job, 1)), {
       gold: 100,
       loot: [
@@ -108,7 +108,7 @@ export const twinHillsBattle: BattleSite = {
         warrior: ['powerStrike', 'knockback'],
         archer: ['aimedShot', 'slowArrow'],
         mage: ['wind', 'fire', 'seal'],
-        healer: ['heal', 'bigHeal', 'protectPrayer'],
+        healer: ['heal', 'bigHeal', 'protectPrayer', 'revive'],
       },
       { warrior: ['quickStep'], archer: ['focus'], mage: ['magicShell'], healer: ['meditate'] },
       (job) => kit(job, 2),
@@ -120,7 +120,7 @@ export const twinHillsBattle: BattleSite = {
       },
     ),
     // むずかしい: レベル 18。すべての行動アビリティを覚えていて、付けられる受動的なアビリティをすべて付けている。
-    // 3段階目の武器と防具と、装飾品（戦士 跳ね靴、弓使い 早駆けの指輪、魔術師 不動の腕輪、癒し手 静寂よけの護符）
+    // 3段階目の武器と防具と、装飾品（戦士 跳ね靴、弓使い 早駆けの指輪、魔道士 不動の腕輪、治癒師 静寂よけの護符）
     tier(
       'hard',
       18,
@@ -128,7 +128,7 @@ export const twinHillsBattle: BattleSite = {
         warrior: ['powerStrike', 'knockback'],
         archer: ['aimedShot', 'slowArrow'],
         mage: ['wind', 'fire', 'thunder', 'seal'],
-        healer: ['heal', 'bigHeal', 'protectPrayer'],
+        healer: ['heal', 'bigHeal', 'protectPrayer', 'revive'],
       },
       {
         warrior: ['counter', 'heavyArmor', 'quickStep'],

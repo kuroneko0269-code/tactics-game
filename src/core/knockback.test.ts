@@ -204,7 +204,7 @@ describe('反撃', () => {
   it('反撃で手番のユニットが倒れたら、その手番はそこで終わり、次の手番が始まる', () => {
     const state = duel({ hp: 10 });
     const r = findSeed(state, { type: 'attack', targetId: 'e' }, (x) => attacked(x.events).every((a) => a.hit));
-    expect(r.events).toContainEqual({ type: 'defeated', unitId: 'w' });
+    expect(r.events).toContainEqual({ type: 'defeated', unitId: 'w', count: 3 });
     // 味方が全滅したので決着
     expect(r.state.winner).toBe('enemy');
     const withAlly = makeState({
@@ -329,7 +329,7 @@ describe('敵 AI が新しい行動アビリティを使う', () => {
   });
 
   it('封じは、魔法を使う相手を優先する（詠唱中の相手が最優先）', () => {
-    // 魔術師は高い柱の上にいて、相手の攻撃が届かない
+    // 魔道士は高い柱の上にいて、相手の攻撃が届かない
     const heights = flat(8, 8).map((row, z) => row.map((h, x) => (x === 0 && z === 0 ? 5 : h)));
     const units: TestUnit[] = [
       { id: 'm', team: 'enemy', job: testMage, x: 0, z: 0, commands: [{ jobId: 'mage', abilityIds: ['seal'] }] },
@@ -361,11 +361,11 @@ describe('敵 AI が新しい行動アビリティを使う', () => {
     ];
     const state = makeState({ heights: flat(8, 8), units });
     const m = getUnit(state, 'm');
-    // 戦士と癒し手の2体の攻撃が届くので、届かない位置からだけ（0）や 1 体までなら使えない
+    // 戦士と治癒師の2体の攻撃が届くので、届かない位置からだけ（0）や 1 体までなら使えない
     expect(chooseSealSpell(state, m, false)).toBeUndefined();
     expect(chooseSealSpell(state, m, false, 1)).toBeUndefined();
     expect(chooseSealSpell(state, m, false, 2)?.target).toEqual({ kind: 'unit', unitId: 'ph' });
-    // 回復魔法も詠唱もしない相手（魔術師で、詠唱していない）には、届く位置からは使わない
+    // 回復魔法も詠唱もしない相手（魔道士で、詠唱していない）には、届く位置からは使わない
     const mageOnly = makeState({ heights: flat(8, 8), units: [units[0]!, units[1]!, { id: 'pm', team: 'player', job: testMage, x: 0, z: 4 }] });
     expect(chooseSealSpell(mageOnly, getUnit(mageOnly, 'm'), false, 2)).toBeUndefined();
   });

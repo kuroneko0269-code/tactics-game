@@ -5,7 +5,15 @@
  * SaveBackend を差し替えるだけで済むようにしている（画面や戦闘の処理は、保存先を知らない）。
  * データの形と、古い版を直す処理は src/core/saveData.ts。
  */
-import { createSaveData, migrateSaveData, type GameRecords, type LoadFailure, type SaveMigrationContext } from '../core/saveData';
+import {
+  createSaveData,
+  migrateSaveData,
+  suspendedBattleFits,
+  type GameRecords,
+  type LoadFailure,
+  type SaveMigrationContext,
+  type SuspendedBattle,
+} from '../core/saveData';
 import { validateRoster, type GameCatalog, type ProgressionRules, type Roster } from '../core/progression';
 import type { DungeonState } from '../core/dungeon';
 
@@ -16,11 +24,15 @@ export interface SaveBackend {
   remove(): void;
 }
 
-/** 保存するもの: 部隊の育成の状態（所持金・所持品を含む）と、ダンジョンの進み具合・クリアの記録、訓練戦の記録 */
+/**
+ * 保存するもの: 部隊の育成の状態（所持金・所持品を含む）と、ダンジョンの進み具合・クリアの記録、訓練戦の記録、
+ * 途中の戦闘（フェーズ2-5。行動がひとつ確定するたびに保存する）
+ */
 export interface GameSave {
   readonly roster: Roster;
   readonly dungeon: DungeonState;
   readonly records: GameRecords;
+  readonly battle: SuspendedBattle | null;
 }
 
 export interface SaveStore {
@@ -94,10 +106,13 @@ export function createSaveStore(
         onLoadFailure('invalidRoster');
         return undefined;
       }
-      return { roster: result.data.roster, dungeon: result.data.dungeon, records: result.data.records };
+      const { roster, dungeon, records } = result.data;
+      // 途中の戦闘が部隊やダンジョンの進み具合と合わなければ、その戦闘だけ捨てる
+      const battle = result.data.battle && suspendedBattleFits(result.data.battle, roster, dungeon) ? result.data.battle : null;
+      return { roster, dungeon, records, battle };
     },
-    save({ roster, dungeon, records }) {
-      backend.write(JSON.stringify(createSaveData(roster, dungeon, records)));
+    save({ roster, dungeon, records, battle }) {
+      backend.write(JSON.stringify(createSaveData(roster, dungeon, records, battle)));
     },
     clear() {
       backend.remove();

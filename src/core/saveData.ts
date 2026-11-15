@@ -6,7 +6,8 @@
  *   読み込む時は、古い版から順に直して、今の版の形にする。
  * - 保存先（端末の中か、将来のサーバーか）は扱わない。保存と読み込みの出入口は src/save/saveStore.ts。
  *   ここはブラウザの機能を使わない計算だけなので、将来サーバーでもそのまま使える。
- * - 戦闘の途中の状態は保存しない（部隊の育成の状態と、ダンジョンの進み具合・クリアの記録だけ）。
+ * - 戦闘の途中の状態も保存する（フェーズ2-5。以前の「保存しない」方針は取り下げた）。戦闘の状態（BattleState）は
+ *   JSON にそのまま変換できるので、乱数の状態も含めてそのまま入れる（閉じて開き直しても、当たり外れを引き直せない）。
  *
  * 版の歴史:
  * - 版 1（フェーズ2-1a）: 部隊（roster）だけ。
@@ -15,13 +16,29 @@
  * - 版 3（フェーズ2-4）: 部隊に所持金（gold）・所持品（items）・次の個体の番号（nextItemSeq）、ユニットに装備の枠（equipment）、
  *   進み具合の記録（records。訓練戦の段階ごとの勝利の回数）を追加。
  *   版 2 のデータは、育てた状態をそのまま残し、各ユニットに「今のジョブの最初の装備」を配って付け、最初の所持金を持たせる。
+ * - 版 4（フェーズ2-5）: 途中の戦闘（battle。どこの戦闘か（訓練戦の段階か、ダンジョンの何戦目か）と、戦闘の状態）を追加。
+ *   版 3 のデータは「途中の戦闘なし」として直す。
  */
-import type { EquipmentDefinition } from './battleTypes';
+import type { BattleState, EquipmentDefinition } from './battleTypes';
 import type { DungeonState } from './dungeon';
 import type { Roster } from './progression';
 
 /** 今のセーブデータの版 */
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
+
+/** 途中の戦闘が、どこの戦闘か（訓練戦の段階か、ダンジョンの何戦目か） */
+export type BattleOrigin =
+  | { readonly kind: 'training'; readonly tierId: string }
+  | { readonly kind: 'dungeon'; readonly dungeonId: string; readonly battle: number };
+
+/**
+ * 途中の戦闘（フェーズ2-5）。行動がひとつ確定するたびに保存し直す。決着したら消す。
+ * 戦闘中に得た経験値と JP は state のユニットに入っているので、途中で閉じても失われない（再開か撤退で部隊に書き戻す）。
+ */
+export interface SuspendedBattle {
+  readonly origin: BattleOrigin;
+  readonly state: BattleState;
+}
 
 /** 進み具合の記録（ダンジョンのクリアは dungeon にある） */
 export interface GameRecords {
@@ -37,6 +54,8 @@ export interface SaveData {
   readonly roster: Roster;
   readonly dungeon: DungeonState;
   readonly records: GameRecords;
+  /** 途中の戦闘（なければ null） */
+  readonly battle: SuspendedBattle | null;
 }
 
 /**
@@ -87,10 +106,17 @@ export const SAVE_MIGRATIONS: SaveMigrations = {
       records: { trainingWins: {} },
     };
   },
+  /** 版 3 → 4: 途中の戦闘を足す（なし） */
+  3: (old) => ({ ...old, version: 4, battle: null }),
 };
 
-export function createSaveData(roster: Roster, dungeon: DungeonState, records: GameRecords): SaveData {
-  return { version: SAVE_VERSION, roster, dungeon, records };
+export function createSaveData(
+  roster: Roster,
+  dungeon: DungeonState,
+  records: GameRecords,
+  battle: SuspendedBattle | null = null,
+): SaveData {
+  return { version: SAVE_VERSION, roster, dungeon, records, battle };
 }
 
 /** 読み込みに失敗した理由（画面ではなく、開発者向けの記録に使う） */
@@ -119,11 +145,56 @@ export function migrateSaveData(
   if (!looksLikeRoster(data.roster)) return { ok: false, reason: 'badShape' };
   if (!looksLikeDungeon(data.dungeon)) return { ok: false, reason: 'badShape' };
   if (!looksLikeRecords(data.records)) return { ok: false, reason: 'badShape' };
+  // 途中の戦闘は、形が崩れていたら捨てる（部隊などはそのまま使う）
+  const battle = looksLikeSuspendedBattle(data.battle) ? data.battle : null;
   return {
     ok: true,
-    data: { version: currentVersion, roster: data.roster, dungeon: data.dungeon, records: data.records },
+    data: { version: currentVersion, roster: data.roster, dungeon: data.dungeon, records: data.records, battle },
     migratedFrom: from,
   };
+}
+
+/** 途中の戦闘として最低限の形をしているか（中身が部隊と合うかは、読み込む側で確かめる） */
+function looksLikeSuspendedBattle(value: unknown): value is SuspendedBattle {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Record<string, unknown>;
+  const o = v.origin as Record<string, unknown> | null | undefined;
+  const originOk =
+    typeof o === 'object' &&
+    o !== null &&
+    ((o.kind === 'training' && typeof o.tierId === 'string') ||
+      (o.kind === 'dungeon' && typeof o.dungeonId === 'string' && Number.isInteger(o.battle)));
+  const s = v.state as Record<string, unknown> | null | undefined;
+  const stateOk =
+    typeof s === 'object' &&
+    s !== null &&
+    Array.isArray(s.units) &&
+    typeof s.map === 'object' &&
+    typeof s.rules === 'object' &&
+    typeof s.scenario === 'object' &&
+    Number.isInteger(s.rngState) &&
+    Number.isInteger(s.turnNumber) &&
+    s.winner === null &&
+    typeof s.turn === 'object' &&
+    s.turn !== null;
+  return originOk && stateOk;
+}
+
+/**
+ * 途中の戦闘が、今の部隊とダンジョンの進み具合に合っているか（合わなければ捨てる）。
+ * - 味方のユニット（経験値と JP を持つもの）は、すべて部隊にいて、ジョブが同じであること
+ * - ダンジョンの戦闘なら、挑戦中のダンジョンの、その戦闘であること
+ */
+export function suspendedBattleFits(battle: SuspendedBattle, roster: Roster, dungeon: DungeonState): boolean {
+  const players = battle.state.units.filter((u) => u.team === 'player' && u.progress);
+  if (players.length === 0) return false;
+  const fits = players.every((u) => roster.units.some((r) => r.id === u.id && r.jobId === u.jobId));
+  if (!fits) return false;
+  if (battle.origin.kind === 'dungeon') {
+    const run = dungeon.run;
+    return run !== null && run.dungeonId === battle.origin.dungeonId && run.battle === battle.origin.battle;
+  }
+  return true;
 }
 
 /** 記録として最低限の形をしているか */

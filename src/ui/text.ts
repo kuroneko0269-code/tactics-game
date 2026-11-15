@@ -95,8 +95,8 @@ export const TEXT = {
   jobs: {
     warrior: '戦士',
     archer: '弓使い',
-    mage: '魔術師',
-    healer: '癒し手',
+    mage: '魔道士',
+    healer: '治癒師',
   } as Readonly<Record<string, string>>,
 
   /** 行動順の欄に出す、ジョブの1文字の略 */
@@ -104,7 +104,7 @@ export const TEXT = {
     warrior: '戦',
     archer: '弓',
     mage: '魔',
-    healer: '癒',
+    healer: '治',
   } as Readonly<Record<string, string>>,
 
   /** ジョブのコマンド（行動アビリティのまとまり）の名前。ジョブの id で引く */
@@ -122,6 +122,7 @@ export const TEXT = {
     thunder: '雷',
     heal: '癒し',
     bigHeal: '大癒し',
+    revive: '蘇生',
     aimedShot: '狙い撃ち',
     powerStrike: '強打',
     knockback: '突き飛ばし',
@@ -152,6 +153,7 @@ export const TEXT = {
     seal: '封',
     protectPrayer: '守',
     inferno: '業',
+    revive: '蘇',
   } as Readonly<Record<string, string>>,
 
   /** 行動アビリティの短い説明（編成の画面で、習得する前に見る） */
@@ -161,6 +163,7 @@ export const TEXT = {
     thunder: '単体の強い攻撃魔法。詠唱はとても遅い',
     heal: '範囲（5マス）の回復魔法。詠唱は速い',
     bigHeal: '単体の大きな回復魔法',
+    revive: '戦闘不能のユニット1体を、最大 HP の 25% で復帰させる（退場した後は効かない）。詠唱は遅い',
     aimedShot: '狙いを付けてから撃つ。必ず当たり、攻撃力の1.5倍（向きと高低差の補正あり）、射程 3〜6。弓が必要',
     powerStrike: 'ダメージ1.5倍、命中率 -15%。剣か杖が必要',
     knockback: '隣の相手に小さなダメージを与え、1マス押し出す。低い所へ落とすと落下ダメージ、押し出せない時は追加のダメージ。詠唱を中断させる。剣か杖が必要',
@@ -301,8 +304,8 @@ export const TEXT = {
     'e-warrior-1': '敵の戦士A',
     'e-warrior-2': '敵の戦士B',
     'e-archer-1': '敵の弓使い',
-    'e-mage-1': '敵の魔術師',
-    'e-healer-1': '敵の癒し手',
+    'e-mage-1': '敵の魔道士',
+    'e-healer-1': '敵の治癒師',
     'r3-boss': '祭壇の主',
   } as Readonly<Record<string, string>>,
 
@@ -368,6 +371,7 @@ export const TEXT = {
     chooseAbility: (mp: number, maxMp: number) => (maxMp > 0 ? `使うものを選ぶ（残り MP ${mp} / ${maxMp}）` : '使うものを選ぶ'),
     chooseStrikeTarget: (name: string) => `「${name}」: 赤く光る敵をタップ`,
     chooseSpellTarget: '紫のマスから、狙う場所をタップ',
+    chooseReviveTarget: '射程の中の、倒れているユニットをタップ',
     chooseTargetKind: 'ユニットを追いかけて狙うか、そのマスに撃つかを選ぶ',
     targetKindHelp: 'ユニット: 動いても追いかける ／ マス: 動かれると外れる',
     charging: (spell: string) => `「${spell}」を詠唱中。「待機」で詠唱を続ける`,
@@ -386,6 +390,10 @@ export const TEXT = {
     note: '今のまま誰も動かなかった場合',
     allyWarning: (n: number) => `⚠ 味方 ${n} 体を巻き込みます`,
     enemyHealWarning: (n: number) => `⚠ 敵 ${n} 体も回復します`,
+    /** 蘇生の予測（フェーズ2-5）: 復帰した後の HP */
+    revive: (hp: number, maxHp: number) => `復帰後の HP ${hp} / ${maxHp}`,
+    reviveNobody: '戦闘不能の味方がいません',
+    enemyReviveWarning: (n: number) => `⚠ 敵 ${n} 体を復帰させます`,
     mp: (cost: number, mp: number) => `MP ${cost} 消費（残り ${mp - cost}）`,
     status: (status: string) => `${status}を付ける`,
     interrupt: '（詠唱を中断）',
@@ -398,6 +406,36 @@ export const TEXT = {
   spellTiming: (caster: string, spell: string) => `${caster}の「${spell}」が発動`,
   /** 詠唱中のユニットの説明 */
   chargingInfo: (spell: string) => `詠唱中: ${spell}`,
+  /** 戦闘不能（フェーズ2-5） */
+  knockout: {
+    /** 頭上の札（残りのカウント） */
+    badge: (count: number) => `倒 ${count}`,
+    badgeTitle: '戦闘不能（数字は退場までの残りのカウント）',
+    /** 情報の欄 */
+    info: (count: number) => `戦闘不能: 残りカウント ${count}（0 で退場。それまでなら蘇生できる）`,
+    retiredInfo: '退場（この戦闘では蘇生できません）',
+    /** 浮かぶ文言 */
+    down: '戦闘不能',
+    count: (count: number) => `カウント ${count}`,
+    retired: '退場',
+    revived: '復帰！',
+  },
+  /** ジョブのマスター（フェーズ2-5） */
+  mastery: {
+    /** 戦闘中に頭上に出す */
+    pop: (job: string) => `${job} マスター！`,
+    /** 戦闘中の帯 */
+    banner: (name: string, job: string) => `${name}: ${job}をマスター！`,
+    /** 編成の画面のジョブに付ける印 */
+    mark: '★',
+    markTitle: 'マスター',
+    /** 編成で習得してマスターした時の知らせ */
+    toast: (job: string, bonus: number) => `${job}をマスターした！ 成長の上限 +${bonus}`,
+    /** 結果の画面の札 */
+    reportTag: (job: string) => `${job} マスター！`,
+    /** 能力のタブの、成長の上限の内訳 */
+    capNote: (n: number, bonus: number) => `マスター ${n} 個で上限 +${bonus}`,
+  },
   /** 情報の欄の、状態変化（残りの手番数つき） */
   statusInfo: (name: string, help: string, turns: number) => `${name}（${help}）残り ${turns} 手番`,
   /** 情報の欄の、付けている受動的なアビリティ */
@@ -409,6 +447,7 @@ export const TEXT = {
   abilityBlocked: {
     weapon: (weapon: string) => `${weapon}が必要`,
     silence: '沈黙中',
+    noDowned: '倒れた味方なし',
   },
 
   preview: {
@@ -508,6 +547,16 @@ export const TEXT = {
     clearedBadge: (name: string, n: number) => `${name}: クリア済み（${n} 回）`,
     back: '戻る',
     saved: '部隊の状態は、この端末に自動で保存されます',
+    /** 途中の戦闘（フェーズ2-5） */
+    suspendedTraining: (tier: string) => `途中の戦闘: 訓練戦（${tier}）`,
+    suspendedDungeon: (name: string, n: number, mapName: string) => `途中の戦闘: ${name} 第${n}戦「${mapName}」`,
+    suspendedNote: '戦闘の途中です。編成と店は、戦闘を終えると使えます',
+    resumeBattle: '戦闘を再開',
+    resumeBattleHelp: '閉じた時の続きから',
+    retreatBattle: '撤退する',
+    retreatBattleHelp: '得た経験値と JP は持ち帰れます',
+    confirmRetreat: 'この戦闘から撤退しますか？ 負けとして扱います（得た経験値と JP は持ち帰れます。ゴールドと戦利品はありません。ダンジョンなら挑戦も終わります）',
+    confirmRetreatYes: '撤退する',
   },
 
   /** 戦闘中の経験値・JP・レベルアップの表示（フェーズ2-3） */
@@ -547,6 +596,10 @@ export const TEXT = {
     retry: 'この戦闘をやり直す',
     retreat: '撤退して拠点へ戻る',
     lostNote: 'やり直しても撤退しても、得た経験値と JP は持ち帰れます',
+    /** 途中の戦闘から撤退した（フェーズ2-5） */
+    retreatTitle: '撤退しました',
+    retreatNote: 'それまでに得た経験値と JP は持ち帰りました',
+    retreatDungeonNote: 'それまでに得た経験値と JP は持ち帰りました。ダンジョンの挑戦は終わりです',
     /** クリアの画面 */
     clearTitle: (name: string) => `${name} クリア！`,
     firstClear: '初めてのクリア！',
@@ -614,6 +667,7 @@ export const TEXT = {
     current: '今のジョブ',
     locked: 'まだ就けません',
     unlockNeeds: (job: string, lv: number) => `${job} Lv ${lv} が必要`,
+    unlockNeedsMastery: (job: string) => `${job}のマスターが必要`,
     changeJobTitle: (job: string) => `${job}に変える`,
     compareNow: '今',
     compareAfter: '変更後',

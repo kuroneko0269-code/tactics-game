@@ -79,6 +79,8 @@ export function showReportScreen(
     const jobTag = el('span', 'tag job report-job-up');
     jobTag.hidden = true;
     nameCell.append(jobTag);
+    // この戦闘でジョブをマスターした（フェーズ2-5）
+    if (u.mastered) nameCell.append(el('span', 'tag mastery report-mastered', TEXT.mastery.reportTag(TEXT.jobs[u.jobId] ?? u.jobId)));
     if (canLearnSomething(u.unitId)) nameCell.append(el('span', 'tag report-learn', TEXT.report.canLearnTag));
     const exp = el('span', 'report-exp');
     const jp = el('span', 'report-jp');

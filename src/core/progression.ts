@@ -12,6 +12,9 @@
  * - 経験値と JP: 行動のたびに、戦闘中のその場で得る（battle.ts。相手のレベルによって経験値が増減する）。
  *   戦闘が終わったら、戦闘中の値を部隊へ書き戻し、勝利していれば全員に勝利のボーナスを足す（applyBattleResult）。
  *
+ * - ジョブのマスター（フェーズ2-5）: そのジョブのレベルが上限で、そのジョブのアビリティ（行動・受動的）をすべて習得していること。
+ *   マスターしたジョブ1つにつき、成長の点数の合計の上限が増える（growthTotalCapOf）。ジョブの解放条件にも使える。
+ *
  * 計算はすべて整数。数値（成長率、必要な経験値など）は src/data から引数で受け取る。
  * 部隊の状態（Roster）は JSON にそのまま変換できる単純なデータにする（セーブにそのまま使うため）。
  */
@@ -150,17 +153,22 @@ export function growthPoints(growth: GrowthValues, rules: ProgressionRules): num
   return Math.floor(growthPointsX100(growth, rules) / 100);
 }
 
-/** 成長の点数の合計が上限に達しているか */
-export function isGrowthCapped(growth: GrowthValues, rules: ProgressionRules): boolean {
-  return growthPointsX100(growth, rules) >= rules.growthTotalCap * 100;
+/** 成長の点数の合計が上限（totalCap。省くと growthTotalCap）に達しているか */
+export function isGrowthCapped(growth: GrowthValues, rules: ProgressionRules, totalCap: number = rules.growthTotalCap): boolean {
+  return growthPointsX100(growth, rules) >= totalCap * 100;
 }
 
 /**
- * 成長値に、1レベルぶんの成長率を足す。能力ごとの上限と、合計の上限を超えない範囲で足す。
+ * 成長値に、1レベルぶんの成長率を足す。能力ごとの上限と、合計の上限（totalCap。省くと growthTotalCap）を超えない範囲で足す。
  * 合計の上限に近い時は、GROWTH_STATS の順に、入る分だけ足す。
  */
-export function addGrowth(growth: GrowthValues, rates: GrowthValues, rules: ProgressionRules): GrowthValues {
-  let room = rules.growthTotalCap * 100 - growthPointsX100(growth, rules);
+export function addGrowth(
+  growth: GrowthValues,
+  rates: GrowthValues,
+  rules: ProgressionRules,
+  totalCap: number = rules.growthTotalCap,
+): GrowthValues {
+  let room = totalCap * 100 - growthPointsX100(growth, rules);
   const next: Record<GrowthStat, number> = { ...growth };
   for (const s of GROWTH_STATS) {
     let inc = Math.max(0, Math.min(rates[s], rules.growthCap[s] - growth[s]));
@@ -195,7 +203,7 @@ export function expToNext(level: number, rules: ProgressionRules): number {
 export function levelUp(unit: RosterUnit, catalog: Pick<GameCatalog, 'jobs'>, rules: ProgressionRules): RosterUnit {
   if (unit.level >= rules.maxLevel) return unit;
   const rates = growthRates(findJob(catalog, unit.jobId));
-  return { ...unit, level: unit.level + 1, growth: addGrowth(unit.growth, rates, rules) };
+  return { ...unit, level: unit.level + 1, growth: addGrowth(unit.growth, rates, rules, growthTotalCapOf(unit, catalog, rules)) };
 }
 
 /**
@@ -277,6 +285,39 @@ export function gainJp(unit: RosterUnit, jobId: string, amount: number): RosterU
   return { ...unit, jobs: { ...unit.jobs, [jobId]: { ...p, jp: p.jp + add, jpTotal: p.jpTotal + add } } };
 }
 
+// ---- ジョブのマスター（フェーズ2-5） ----
+
+/** ジョブで習得できるアビリティ（行動アビリティと受動的なアビリティ）の id すべて */
+export function jobAbilityIds(job: JobDefinition): string[] {
+  return [...(job.abilities ?? []), ...(job.passives ?? [])].map((a) => a.id);
+}
+
+/** そのジョブのアビリティをすべて習得しているか */
+export function hasLearnedAll(unit: RosterUnit, job: JobDefinition): boolean {
+  const learned = jobProgress(unit, job.id).learned;
+  return jobAbilityIds(job).every((id) => learned.includes(id));
+}
+
+/** そのジョブをマスターしているか（ジョブのレベルが上限で、アビリティをすべて習得している） */
+export function isJobMastered(unit: RosterUnit, job: JobDefinition, rules: ProgressionRules): boolean {
+  return jobLevel(unit, job.id, rules) >= maxJobLevel(rules) && hasLearnedAll(unit, job);
+}
+
+/** マスターしたジョブの id（ジョブの並び順） */
+export function masteredJobs(unit: RosterUnit, catalog: Pick<GameCatalog, 'jobs'>, rules: ProgressionRules): string[] {
+  return catalog.jobs.filter((j) => isJobMastered(unit, j, rules)).map((j) => j.id);
+}
+
+/** マスター1つで増える、成長の点数の合計の上限 */
+export function masteryCapBonus(rules: ProgressionRules): number {
+  return Math.floor((rules.growthTotalCap * rules.masteryGrowthCapPercent) / 100);
+}
+
+/** ユニットの成長の点数の合計の上限（マスターしたジョブ1つにつき masteryCapBonus 増える） */
+export function growthTotalCapOf(unit: RosterUnit, catalog: Pick<GameCatalog, 'jobs'>, rules: ProgressionRules): number {
+  return rules.growthTotalCap + masteredJobs(unit, catalog, rules).length * masteryCapBonus(rules);
+}
+
 // ---- アビリティ ----
 
 /** jobId で習得済みの行動アビリティ（ジョブの一覧の順） */
@@ -345,7 +386,7 @@ export function learnRefusal(
   if (!entry) return 'unknownAbility';
   const p = jobProgress(unit, jobId);
   if (p.learned.includes(abilityId)) return 'alreadyLearned';
-  if (!isJobUnlocked(unit, job, rules)) return 'jobLocked';
+  if (!isJobUnlocked(unit, job, rules, catalog)) return 'jobLocked';
   if (jobLevel(unit, jobId, rules) < (entry.jobLevel ?? 1)) return 'jobLevelTooLow';
   if (p.jp < entry.jpCost) return 'notEnoughJp';
   return null;
@@ -371,9 +412,24 @@ export function learnAbility(
 
 // ---- ジョブチェンジと副コマンド ----
 
-/** ジョブの解放条件（ほかのジョブのレベル）をすべて満たしているか */
-export function isJobUnlocked(unit: RosterUnit, job: JobDefinition, rules: ProgressionRules): boolean {
-  return (job.unlock ?? []).every((r) => jobLevel(unit, r.jobId, rules) >= r.level);
+/**
+ * ジョブの解放条件（ほかのジョブのレベル・マスター）をすべて満たしているか。
+ * マスターの条件は、そのジョブの定義が catalog にある時だけ判定できる（なければ満たさない）
+ */
+export function isJobUnlocked(
+  unit: RosterUnit,
+  job: JobDefinition,
+  rules: ProgressionRules,
+  catalog?: Pick<GameCatalog, 'jobs'>,
+): boolean {
+  return (job.unlock ?? []).every((r) => {
+    if (r.level !== undefined && jobLevel(unit, r.jobId, rules) < r.level) return false;
+    if (r.mastered) {
+      const required = catalog?.jobs.find((j) => j.id === r.jobId);
+      if (!required || !isJobMastered(unit, required, rules)) return false;
+    }
+    return true;
+  });
 }
 
 /**
@@ -387,7 +443,7 @@ export function changeJob(
   rules: ProgressionRules,
 ): RosterUnit {
   const job = findJob(catalog, jobId);
-  if (!isJobUnlocked(unit, job, rules)) throw new Error(`${unit.id} はまだ ${jobId} に就けません`);
+  if (!isJobUnlocked(unit, job, rules, catalog)) throw new Error(`${unit.id} はまだ ${jobId} に就けません`);
   const p = jobProgress(unit, jobId);
   const starters = (job.abilities ?? []).filter((a) => a.starter && !p.learned.includes(a.id)).map((a) => a.id);
   return {
@@ -467,7 +523,7 @@ export function validateRoster(roster: Roster, catalog: GameCatalog, rules: Prog
     seen.add(unitId);
     const job = catalog.jobs.find((j) => j.id === u.jobId);
     if (!job) problems.push({ kind: 'unknownJob', unitId, jobId: u.jobId });
-    else if (!isJobUnlocked(u, job, rules)) problems.push({ kind: 'jobLocked', unitId, jobId: u.jobId });
+    else if (!isJobUnlocked(u, job, rules, catalog)) problems.push({ kind: 'jobLocked', unitId, jobId: u.jobId });
     if (!isInt(u.level) || u.level < 1 || u.level > rules.maxLevel) problems.push({ kind: 'badLevel', unitId });
     if (!isInt(u.exp) || u.exp < 0 || (isInt(u.level) && u.level < rules.maxLevel && u.exp >= expToNext(u.level, rules))) {
       problems.push({ kind: 'badExp', unitId });
@@ -476,7 +532,7 @@ export function validateRoster(roster: Roster, catalog: GameCatalog, rules: Prog
       const g = u.growth[stat];
       if (!isInt(g) || g < 0 || g > rules.growthCap[stat]) problems.push({ kind: 'badGrowth', unitId, stat });
     }
-    if (growthPointsX100(u.growth, rules) > rules.growthTotalCap * 100) problems.push({ kind: 'growthOverTotal', unitId });
+    if (growthPointsX100(u.growth, rules) > growthTotalCapOf(u, catalog, rules) * 100) problems.push({ kind: 'growthOverTotal', unitId });
     for (const [jobId, p] of Object.entries(u.jobs)) {
       const def = catalog.jobs.find((j) => j.id === jobId);
       if (!def) {
@@ -545,6 +601,8 @@ export interface UnitBattleReport {
   readonly jobLevelBefore: number;
   readonly jobLevelAfterBattle: number;
   readonly jobLevelAfter: number;
+  /** この戦闘（勝利のボーナスを含む）で新しくマスターしたか（今のジョブ） */
+  readonly mastered: boolean;
 }
 
 export interface BattleReport {
@@ -603,6 +661,7 @@ export function applyBattleResult(
       jobLevelBefore: jobLevel(before, jobId, rules),
       jobLevelAfterBattle: jobLevel(afterBattle, jobId, rules),
       jobLevelAfter: jobLevel(after, jobId, rules),
+      mastered: !isJobMastered(before, findJob(catalog, jobId), rules) && isJobMastered(after, findJob(catalog, jobId), rules),
     });
     next = replaceUnit(next, after);
   }

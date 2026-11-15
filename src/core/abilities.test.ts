@@ -180,10 +180,10 @@ describe('敵 AI が新しい行動アビリティを使う', () => {
     expect(plan.target).toEqual({ kind: 'unit', unitId: 'p' });
   });
 
-  it('魔術師は、留まりやすい相手（前の手番で動かなかった）には、単体で強い雷を使う。動いた相手には速い風', () => {
+  it('魔道士は、留まりやすい相手（前の手番で動かなかった）には、単体で強い雷を使う。動いた相手には速い風', () => {
     const make = (moved: boolean) =>
       makeState({
-        // 魔術師は高さ 5 の柱の上にいて、戦士 p の攻撃は届かない
+        // 魔道士は高さ 5 の柱の上にいて、戦士 p の攻撃は届かない
         heights: [[5, 0, 0, 0, 0, 0]],
         units: [
           { id: 'm', team: 'enemy', job: testMage, x: 0, z: 0, commands: [{ jobId: 'mage', abilityIds: ['fire', 'wind', 'thunder'] }] },
@@ -196,7 +196,7 @@ describe('敵 AI が新しい行動アビリティを使う', () => {
     expect(chooseDamageSpell(moving, moving.units[0]!, false)?.spellId).toBe('wind');
   });
 
-  it('癒し手は、1体だけを回復する時は回復量の大きい大癒しを使う', () => {
+  it('治癒師は、1体だけを回復する時は回復量の大きい大癒しを使う', () => {
     const state = makeState({
       heights: flat(6, 1),
       units: [
@@ -208,7 +208,7 @@ describe('敵 AI が新しい行動アビリティを使う', () => {
     expect(chooseHealSpell(state, state.units[0]!, false, testAi)?.spellId).toBe('bigHeal');
   });
 
-  it('副コマンドの回復魔法を持つ戦士は、癒し手としては振る舞わない（前に出て攻撃する）', () => {
+  it('副コマンドの回復魔法を持つ戦士は、治癒師としては振る舞わない（前に出て攻撃する）', () => {
     const state = makeState({
       heights: flat(3, 3),
       units: [

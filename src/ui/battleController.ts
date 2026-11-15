@@ -13,8 +13,8 @@ import type {
 import { attackableTargets, attackRangeTiles, previewAttack, strikeOf, weaponFits, type AttackPreview } from '../core/combat';
 import { isSilencedFor, mpCostOf, passiveIdOf, statusBlocker } from '../core/effects';
 import { directionToward, type Coord, type Direction } from '../core/geometry';
-import { chargeArea, hasMpFor, inSpellRange, previewSpellAt, spellOf, spellRangeTiles, targetCenter } from '../core/magic';
-import { reachableTiles, unitAt } from '../core/movement';
+import { affectsUnit, chargeArea, hasMpFor, inSpellRange, previewSpellAt, spellOf, spellRangeTiles, targetCenter } from '../core/magic';
+import { isKnockedOut, occupantAt, reachableTiles, unitAt } from '../core/movement';
 import { targetUnitIds } from '../core/scenario';
 import { predictTimeline } from '../core/turnOrder';
 import { objectivesView, overlayTiles, type OverlayKind } from './objectives';
@@ -45,6 +45,10 @@ export interface BattleViewPort {
   animateCast(event: Extract<BattleEvent, { type: 'castStarted' }>, element: SpellElement): Promise<void>;
   animateSpell(event: Extract<BattleEvent, { type: 'spellResolved' }>, onImpact: () => void): Promise<void>;
   animateDefeat(unitId: string): Promise<void>;
+  /** 戦闘不能のカウントが 0 になって退場する */
+  animateRetire(unitId: string): Promise<void>;
+  /** 蘇生で立ち上がる */
+  animateRevive(unitId: string): Promise<void>;
   /** 戦闘の間ずっと出しておく目印（到達するマス・増援の予告・見えている罠） */
   setOverlays(tiles: readonly { x: number; z: number; kind: OverlayKind }[]): void;
   /** 増援が現れる */
@@ -67,6 +71,11 @@ export interface BattleControllerDeps {
   readonly ai: AiConfig;
   /** 決着した時に呼ぶ（結果の画面へ進むため） */
   readonly onFinished: (state: BattleState) => void;
+  /**
+   * 行動がひとつ確定して、戦闘の状態が変わった時に呼ぶ（途中の戦闘として保存するため。フェーズ2-5）。
+   * 出来事を再生する前に呼ぶので、再生の途中で閉じても、その行動の結果は残る
+   */
+  readonly onStateChanged?: (state: BattleState) => void;
 }
 
 export interface BattleController {
@@ -192,8 +201,18 @@ export function createBattleController(start: ActionResult, deps: BattleControll
     else void perform(step.action);
   };
 
-  /** 魔法の狙い先として選べるマスか（射程の内側） */
-  const canAim = (spell: SpellDefinition, c: Coord) => inSpellRange(spell, actor(), c);
+  /** 魔法の狙い先として選べるマスか（射程の内側。蘇生は、戦闘不能のユニットがいるマスだけ） */
+  const canAim = (spell: SpellDefinition, c: Coord) =>
+    inSpellRange(spell, actor(), c) &&
+    (spell.effect !== 'revive' || state.units.some((u) => affectsUnit(spell, u) && u.x === c.x && u.z === c.z));
+
+  /** 頭上の戦闘不能のカウントを、状態に合わせて出し直す（戦闘の開始・再開の時） */
+  const syncKnockoutLabels = () => {
+    for (const u of state.units) {
+      if (u.retired) labels.setKnockout(u.id, null, true);
+      else labels.setKnockout(u.id, isKnockedOut(u) ? u.knockoutCount : null);
+    }
+  };
 
   /** コマンドのアビリティのうち、今使えるか（使えなければ、ボタンに添える理由） */
   const abilityBlock = (unit: UnitState, abilityId: string): { disabled: boolean; detail?: string } => {
@@ -204,6 +223,10 @@ export function createBattleController(start: ActionResult, deps: BattleControll
       return { disabled: true, detail: TEXT.abilityBlocked.weapon(weapons!.map((w) => TEXT.weapons[w]).join('・')) };
     }
     if (spell && isSilencedFor(unit, spell)) return { disabled: true, detail: TEXT.abilityBlocked.silence };
+    // 蘇生は、戦闘不能の味方がいる時だけ
+    if (spell?.effect === 'revive' && !state.units.some((u) => u.team === unit.team && affectsUnit(spell, u))) {
+      return { disabled: true, detail: TEXT.abilityBlocked.noDowned };
+    }
     if (spell) {
       const cost = mpCostOf(unit, spell);
       return { disabled: !hasMpFor(unit, spell), detail: cost > 0 ? `${TEXT.mp} ${cost}` : undefined };
@@ -392,8 +415,13 @@ export function createBattleController(start: ActionResult, deps: BattleControll
         const spell = spellOf(unit, mode.spellId);
         const range = spellRangeTiles(state.map, spell, unit).map((c) => ({ ...c, kind: 'spellRange' as const }));
         if (mode.kind === 'spellTarget') {
-          view.setMarks([...range, self]);
-          hud.setHint(TEXT.hints.chooseSpellTarget);
+          // 蘇生は、狙える戦闘不能のユニットのマスも示す
+          const downs =
+            spell.effect === 'revive'
+              ? state.units.filter((u) => affectsUnit(spell, u) && inSpellRange(spell, unit, u)).map((u) => ({ x: u.x, z: u.z, kind: 'target' as const }))
+              : [];
+          view.setMarks([...range, ...downs, self]);
+          hud.setHint(spell.effect === 'revive' ? TEXT.hints.chooseReviveTarget : TEXT.hints.chooseSpellTarget);
           hud.setActions([
             { label: TEXT.buttons.back, onClick: () => setMode({ kind: 'abilityMenu', command: commandIndexOf(unit, spell.id) }) },
           ]);
@@ -431,11 +459,14 @@ export function createBattleController(start: ActionResult, deps: BattleControll
         const allies = affected.filter((r) => r.unit.team === unit.team).length;
         const enemies = affected.length - allies;
         const harmful = spell.effect === 'damage' || (spell.effect === 'status' && state.rules.status[spell.inflicts!].harmful);
+        // 蘇生で敵を復帰させる時も警告する（回復と同じ文言の代わりに、蘇生の文言）
         const warning =
           harmful && allies > 0
             ? TEXT.spellPreview.allyWarning(allies)
             : !harmful && enemies > 0
-              ? TEXT.spellPreview.enemyHealWarning(enemies)
+              ? spell.effect === 'revive'
+                ? TEXT.spellPreview.enemyReviveWarning(enemies)
+                : TEXT.spellPreview.enemyHealWarning(enemies)
               : '';
         const target = mode.target;
         hud.showSpellPreview({
@@ -608,6 +639,8 @@ export function createBattleController(start: ActionResult, deps: BattleControll
           await view.animateSpell(ev, () => {
             for (const r of ev.results) {
               const u = getUnit(state, r.unitId);
+              // 蘇生の HP の表示は、続く「復帰」の出来事で出す
+              if (ev.effect === 'revive') continue;
               if (ev.effect === 'heal') labels.popHeal(r.unitId, r.amount);
               else labels.popDamage(r.unitId, r.amount);
               labels.setHp(r.unitId, r.hp, u.stats.maxHp);
@@ -629,9 +662,41 @@ export function createBattleController(start: ActionResult, deps: BattleControll
           await view.wait(0.4);
           break;
         case 'defeated':
+          // 戦闘不能: 倒れた姿でマスに残り、頭上に残りのカウントを出す
           labels.setStatuses(ev.unitId, []);
+          labels.popText(ev.unitId, TEXT.knockout.down);
           await view.animateDefeat(ev.unitId);
+          labels.setKnockout(ev.unitId, ev.count);
           break;
+        case 'knockoutCounted':
+          labels.setKnockout(ev.unitId, ev.count);
+          if (ev.count > 0) {
+            labels.popText(ev.unitId, TEXT.knockout.count(ev.count));
+            await view.wait(0.3);
+          }
+          break;
+        case 'retired':
+          await view.focusTiles([getUnit(state, ev.unitId)]);
+          labels.popText(ev.unitId, TEXT.knockout.retired);
+          await view.animateRetire(ev.unitId);
+          labels.setKnockout(ev.unitId, null, true);
+          break;
+        case 'revived': {
+          const u = getUnit(state, ev.unitId);
+          labels.setKnockout(ev.unitId, null);
+          labels.setHp(ev.unitId, ev.hp, u.stats.maxHp);
+          labels.popText(ev.unitId, TEXT.knockout.revived, 'reaction');
+          await view.animateRevive(ev.unitId);
+          break;
+        }
+        case 'jobMastered': {
+          const u = getUnit(state, ev.unitId);
+          const job = TEXT.jobs[ev.jobId] ?? ev.jobId;
+          labels.popText(ev.unitId, TEXT.mastery.pop(job), 'joblevel');
+          hud.showLevelUp(TEXT.mastery.banner(unitName(u.id, u.jobId), job));
+          await view.wait(0.45);
+          break;
+        }
         case 'turnEnded':
           view.showFacingArrows(undefined);
           await view.turnTo(ev.unitId, ev.facing);
@@ -708,6 +773,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
     refresh();
     const result = applyAction(state, action);
     state = result.state;
+    deps.onStateChanged?.(state);
     await play(result.events);
     afterPlayerAction(before?.unitId);
   };
@@ -740,7 +806,9 @@ export function createBattleController(start: ActionResult, deps: BattleControll
       }
       const unit = actor();
       if (unit.team === 'player') {
-        setMode({ kind: 'main' });
+        // 移動と行動を済ませた後で再開した時は、向きを選ぶところから
+        const t = turn()!;
+        setMode(t.moved && t.acted ? facingMode() : { kind: 'main' });
         return;
       }
       await runEnemyTurn();
@@ -784,6 +852,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
       }
       const result = applyAction(state, action);
       state = result.state;
+      deps.onStateChanged?.(state);
       view.setMarks([]);
       await play(result.events);
       await view.wait(ENEMY_PAUSE.afterAction);
@@ -798,6 +867,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
       labels.setMp(u.id, u.mp, u.stats.maxMp);
       labels.setStatuses(u.id, u.statuses.map((x) => x.id));
     }
+    syncKnockoutLabels();
     hud.showResult(undefined, 0);
     mode = { kind: 'busy' };
     interruptAcceptedTurn = -1;
@@ -814,8 +884,13 @@ export function createBattleController(start: ActionResult, deps: BattleControll
       if (!first || (first.x === unit.x && first.z === unit.z)) return;
       return setMode({ kind: 'facing', facing: directionToward(unit, first, mode.facing) });
     }
-    // ユニットの体をタップした時は、候補はそのユニットのマスだけになっている（tapJudge.ts）
-    const occupied = first ? unitAt(state, first.x, first.z) : undefined;
+    // ユニットの体をタップした時は、候補はそのユニットのマスだけになっている（tapJudge.ts）。
+    // 戦闘不能のユニットも、タップすると情報の欄に残りのカウントが出る
+    const occupied = first ? occupantAt(state, first.x, first.z) : undefined;
+    // 移動を選ぶ時に倒れたユニット（体が低いので、マスの上面に触れたと判定されやすい）を押したら、情報を見せるだけにする。
+    // 近くの選べるマスへ逃がすと、見るつもりで押しただけなのに隣のマスへ移動してしまうため。
+    // （魔法の狙いでは、倒れたユニットのマスも範囲の中心に選べる）
+    if (mode.kind === 'main' && occupied && isKnockedOut(occupied)) return hud.setUnitInfo(occupied, state.turnNumber);
     // 今の操作で選べるマスがあれば、候補の先頭から順に探してそれを選ぶ
     if (mode.kind === 'main' && !turn()!.moved) {
       const reachable = reachableTiles(state, actor());
@@ -833,6 +908,11 @@ export function createBattleController(start: ActionResult, deps: BattleControll
       const spell = spellOf(actor(), mode.spellId);
       const c = candidates.find((c) => canAim(spell, c));
       if (c) {
+        // 蘇生は、戦闘不能のユニットを狙う（マスを狙う選択は出さない）
+        if (spell.effect === 'revive') {
+          const down = state.units.find((u) => affectsUnit(spell, u) && u.x === c.x && u.z === c.z)!;
+          return setMode({ kind: 'spellConfirm', spellId: spell.id, target: { kind: 'unit', unitId: down.id } });
+        }
         // ユニットのいるマスなら、ユニットを狙うかマスを狙うかを選ばせる
         const there = unitAt(state, c.x, c.z);
         if (there) return setMode({ kind: 'spellTargetKind', spellId: spell.id, x: c.x, z: c.z, unitId: there.id });
@@ -843,6 +923,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
     if (occupied) hud.setUnitInfo(occupied, state.turnNumber);
   };
 
+  syncKnockoutLabels();
   void play(start.events).then(proceed);
 
   return {

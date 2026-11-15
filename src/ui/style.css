@@ -2525,3 +2525,134 @@ body {
     font-size: 14px;
   }
 }
+
+/* ---- 戦闘不能・途中の戦闘・マスター（フェーズ2-5） ---- */
+
+/* 頭上の、戦闘不能の残りのカウント（HP の上に） */
+.unit-label-knockout {
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 16px));
+  padding: 0 5px;
+  min-width: 26px;
+  height: 18px;
+  border-radius: 9px;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 900;
+  text-align: center;
+  white-space: nowrap;
+  color: #fff;
+  background: #8a2a2a;
+  border: 1px solid #ffb0a8;
+}
+
+.unit-label-knockout[hidden] {
+  display: none;
+}
+
+.unit-label-knockout[data-count='1'] {
+  background: #c22;
+  animation: knockout-blink 0.8s ease-in-out infinite alternate;
+}
+
+@keyframes knockout-blink {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.55;
+  }
+}
+
+/* 戦闘不能のユニットの頭上の HP は暗くする */
+.unit-label.down .unit-label-hp,
+.unit-label.down .unit-label-mp,
+.unit-label.down .unit-label-status {
+  opacity: 0.45;
+}
+
+/* 情報の欄の戦闘不能 */
+.info-knockout {
+  margin-top: 2px;
+  font-size: 13px;
+  font-weight: bold;
+  color: #ffb0a8;
+}
+
+.info-knockout.retired {
+  color: #b8b8b8;
+}
+
+/* 拠点の、途中の戦闘 */
+.suspended-title {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-weight: bold;
+  background: rgba(255, 214, 102, 0.14);
+  border: 1px solid #ffd666;
+  color: #ffe9a8;
+}
+
+/* 編成の画面の、マスターしたジョブの印 */
+.mastery-mark {
+  margin-left: 4px;
+  color: #ffd666;
+  font-weight: 900;
+}
+
+.tag.mastery {
+  background: #ffd666;
+  color: #2b2100;
+}
+
+/* 編成の画面の、今のジョブの名前の横の「マスター」の札 */
+.job-name .tag.mastery {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  vertical-align: middle;
+}
+
+/* 編成の画面で、マスターした瞬間に短く出す知らせ */
+.mastery-toast {
+  position: fixed;
+  left: 50%;
+  top: max(12px, env(safe-area-inset-top));
+  transform: translateX(-50%);
+  z-index: 30;
+  padding: 10px 16px;
+  border-radius: 10px;
+  font-weight: bold;
+  white-space: nowrap;
+  color: #2b2100;
+  background: #ffd666;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  animation: mastery-toast 2.4s ease forwards;
+}
+
+@keyframes mastery-toast {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -8px);
+  }
+  12%,
+  80% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, 0);
+  }
+}
+
+.report-row .tag.mastery {
+  padding: 0 5px;
+  border-radius: 8px;
+  color: #2b2100;
+}

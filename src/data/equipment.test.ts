@@ -35,7 +35,7 @@ describe('装備の定義（フェーズ2-4）', () => {
     expect(equipment.filter((e) => e.slot === 'accessory' && e.tier > 0)).toHaveLength(6);
   });
 
-  it('ジョブごとの装備できる種類: 戦士は剣と鎧、弓使いは弓と軽装、魔術師と癒し手は杖とローブ', () => {
+  it('ジョブごとの装備できる種類: 戦士は剣と鎧、弓使いは弓と軽装、魔道士と治癒師は杖とローブ', () => {
     const of = (id: string) => jobs.find((j) => j.id === id)!;
     expect([of('warrior').weaponTypes, of('warrior').armorTypes]).toEqual([['sword'], ['heavy']]);
     expect([of('archer').weaponTypes, of('archer').armorTypes]).toEqual([['bow'], ['light']]);

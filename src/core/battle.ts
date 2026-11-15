@@ -23,6 +23,15 @@
  * - HP が減った後（攻撃・魔法・罠）に、「HP が一定以下」「撃破」のきっかけを調べる。
  * - 罠やイベントが起きた移動は、取り消せない。自分の移動で倒れたら、その手番はそこで終わる。
  *
+ * 戦闘不能と蘇生（フェーズ2-5）:
+ * - HP が 0 になったユニットは戦闘不能になり、倒れた姿でそのマスに残る（行動できず、手番も来ない。詠唱は不発、状態変化は消える）。
+ *   CT は溜まり続け、手番が来るはずだった時にカウントが 1 減る。0 になると退場し、マップから消える。
+ * - 蘇生の魔法で、退場する前なら復帰できる（最大 HP の一定の割合、CT は 0）。
+ * - 勝敗では、戦闘不能は倒れたものとして数える（立っているユニットがいなくなった側の負け）。
+ *
+ * ジョブのマスター（フェーズ2-5）: 今のジョブのアビリティをすべて習得しているユニットは、戦闘中にジョブのレベルが上限に届くと
+ * マスターになり、成長の点数の合計の上限が増える（progress.growthTotalCap）。
+ *
  * 状態変化（守り・鈍足・沈黙）は、そのユニットの手番が終わるたびに持続が 1 減り、0 で消える（effects.ts）。
  * 攻撃が当たった後の順番: ダメージ → 突き飛ばし（詠唱の中断、押し出しと落下・追加のダメージ）→ 状態変化 → 瞑想 → 反撃。
  * 反撃で手番のユニットが倒れたら、その手番はそこで終わる。
@@ -38,6 +47,7 @@ import type {
   MapEventState,
   PassiveDefinition,
   PendingReinforcement,
+  ProgressionRules,
   ScenarioState,
   SpellDefinition,
   StatusId,
@@ -105,7 +115,7 @@ export function startBattle(
 ): ActionResult {
   const map = createMap(setup.map);
   const ids = new Set<string>();
-  const build = (p: UnitPlacement) => buildUnit(p, rules, jobs, spells, strikes, passives);
+  const build = (p: UnitPlacement) => buildUnit(p, rules, jobs, spells, strikes, passives, setup.progression);
   const units: UnitState[] = setup.units.map((p) => {
     if (ids.has(p.id)) throw new Error(`ユニット id ${p.id} が重複しています`);
     ids.add(p.id);
@@ -173,6 +183,7 @@ function buildUnit(
   spells: readonly SpellDefinition[],
   strikes: readonly StrikeDefinition[],
   passives: readonly PassiveDefinition[],
+  progression: ProgressionRules | undefined,
 ): UnitState {
   const job = jobs.find((j) => j.id === p.jobId);
   if (!job) throw new Error(`ユニット ${p.id}: ジョブ ${p.jobId} が見つかりません`);
@@ -211,6 +222,8 @@ function buildUnit(
     facing: p.facing,
     hp: stats.maxHp,
     ct: 0,
+    knockoutCount: 0,
+    retired: false,
     stats,
     attack,
     mp: stats.maxMp,
@@ -222,7 +235,15 @@ function buildUnit(
     statBonus,
     equipment,
     progress: p.progress
-      ? { exp: p.progress.exp, jp: p.progress.jp, jpTotal: p.progress.jpTotal, gainedExp: 0, gainedJp: 0 }
+      ? {
+          exp: p.progress.exp,
+          jp: p.progress.jp,
+          jpTotal: p.progress.jpTotal,
+          gainedExp: 0,
+          gainedJp: 0,
+          growthTotalCap: p.progress.growthTotalCap ?? progression?.growthTotalCap ?? 0,
+          masteryPending: p.progress.masteryPending ?? false,
+        }
       : null,
     weapon,
     commands,
@@ -408,11 +429,14 @@ function validateBeforeInterrupt(state: BattleState, action: BattleAction): void
   }
 }
 
-/** ユニットを戦闘不能にする。詠唱中だった魔法は不発になり、状態変化は消える */
+/**
+ * ユニットを戦闘不能にする（倒れた姿でマスに残り、カウントが始まる）。詠唱中だった魔法は不発になり、状態変化は消える
+ */
 function defeat(state: BattleState, unitId: string, events: BattleEvent[]): BattleState {
-  events.push({ type: 'defeated', unitId });
+  const count = state.rules.knockout.count;
+  events.push({ type: 'defeated', unitId, count });
   const unit = getUnit(state, unitId);
-  const next = updateUnit(state, unitId, { statuses: [] });
+  const next = updateUnit(state, unitId, { statuses: [], knockoutCount: count });
   if (!unit.charging) return next;
   events.push({ type: 'spellFizzled', casterId: unitId, spellId: unit.charging.spellId, reason: 'casterDefeated' });
   return updateUnit(next, unitId, { charging: null });
@@ -549,7 +573,11 @@ function resolveWeaponAttack(
 
 /** 支援の魔法（回復・味方に有利な状態変化）か。経験値の元の量が変わる */
 function isSupportive(state: BattleState, spell: SpellDefinition): boolean {
-  return spell.effect === 'heal' || (spell.effect === 'status' && !state.rules.status[spell.inflicts!].harmful);
+  return (
+    spell.effect === 'heal' ||
+    spell.effect === 'revive' ||
+    (spell.effect === 'status' && !state.rules.status[spell.inflicts!].harmful)
+  );
 }
 
 /**
@@ -580,6 +608,18 @@ function grantProgress(
   const jobFrom = jobLevelFromJp(p.jpTotal, rules);
   const jobTo = jobLevelFromJp(p.jpTotal + jp, rules);
   if (jobTo > jobFrom) events.push({ type: 'jobLeveledUp', unitId, jobId: unit.jobId, from: jobFrom, to: jobTo });
+  // ジョブのレベルが上限に届き、アビリティもすべて習得済みなら、マスターになる（成長の上限が増える）
+  if (p.masteryPending && jobTo > jobFrom && jobTo >= rules.jobLevelJp.length + 1) {
+    events.push({ type: 'jobMastered', unitId, jobId: unit.jobId });
+    const q = getUnit(next, unitId).progress!;
+    next = updateUnit(next, unitId, {
+      progress: {
+        ...q,
+        masteryPending: false,
+        growthTotalCap: q.growthTotalCap + Math.floor((rules.growthTotalCap * rules.masteryGrowthCapPercent) / 100),
+      },
+    });
+  }
   // 経験値が貯まったら、その場でレベルを上げる（何度でも）
   for (;;) {
     const u = getUnit(next, unitId);
@@ -590,7 +630,7 @@ function grantProgress(
     }
     const need = expToNext(u.level, rules);
     if (progress.exp < need) break;
-    const growth = addGrowth(u.growth, u.growthRates, rules);
+    const growth = addGrowth(u.growth, u.growthRates, rules, progress.growthTotalCap);
     const stats = computeStats(u.baseStats, growth, u.statBonus, u.passives);
     // 最大 HP・MP が増えた分だけ、今の HP・MP も増やす（倒れているユニットは起き上がらない）
     const alive = isAlive(u);
@@ -818,6 +858,14 @@ function resolveCharge(state: BattleState, casterId: string, events: BattleEvent
     for (const r of preview.results) next = inflict(next, r.unitId, spell.inflicts!, events);
     return grant(next);
   }
+  // 蘇生: 戦闘不能のユニットを、決まった HP で復帰させる（CT は 0。退場していたら効かない）
+  if (spell.effect === 'revive') {
+    for (const r of preview.results) {
+      events.push({ type: 'revived', unitId: r.unitId, hp: r.hp });
+      next = updateUnit(next, r.unitId, { hp: r.hp, ct: 0, knockoutCount: 0 });
+    }
+    return grant(next);
+  }
   for (const r of preview.results) next = updateUnit(next, r.unitId, { hp: r.hp });
   for (const r of preview.results) {
     const u = getUnit(next, r.unitId);
@@ -843,6 +891,10 @@ function beginNextTurn(state: BattleState, events: BattleEvent[]): BattleState {
       if (current.winner) return current;
       continue;
     }
+    if (entry.kind === 'knockout') {
+      current = countKnockout(current, entry.unitId, events);
+      continue;
+    }
     const unit = getUnit(current, entry.unitId);
     const turn: TurnState = {
       unitId: unit.id,
@@ -855,6 +907,20 @@ function beginNextTurn(state: BattleState, events: BattleEvent[]): BattleState {
     events.push({ type: 'turnStarted', unitId: unit.id, turnNumber });
     return { ...current, turn, turnNumber };
   }
+}
+
+/** 戦闘不能のユニットの手番が来るはずだった時: カウントを 1 減らす。0 になれば退場する */
+function countKnockout(state: BattleState, unitId: string, events: BattleEvent[]): BattleState {
+  const unit = getUnit(state, unitId);
+  const count = Math.max(0, unit.knockoutCount - 1);
+  const ct = state.rules.knockout.ctAfterTick;
+  if (count > 0) {
+    events.push({ type: 'knockoutCounted', unitId, count });
+    return updateUnit(state, unitId, { knockoutCount: count, ct });
+  }
+  events.push({ type: 'knockoutCounted', unitId, count: 0 });
+  events.push({ type: 'retired', unitId });
+  return updateUnit(state, unitId, { knockoutCount: 0, ct, retired: true, charging: null });
 }
 
 function updateUnit(state: BattleState, id: string, patch: Partial<UnitState>): BattleState {

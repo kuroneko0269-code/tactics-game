@@ -46,7 +46,12 @@ export interface BattleView {
   animateAttack(event: Extract<BattleEvent, { type: 'attacked' }>, onImpact: () => void): Promise<void>;
   /** 突き飛ばしで押し出される動き（押し出せない時は、その場で揺れる）。止まった瞬間に onImpact を呼ぶ */
   animateKnockback(event: Extract<BattleEvent, { type: 'knockedBack' }>, onImpact: () => void): Promise<void>;
+  /** 戦闘不能になる（倒れた姿になって、そのマスに残る。フェーズ2-5） */
   animateDefeat(unitId: string): Promise<void>;
+  /** 戦闘不能のカウントが 0 になって退場する（消える） */
+  animateRetire(unitId: string): Promise<void>;
+  /** 蘇生で立ち上がる */
+  animateRevive(unitId: string): Promise<void>;
   wait(seconds: number): Promise<void>;
   /** 各ユニットの頭上の画面座標（px） */
   unitAnchors(): { id: string; x: number; y: number; visible: boolean }[];
@@ -96,11 +101,22 @@ const TAP_RING: readonly (readonly [number, number])[] = [5, 10].flatMap((r) =>
   [0, 1, 2, 3, 4, 5, 6, 7].map((k) => [Math.round(r * Math.cos((k * Math.PI) / 4)), Math.round(r * Math.sin((k * Math.PI) / 4))] as const),
 );
 const STEP_SECONDS = 0.2;
+/** 倒れた姿の透明度と、体をマスの中ほどに寄せる量（仰向けに倒すと、頭が奥へはみ出すため） */
+const DOWN_OPACITY = 0.8;
+const DOWN_SHIFT = 0.38;
+
+/** 倒れた姿にする（t が 0 で立った姿、1 で倒れた姿） */
+function setLying(puppet: Puppet, t: number): void {
+  puppet.body.rotation.set(-(Math.PI / 2) * t, 0, 0);
+  puppet.body.position.set(0, 0.06 * t, DOWN_SHIFT * t);
+}
 
 interface UnitVisual {
   readonly puppet: Puppet;
   coord: Coord;
   alive: boolean;
+  /** 戦闘不能で、倒れた姿でマスに残っている（フェーズ2-5） */
+  down: boolean;
   /** 詠唱中の目印（属性の色の輪） */
   readonly chargeRing: THREE.Mesh<THREE.TorusGeometry, THREE.MeshBasicMaterial>;
 }
@@ -133,7 +149,7 @@ export function createBattleView(options: {
     chargeRing.raycast = () => {};
     puppet.group.add(chargeRing);
     scene.add(puppet.group);
-    const v: UnitVisual = { puppet, coord: { x: unit.x, z: unit.z }, alive: true, chargeRing };
+    const v: UnitVisual = { puppet, coord: { x: unit.x, z: unit.z }, alive: true, down: false, chargeRing };
     visuals.set(unit.id, v);
     place(v, unit);
     puppet.setFacing(unit.facing);
@@ -250,7 +266,8 @@ export function createBattleView(options: {
   };
 
   return {
-    pickTargets: () => [mapView.group, ...[...visuals.values()].filter((v) => v.alive).map((v) => v.puppet.group)],
+    // 戦闘不能のユニットも、タップして情報（残りのカウント）を見られ、蘇生で狙える
+    pickTargets: () => [mapView.group, ...[...visuals.values()].filter((v) => v.alive || v.down).map((v) => v.puppet.group)],
     coordOf,
     tapCandidates(hitsAt, x, y) {
       const toHit = (hits: THREE.Intersection[]): TapHit | undefined => {
@@ -286,11 +303,11 @@ export function createBattleView(options: {
         place(v, unit);
         v.puppet.setFacing(unit.facing);
         v.alive = unit.hp > 0;
-        v.puppet.group.visible = v.alive;
-        v.puppet.setOpacity(1);
+        v.down = unit.hp <= 0 && !unit.retired;
+        v.puppet.group.visible = v.alive || v.down;
+        v.puppet.setOpacity(v.down ? DOWN_OPACITY : 1);
         v.puppet.setFlash(0);
-        v.puppet.body.position.set(0, 0, 0);
-        v.puppet.body.rotation.set(0, 0, 0);
+        setLying(v.puppet, v.down ? 1 : 0);
         const spell = unit.charging && unit.spells.find((sp) => sp.id === unit.charging!.spellId);
         v.chargeRing.visible = Boolean(spell) && v.alive;
         if (spell) v.chargeRing.material.color.setHex(ELEMENT_COLORS[spell.element]);
@@ -525,20 +542,43 @@ export function createBattleView(options: {
     },
     async animateDefeat(unitId) {
       const v = visual(unitId);
+      v.chargeRing.visible = false;
       await tweens.play(0.6, (t) => {
-        v.puppet.body.rotation.x = -(Math.PI / 2) * easeOutCubic(t);
-        v.puppet.setOpacity(1 - t * t);
+        setLying(v.puppet, easeOutCubic(t));
+        v.puppet.setOpacity(1 - (1 - DOWN_OPACITY) * t);
       });
       v.alive = false;
+      v.down = true;
+    },
+    async animateRetire(unitId) {
+      const v = visual(unitId);
+      await tweens.play(0.6, (t) => v.puppet.setOpacity(DOWN_OPACITY * (1 - t)));
+      v.alive = false;
+      v.down = false;
       v.puppet.group.visible = false;
       v.chargeRing.visible = false;
+    },
+    async animateRevive(unitId) {
+      const v = visual(unitId);
+      const glow = new THREE.Color(ELEMENT_COLORS.light);
+      v.puppet.group.visible = true;
+      await tweens.play(0.6, (t) => {
+        setLying(v.puppet, 1 - easeInOut(t));
+        v.puppet.setOpacity(DOWN_OPACITY + (1 - DOWN_OPACITY) * t);
+        v.puppet.setGlow(glow, 1 - t);
+      });
+      setLying(v.puppet, 0);
+      v.puppet.setOpacity(1);
+      v.puppet.setGlow(glow, 0);
+      v.alive = true;
+      v.down = false;
     },
     wait: (seconds) => tweens.wait(seconds),
     unitAnchors() {
       return [...visuals.entries()].map(([id, v]) => {
         const world = v.puppet.group.position.clone().add(new THREE.Vector3(0, HEAD_HEIGHT, 0));
         const s = screenOf(world);
-        return { id, x: s.x, y: s.y, visible: v.alive && s.onScreen };
+        return { id, x: s.x, y: s.y, visible: (v.alive || v.down) && s.onScreen };
       });
     },
     tileScreenPosition(x, z) {
@@ -556,7 +596,10 @@ export function createBattleView(options: {
       );
     },
     unitScreenPosition(unitId) {
-      const s = screenOf(visual(unitId).puppet.group.position.clone().add(new THREE.Vector3(0, 0.5, 0)));
+      const v = visual(unitId);
+      // 倒れた姿なら、低い位置（体の中ほど）
+      const offset = v.down ? new THREE.Vector3(0, 0.12, 0) : new THREE.Vector3(0, 0.5, 0);
+      const s = screenOf(v.puppet.group.position.clone().add(offset));
       return { x: s.x, y: s.y };
     },
     update(dt, elapsed) {

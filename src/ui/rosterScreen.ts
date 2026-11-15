@@ -18,6 +18,10 @@ import {
   growthPoints,
   growthRates,
   isGrowthCapped,
+  growthTotalCapOf,
+  isJobMastered,
+  masteredJobs,
+  masteryCapBonus,
   isJobUnlocked,
   jobLevel,
   jobProgress,
@@ -117,10 +121,17 @@ export function createRosterScreen(root: HTMLElement, deps: RosterScreenDeps): R
   };
   const edit = (change: (u: RosterUnit) => RosterUnit, after?: () => void) => {
     const roster = deps.roster();
-    deps.update(replaceUnit(roster, change(findUnit(roster, unitId))));
+    const before = findUnit(roster, unitId);
+    const changed = change(before);
+    deps.update(replaceUnit(roster, changed));
     notice = undefined;
     after?.();
     render();
+    // 習得でジョブをマスターした瞬間に、短く知らせる（フェーズ2-5）
+    const was = masteredJobs(before, catalog, rules);
+    for (const jobId of masteredJobs(changed, catalog, rules).filter((j) => !was.includes(j))) {
+      showMasteryToast(TEXT.mastery.toast(jobName(jobId), masteryCapBonus(rules)));
+    }
   };
   /** 部隊ごと変える（装備の付け替えは、ほかのユニットから外すこともある） */
   const editRoster = (change: (r: Roster) => Roster, after?: () => void) => {
@@ -187,13 +198,20 @@ export function createRosterScreen(root: HTMLElement, deps: RosterScreenDeps): R
       list.append(row);
     }
     // 成長値の合計と上限（棒の右端が上限）
+    // 上限は、マスターしたジョブ1つにつき増える（フェーズ2-5）
     const points = growthPoints(u.growth, rules);
-    const total = el('div', `growth-total${isGrowthCapped(u.growth, rules) ? ' capped' : ''}`);
+    const cap = growthTotalCapOf(u, catalog, rules);
+    const mastered = masteredJobs(u, catalog, rules).length;
+    const total = el('div', `growth-total${isGrowthCapped(u.growth, rules, cap) ? ' capped' : ''}`);
     total.dataset.points = String(points);
-    total.dataset.cap = String(rules.growthTotalCap);
+    total.dataset.cap = String(cap);
     const label = el('div', 'growth-total-label');
-    label.append(el('span', undefined, TEXT.roster.growthTotal), el('span', 'value', `${points} / ${rules.growthTotalCap}`));
-    total.append(label, bar([[points / rules.growthTotalCap, 'bar-total']], true));
+    label.append(
+      el('span', undefined, TEXT.roster.growthTotal),
+      el('span', 'value', `${points} / ${cap}${mastered > 0 ? ` ${TEXT.mastery.mark}` : ''}`),
+    );
+    if (mastered > 0) label.title = TEXT.mastery.capNote(mastered, cap - rules.growthTotalCap);
+    total.append(label, bar([[points / cap, 'bar-total']], true));
     panel.append(
       block,
       legend,
@@ -217,28 +235,40 @@ export function createRosterScreen(root: HTMLElement, deps: RosterScreenDeps): R
     card.dataset.jobId = u.jobId;
     const line = el('div', 'job-line');
     line.append(el('span', undefined, TEXT.roster.jobLevel(lv)), el('span', undefined, TEXT.roster.jp(p.jp)));
+    const currentMastered = isJobMastered(u, findJob(catalog, u.jobId), rules);
+    const nameLine = el('span', 'job-name', jobName(u.jobId));
+    if (currentMastered) nameLine.append(el('span', 'tag mastery', TEXT.mastery.markTitle));
+    card.dataset.mastered = String(currentMastered);
     card.append(
-      el('span', 'job-name', jobName(u.jobId)),
+      nameLine,
       line,
       bar([[next === undefined ? 1 : (p.jpTotal - prev) / (next - prev), 'bar-jp']], true),
       el('span', 'screen-note', next === undefined ? TEXT.roster.jobMaxLevel : TEXT.roster.jpToNext(next - p.jpTotal)),
     );
     const grid = el('div', 'job-grid');
     for (const job of catalog.jobs) {
-      const unlocked = isJobUnlocked(u, job, rules);
+      const unlocked = isJobUnlocked(u, job, rules, catalog);
       const current = job.id === u.jobId;
       const sub = current
         ? TEXT.roster.current
         : !unlocked
-          ? (job.unlock ?? []).map((r) => TEXT.roster.unlockNeeds(jobName(r.jobId), r.level)).join('、') || TEXT.roster.locked
+          ? (job.unlock ?? [])
+                .map((r) =>
+                  r.mastered ? TEXT.roster.unlockNeedsMastery(jobName(r.jobId)) : TEXT.roster.unlockNeeds(jobName(r.jobId), r.level ?? 1),
+                )
+                .join('、') || TEXT.roster.locked
           : `Lv ${jobLevel(u, job.id, rules)} ・ ${TEXT.roster.jp(jobProgress(u, job.id).jp)}`;
-      const b = screenButton(jobName(job.id), () => set(() => (sheet = { kind: 'job', jobId: job.id })), {
+      // マスターしたジョブには印を付ける（フェーズ2-5）
+      const jobMastered = isJobMastered(u, job, rules);
+      const b = screenButton(`${jobName(job.id)}${jobMastered ? ` ${TEXT.mastery.mark}` : ''}`, () => set(() => (sheet = { kind: 'job', jobId: job.id })), {
         className: 'job-choice',
         sub,
         disabled: !unlocked || current,
         pressed: current,
       });
       b.dataset.jobId = job.id;
+      b.dataset.mastered = String(jobMastered);
+      if (jobMastered) b.title = TEXT.mastery.markTitle;
       grid.append(b);
     }
     panel.append(card, grid);
@@ -360,13 +390,17 @@ export function createRosterScreen(root: HTMLElement, deps: RosterScreenDeps): R
     const list = el('div', 'learn-list scroll-area');
     list.dataset.group = learnGroup;
     // 今のジョブを先頭に。解放されていないジョブは出さない
-    const jobsInOrder = [findJob(catalog, u.jobId), ...catalog.jobs.filter((j) => j.id !== u.jobId)].filter((j) => isJobUnlocked(u, j, rules));
+    const jobsInOrder = [findJob(catalog, u.jobId), ...catalog.jobs.filter((j) => j.id !== u.jobId)].filter((j) => isJobUnlocked(u, j, rules, catalog));
     for (const job of jobsInOrder) {
       const entries = groupEntries(job, learnGroup);
       if (entries.length === 0) continue;
       const head = el('div', 'learn-job-head');
       head.append(
-        el('span', undefined, TEXT.roster.jobLevelOf(jobName(job.id), jobLevel(u, job.id, rules))),
+        el(
+          'span',
+          undefined,
+          `${TEXT.roster.jobLevelOf(jobName(job.id), jobLevel(u, job.id, rules))}${isJobMastered(u, job, rules) ? ` ${TEXT.mastery.mark}` : ''}`,
+        ),
         el('span', undefined, TEXT.roster.jp(jobProgress(u, job.id).jp)),
       );
       list.append(head);
@@ -618,4 +652,13 @@ export function createRosterScreen(root: HTMLElement, deps: RosterScreenDeps): R
       render();
     },
   };
+}
+
+/** マスターした瞬間の短い知らせ（画面の上に出て、数秒で消える） */
+function showMasteryToast(text: string): void {
+  const toast = el('div', 'mastery-toast', text);
+  toast.setAttribute('role', 'status');
+  document.body.append(toast);
+  toast.addEventListener('animationend', () => toast.remove());
+  window.setTimeout(() => toast.remove(), 3000);
 }

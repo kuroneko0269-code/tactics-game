@@ -80,8 +80,11 @@ export type GrowthStat = 'maxHp' | 'maxMp' | 'attack' | 'magic' | 'speed';
  */
 export type GrowthValues = Readonly<Record<GrowthStat, number>>;
 
-/** 魔法の効果の種類。status は状態変化を付けるだけ（ダメージも回復もない） */
-export type SpellEffect = 'damage' | 'heal' | 'status';
+/**
+ * 魔法の効果の種類。status は状態変化を付けるだけ（ダメージも回復もない）。
+ * revive は蘇生（戦闘不能のユニットだけに効き、最大 HP の power% で復帰させる。フェーズ2-5）
+ */
+export type SpellEffect = 'damage' | 'heal' | 'status' | 'revive';
 
 /**
  * 詠唱のある行動アビリティの種類。magic は魔法（沈黙で使えなくなり、魔力の殻で軽くなる）、
@@ -188,7 +191,10 @@ export interface SpellDefinition {
    * 向きと高さは、発動した時点の詠唱者と相手の位置・相手の向きで決まる
    */
   readonly directional?: boolean;
-  /** 威力（%）。ダメージ・回復量 = 元の能力値 × 威力 ÷ 100（切り捨て） */
+  /**
+   * 威力（%）。ダメージ・回復量 = 元の能力値 × 威力 ÷ 100（切り捨て）。
+   * 蘇生（effect が revive）では、復帰した時の HP = 対象の最大 HP × 威力 ÷ 100（切り捨て、最小 1）
+   */
   readonly power: number;
   /** 消費 MP */
   readonly mpCost: number;
@@ -254,10 +260,14 @@ export interface JobAbility {
   readonly jobLevel?: number;
 }
 
-/** ジョブの解放条件の1つ（ほかのジョブのレベル） */
+/**
+ * ジョブの解放条件の1つ。level を書けば「そのジョブのレベルが level 以上」、
+ * mastered を true にすれば「そのジョブをマスターしている」（フェーズ2-5。隠しジョブ用）。両方書けば両方
+ */
 export interface JobRequirement {
   readonly jobId: string;
-  readonly level: number;
+  readonly level?: number;
+  readonly mastered?: boolean;
 }
 
 export interface JobDefinition {
@@ -319,6 +329,19 @@ export interface BattleRules {
   readonly trap: TrapRules;
   /** 武器を装備していない時の通常攻撃の届き方（素手） */
   readonly unarmedAttack: AttackProfile;
+  /** 戦闘不能の数値（フェーズ2-5） */
+  readonly knockout: KnockoutRules;
+}
+
+/**
+ * 戦闘不能の数値（src/data に置く）。HP が 0 になったユニットは、倒れた姿でマスに残り、
+ * そのユニットの手番が来るはずだった時（CT がしきい値に達した時）にカウントが 1 減る。0 になると退場する
+ */
+export interface KnockoutRules {
+  /** 戦闘不能になった時のカウント */
+  readonly count: number;
+  /** カウントが減った後の CT */
+  readonly ctAfterTick: number;
 }
 
 /** 罠の数値（src/data に置く） */
@@ -477,7 +500,7 @@ export interface UnitPlacement {
   readonly passives?: readonly string[];
   /**
    * 能力値の補正（マイナスもある）。成長値を足した後に足す（0 より下にはしない）。
-   * 敵の強さの段階の調整に使う（例: 「やさしい」の敵の癒し手は MP が少ない）
+   * 敵の強さの段階の調整に使う（例: 「やさしい」の敵の治癒師は MP が少ない）
    */
   readonly statBonus?: Partial<UnitStats>;
   /**
@@ -505,6 +528,13 @@ export interface UnitProgressState {
   readonly gainedExp: number;
   /** この戦闘で得た JP の合計 */
   readonly gainedJp: number;
+  /** 成長の点数の合計の上限（マスターしたジョブの数で増える。フェーズ2-5） */
+  readonly growthTotalCap: number;
+  /**
+   * 今のジョブのアビリティをすべて習得していて、まだマスターしていないか。
+   * true の時、戦闘中にジョブのレベルが上限に届くとマスターになり、成長の上限が増える
+   */
+  readonly masteryPending: boolean;
 }
 
 /** 部隊のユニットを戦場に出す時に渡す、経験値と JP の今の値 */
@@ -512,6 +542,10 @@ export interface PlacementProgress {
   readonly exp: number;
   readonly jp: number;
   readonly jpTotal: number;
+  /** 成長の点数の合計の上限。省くと ProgressionRules.growthTotalCap */
+  readonly growthTotalCap?: number;
+  /** 今のジョブのアビリティをすべて習得していて、まだマスターしていないか（UnitProgressState.masteryPending） */
+  readonly masteryPending?: boolean;
 }
 
 /** 育成の数値（src/data に置く）。計算は progression.ts。戦闘中の経験値と JP にも使うので、戦闘の状態にも持たせる */
@@ -545,8 +579,10 @@ export interface ProgressionRules {
   readonly growthCap: GrowthValues;
   /** 成長の点数の重み。能力値 1 ぶんの成長を何点と数えるか */
   readonly growthWeights: GrowthValues;
-  /** 成長の点数の合計の上限 */
+  /** 成長の点数の合計の上限（マスターしたジョブがなければ、これがそのまま上限） */
   readonly growthTotalCap: number;
+  /** ジョブを1つマスターするごとに、成長の点数の合計の上限が増える割合（growthTotalCap に対する %。切り捨て） */
+  readonly masteryGrowthCapPercent: number;
 }
 
 /** 1戦ぶんの定義（src/data に置く） */
@@ -571,9 +607,13 @@ export interface UnitState {
   readonly x: number;
   readonly z: number;
   readonly facing: Direction;
-  /** 0 になったら戦闘不能 */
+  /** 0 になったら戦闘不能（倒れた姿でマスに残る。退場するまでは蘇生できる） */
   readonly hp: number;
   readonly ct: number;
+  /** 戦闘不能の残りのカウント（立っている時と退場した後は 0） */
+  readonly knockoutCount: number;
+  /** 退場したか（戦闘不能のカウントが 0 になった。マップから消え、その戦闘では蘇生できない） */
+  readonly retired: boolean;
   /**
    * 今の能力値 = ジョブの基本値（baseStats）+ 成長値（growth）+ 補正（statBonus）に、受動的なアビリティ（重装・早足・身軽）を反映したもの。
    * 戦闘中にレベルが上がる（下がる）と、計算し直す
@@ -772,7 +812,16 @@ export type BattleEvent =
       readonly spellId: string;
       readonly reason: 'acted' | 'silenced' | 'knockedBack';
     }
-  | { readonly type: 'defeated'; readonly unitId: string }
+  /** HP が 0 になり、戦闘不能になった（倒れた姿でマスに残る）。count は戦闘不能のカウント */
+  | { readonly type: 'defeated'; readonly unitId: string; readonly count: number }
+  /** 戦闘不能のユニットの手番が来るはずだった時に、カウントが減った（count は残り） */
+  | { readonly type: 'knockoutCounted'; readonly unitId: string; readonly count: number }
+  /** 戦闘不能のカウントが 0 になり、退場した（マップから消える） */
+  | { readonly type: 'retired'; readonly unitId: string }
+  /** 蘇生した（hp は復帰した時の HP。CT は 0） */
+  | { readonly type: 'revived'; readonly unitId: string; readonly hp: number }
+  /** 戦闘中にジョブをマスターした（ジョブのレベルが上限に届いた。成長の上限が増える） */
+  | { readonly type: 'jobMastered'; readonly unitId: string; readonly jobId: string }
   | {
       /**
        * 罠が発動した。unitId は踏んだ（そのマスにいた）ユニット。イベントで起きた罠でマスに誰もいなければ null。
@@ -846,7 +895,7 @@ export type BattleEvent =
 /** 魔法が1体のユニットに与えた結果 */
 export interface SpellUnitResult {
   readonly unitId: string;
-  /** ダメージ（effect が damage）または回復量（effect が heal）。状態変化だけの魔法では 0 */
+  /** ダメージ（effect が damage）、回復量（effect が heal）、復帰した時の HP（effect が revive）。状態変化だけの魔法では 0 */
   readonly amount: number;
   /** 効果の後の HP */
   readonly hp: number;

@@ -15,13 +15,15 @@
  * - 状態変化の魔法（封じ・守りの祈り）は、範囲内の全員に状態変化を付ける（ダメージも回復もない）。
  *   沈黙が付いた時に魔法を詠唱中なら、その詠唱は中断される（battle.ts）。
  * - 消費 MP は「節約」で、詠唱の速さは「早口」で変わる（effects.ts）。
+ * - 戦闘不能のユニット（フェーズ2-5）は、攻撃・回復・状態変化の魔法の対象にならない。対象にできるのは蘇生（effect が revive）だけで、
+ *   蘇生は戦闘不能のユニット（退場していない）だけに効く。復帰した時の HP は最大 HP × 威力 ÷ 100（切り捨て、最小 1）。
  */
 import type { BattleRules, BattleState, ChargeState, SpellDefinition, SpellTarget, UnitState } from './battleTypes';
 import { computeDamage, heightDamagePercent, weaponFits } from './combat';
 import { damageTaken, isSilencedFor, mpCostOf } from './effects';
 import { manhattan, relativeSide, type Coord, type RelativeSide } from './geometry';
 import { getTile, type BattleMap } from './map';
-import { isAlive, unitAt } from './movement';
+import { isAlive, isKnockedOut, unitAt } from './movement';
 
 /** ユニットが持っている魔法の定義。持っていなければエラー */
 export function spellOf(unit: UnitState, spellId: string): SpellDefinition {
@@ -93,6 +95,7 @@ export function spellAmountOn(
   angle?: { side: RelativeSide; heightPercent: number },
 ): number {
   if (spell.effect === 'status') return 0;
+  if (spell.effect === 'revive') return reviveHp(target, spell);
   const stat = spell.stat === 'attack' ? caster.stats.attack : caster.stats.magic;
   const base =
     spell.directional && angle
@@ -101,6 +104,16 @@ export function spellAmountOn(
   if (spell.effect === 'heal') return Math.max(0, Math.min(base, target.stats.maxHp - target.hp));
   const damage = damageTaken(rules, target, Math.max(rules.minimumDamage, base), { magical: spell.kind === 'magic' });
   return Math.min(damage, target.hp);
+}
+
+/** 蘇生で復帰した時の HP（最大 HP × 威力 ÷ 100、切り捨て、最小 1） */
+export function reviveHp(target: UnitState, spell: SpellDefinition): number {
+  return Math.max(1, Math.floor((target.stats.maxHp * spell.power) / 100));
+}
+
+/** その魔法の対象になるユニットか（蘇生なら戦闘不能のユニット、それ以外は立っているユニット） */
+export function affectsUnit(spell: SpellDefinition, unit: UnitState): boolean {
+  return spell.effect === 'revive' ? isKnockedOut(unit) : isAlive(unit);
 }
 
 export interface SpellPreview {
@@ -137,12 +150,13 @@ export function previewSpellAt(
   const results: { unitId: string; amount: number; hp: number; side?: RelativeSide; heightPercent?: number }[] = [];
   for (const unit of state.units) {
     const u = casterOverride && unit.id === caster.id ? casterOverride : unit;
-    if (!isAlive(u) || !tiles.some((t) => t.x === u.x && t.z === u.z)) continue;
+    if (!affectsUnit(spell, u) || !tiles.some((t) => t.x === u.x && t.z === u.z)) continue;
     const angle = spell.directional
       ? { side: relativeSide(from, u, u.facing), heightPercent: heightDamagePercent(state.rules, heightOf(from), heightOf(u)) }
       : undefined;
     const amount = spellAmountOn(state.rules, caster, spell, u, angle);
-    const hp = spell.effect === 'heal' ? u.hp + amount : spell.effect === 'damage' ? u.hp - amount : u.hp;
+    const hp =
+      spell.effect === 'heal' ? u.hp + amount : spell.effect === 'damage' ? u.hp - amount : spell.effect === 'revive' ? amount : u.hp;
     results.push({ unitId: u.id, amount, hp, ...angle });
   }
   return { center, tiles, results };
@@ -155,17 +169,21 @@ export function isValidSpellTarget(
   from: Coord,
   target: SpellTarget,
 ): boolean {
-  // 倒れたユニットは、新しく狙うことはできない
-  if (target.kind === 'unit' && !state.units.some((u) => u.id === target.unitId && isAlive(u))) return false;
+  // 倒れたユニットは、新しく狙うことはできない（蘇生は、戦闘不能のユニットだけを狙える）
+  if (target.kind === 'unit' && !state.units.some((u) => u.id === target.unitId && affectsUnit(spell, u))) return false;
   const center = targetCenter(state, target);
   if (!center || !getTile(state.map, center.x, center.z)) return false;
   if (target.kind === 'tile' && (!Number.isInteger(target.x) || !Number.isInteger(target.z))) return false;
   return inSpellRange(spell, from, center);
 }
 
-/** マスにいるユニットを狙うか、マスそのものを狙うかを決める補助（マスに生きているユニットがいればその id） */
-export function unitOnTile(state: BattleState, c: Coord): string | undefined {
-  return unitAt(state, c.x, c.z)?.id;
+/**
+ * マスにいるユニットを狙うか、マスそのものを狙うかを決める補助（マスにその魔法の対象になるユニットがいればその id）。
+ * spell を省くと、立っているユニット
+ */
+export function unitOnTile(state: BattleState, c: Coord, spell?: SpellDefinition): string | undefined {
+  if (!spell) return unitAt(state, c.x, c.z)?.id;
+  return state.units.find((u) => affectsUnit(spell, u) && u.x === c.x && u.z === c.z)?.id;
 }
 
 /** 詠唱中の魔法が今発動したら届くマス（画面で予約範囲を薄く表示するため）。詠唱中でなければ空 */

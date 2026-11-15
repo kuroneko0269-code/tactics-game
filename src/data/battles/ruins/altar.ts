@@ -5,10 +5,10 @@ import { altarCrown, robe1, staff1 } from '../../equipment';
 import { enemyUnit, kit } from '../enemyUnits';
 
 /**
- * 第3戦「祭壇の間」: 10×10 の広間。勝利はボス（魔術師）の撃破。
+ * 第3戦「祭壇の間」: 10×10 の広間。勝利はボス（魔道士）の撃破。
  * - ボスは奥の高さ 3 の祭壇にいて、詠唱のとても長い強力な範囲の魔法「業火」（範囲 2、13マス）を使う。
  *   予約された範囲から逃げるか、突き飛ばし・封じで詠唱を止めるかを選ぶ。ボスは相手の攻撃が届く位置へ不用意に出ない。
- * - 取り巻き: 祭壇の前の戦士2体（反撃）、両脇の柱の上の弓使い、祭壇の上の癒し手。
+ * - 取り巻き: 祭壇の前の戦士2体（反撃）、両脇の柱の上の弓使い、祭壇の上の治癒師。
  * - ボスの HP が半分以下になると、祭壇の両脇に取り巻きの戦士が2体現れる（2 手番前に予告）。
  * - 隠れた罠: 落石・ぬかるみを広間に1つずつ。脱力の罠を、味方の開始位置の南西の隅（高い柱の陰の行き止まり）に1つ。
  *   北へ進めば踏まないが、場所を知っていれば、開始位置からすぐに何度でも踏みに行ける。
@@ -84,7 +84,7 @@ export const ruinsAltar: BattleSite = {
         }),
         enemyUnit({ id: 'r3-warrior-2', job: warrior, x: 5, z: 2, level, abilities: ['powerStrike', 'knockback'], passives: ['counter'], equipment: kit(warrior, 1) }),
         enemyUnit({ id: 'r3-archer-1', job: archer, x: 0, z: 2, level, abilities: ['aimedShot'], passives: ['focus'], equipment: kit(archer, 1) }),
-        enemyUnit({ id: 'r3-healer-1', job: healer, x: 5, z: 0, level, abilities: ['heal', 'bigHeal'], passives: ['meditate'], equipment: kit(healer, 1) }),
+        enemyUnit({ id: 'r3-healer-1', job: healer, x: 5, z: 0, level, abilities: ['heal', 'bigHeal', 'revive'], passives: ['meditate'], equipment: kit(healer, 1) }),
       ],
     },
   ],

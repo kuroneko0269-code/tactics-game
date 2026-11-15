@@ -159,8 +159,25 @@ export const inferno: SpellDefinition = {
   castSpeed: 10,
 };
 
+/**
+ * 蘇生: 戦闘不能のユニット1体を、最大 HP の 25%（切り捨て、最小 1）で復帰させる（フェーズ2-5）。復帰した時の CT は 0。
+ * 単体。詠唱は長め（雷と同じ 20）。退場したユニットには効かない。光属性
+ */
+export const revive: SpellDefinition = {
+  id: 'revive',
+  kind: 'magic',
+  element: 'light',
+  effect: 'revive',
+  power: 25,
+  mpCost: 14,
+  range: 4,
+  areaRadius: 0,
+  heightTolerance: 0,
+  castSpeed: 20,
+};
+
 /** 詠唱のある行動アビリティ（魔法と狙い撃ち） */
-export const spells: readonly SpellDefinition[] = [fire, wind, thunder, heal, bigHeal, aimedShot, seal, protectPrayer, inferno];
+export const spells: readonly SpellDefinition[] = [fire, wind, thunder, heal, bigHeal, aimedShot, seal, protectPrayer, inferno, revive];
 
 /** 強打: 通常攻撃のダメージ 1.5 倍、命中率 -15。近接武器（剣・杖）が必要 */
 export const powerStrike: StrikeDefinition = {

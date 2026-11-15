@@ -73,7 +73,7 @@ describe('applyAction', () => {
     const attack = r.events[0]!;
     // 北を向いた相手を南から攻撃 → 背面。命中率 100%
     expect(attack).toMatchObject({ type: 'attacked', side: 'back', hitPercent: 100, hit: true, damage: 10, targetHp: 0 });
-    expect(r.events[1]).toEqual({ type: 'defeated', unitId: 'e' });
+    expect(r.events[1]).toEqual({ type: 'defeated', unitId: 'e', count: 3 });
     state = r.state;
 
     r = applyAction(state, { type: 'endTurn', facing: 'east' });

@@ -17,14 +17,14 @@ export const counter: PassiveDefinition = { id: 'counter', slot: 'reaction', eff
 /** 身かわし（弓使い）: 正面と側面からの、武器による攻撃の命中率 -20 */
 export const evade: PassiveDefinition = { id: 'evade', slot: 'reaction', effect: { kind: 'evade', hitPenalty: 20 } };
 
-/** 魔力の殻（魔術師）: 魔法で受けるダメージ -20%（倍率 80%、切り捨て） */
+/** 魔力の殻（魔道士）: 魔法で受けるダメージ -20%（倍率 80%、切り捨て） */
 export const magicShell: PassiveDefinition = {
   id: 'magicShell',
   slot: 'reaction',
   effect: { kind: 'magicShell', damageTakenPercent: 80 },
 };
 
-/** 瞑想（癒し手）: ダメージを受けて生き残った時、MP を 6 回復する（最大 MP まで） */
+/** 瞑想（治癒師）: ダメージを受けて生き残った時、MP を 6 回復する（最大 MP まで） */
 export const meditate: PassiveDefinition = { id: 'meditate', slot: 'reaction', effect: { kind: 'meditate', mp: 6 } };
 
 // ---- サポート ----
@@ -39,14 +39,14 @@ export const heavyArmor: PassiveDefinition = {
 /** 集中（弓使い）: 武器による攻撃の命中率 +10 */
 export const focus: PassiveDefinition = { id: 'focus', slot: 'support', effect: { kind: 'weaponHitBonus', bonus: 10 } };
 
-/** 早口（魔術師）: 詠唱の速さ +25%（倍率 125%、切り捨て） */
+/** 早口（魔道士）: 詠唱の速さ +25%（倍率 125%、切り捨て） */
 export const quickCast: PassiveDefinition = {
   id: 'quickCast',
   slot: 'support',
   effect: { kind: 'castSpeedPercent', percent: 125 },
 };
 
-/** 節約（癒し手）: 消費 MP -25%（倍率 75%、切り捨て） */
+/** 節約（治癒師）: 消費 MP -25%（倍率 75%、切り捨て） */
 export const thrift: PassiveDefinition = { id: 'thrift', slot: 'support', effect: { kind: 'mpCostPercent', percent: 75 } };
 
 // ---- ムーブ ----

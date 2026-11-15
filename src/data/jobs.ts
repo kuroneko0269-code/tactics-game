@@ -57,7 +57,7 @@ export const archer: JobDefinition = {
   unlock: [],
 };
 
-/** 魔術師「攻撃魔法」: HP が低く、魔力が高い。杖の通常攻撃（隣接マス）は弱い。魔力と MP が伸びやすい */
+/** 魔道士「攻撃魔法」: HP が低く、魔力が高い。杖の通常攻撃（隣接マス）は弱い。魔力と MP が伸びやすい */
 export const mage: JobDefinition = {
   id: 'mage',
   stats: { maxHp: 36, attack: 6, speed: 6, move: 3, jump: 2, maxMp: 30, magic: 9 },
@@ -78,7 +78,7 @@ export const mage: JobDefinition = {
   unlock: [],
 };
 
-/** 癒し手「回復魔法」: HP は低め。杖の通常攻撃（隣接マス）は弱い。MP と魔力と HP が伸びやすい */
+/** 治癒師「回復魔法」: HP は低め。杖の通常攻撃（隣接マス）は弱い。MP と魔力と HP が伸びやすい */
 export const healer: JobDefinition = {
   id: 'healer',
   stats: { maxHp: 41, attack: 6, speed: 6, move: 3, jump: 2, maxMp: 34, magic: 9 },
@@ -89,6 +89,7 @@ export const healer: JobDefinition = {
     { id: 'heal', jpCost: 0, starter: true },
     { id: 'bigHeal', jpCost: 150 },
     { id: 'protectPrayer', jpCost: 160 },
+    { id: 'revive', jpCost: 200 },
   ],
   passives: [
     { id: 'meditate', jpCost: 150 },

@@ -4,6 +4,7 @@ import {
   chooseAttack,
   chooseDamageSpell,
   chooseHealSpell,
+  chooseReviveSpell,
   decideNextAction,
   defaultFacing,
   playAiTurn,
@@ -269,8 +270,8 @@ describe('敵 AI: 攻撃できない時の動き', () => {
   });
 });
 
-describe('敵 AI: 魔術師', () => {
-  /** 魔術師が立つ (4,1) だけ高さ 3 の柱にして、相手の通常攻撃が届かないようにする（届く位置からは撃ち方が変わるため） */
+describe('敵 AI: 魔道士', () => {
+  /** 魔道士が立つ (4,1) だけ高さ 3 の柱にして、相手の通常攻撃が届かないようにする（届く位置からは撃ち方が変わるため） */
   const pillar = () => {
     const h = flat(9, 9);
     h[1]![4] = 3;
@@ -355,7 +356,7 @@ describe('敵 AI: 魔術師', () => {
   });
 });
 
-describe('敵 AI: 癒し手', () => {
+describe('敵 AI: 治癒師', () => {
   const party = (allyHp: number) =>
     makeState({
       heights: flat(12, 5),
@@ -381,7 +382,7 @@ describe('敵 AI: 癒し手', () => {
     expect(action.type).toBe('move');
     if (action.type !== 'move') return;
     expect(threatMap(state, 'enemy').get(action.z * 12 + action.x)).toBeUndefined();
-    // にらみ合いになっても、癒し手は前に出ない
+    // にらみ合いになっても、治癒師は前に出ない
     const stale = { ...state, turnNumber: 30, lastAggressionTurn: 0 };
     const staleAction = decideNextAction(stale, testAi);
     if (staleAction.type === 'move') expect(threatMap(stale, 'enemy').get(staleAction.z * 12 + staleAction.x)).toBeUndefined();
@@ -525,5 +526,91 @@ describe('AI: 勝敗条件と罠（フェーズ2-2）', () => {
     // にらみ合いでも、相手の攻撃が届くマス（相手から 4 歩以内）には入らない
     const dest = chooseApproach(bossTurn, bossTurn.units[0]!, testAi);
     expect(dest === undefined || 9 - dest.x > 4).toBe(true);
+  });
+});
+
+describe('敵 AI: 戦闘不能と蘇生（フェーズ2-5）', () => {
+  const healerCmd = [{ jobId: 'healer', abilityIds: ['heal', 'revive'] }];
+
+  it('蘇生できる味方がいれば、回復より蘇生を優先する（ユニットを狙う）', () => {
+    const state = makeState({
+      heights: flat(8, 1),
+      units: [
+        { id: 'h', team: 'enemy', job: testHealer, x: 0, z: 0, commands: healerCmd },
+        { id: 'hurt', team: 'enemy', x: 1, z: 0, hp: 10 },
+        { id: 'down', team: 'enemy', x: 2, z: 0, hp: 0 },
+        { id: 'p', team: 'player', x: 7, z: 0 },
+      ],
+    });
+    expect(decideNextAction(state, testAi)).toEqual({ type: 'cast', spellId: 'revive', target: { kind: 'unit', unitId: 'down' } });
+  });
+
+  it('退場まで間に合わない相手と、味方の蘇生がすでに向かっている相手には使わない', () => {
+    const base = {
+      heights: flat(8, 1),
+      units: [
+        { id: 'h', team: 'enemy' as const, job: testHealer, x: 0, z: 0, commands: healerCmd },
+        { id: 'down', team: 'enemy' as const, x: 2, z: 0, hp: 0, knockoutCount: 1, ct: 95 },
+        { id: 'p', team: 'player' as const, x: 7, z: 0 },
+      ],
+    };
+    expect(chooseReviveSpell(makeState(base), makeState(base).units[0]!, true)).toBeUndefined();
+    const pending = makeState({
+      ...base,
+      units: [
+        base.units[0]!,
+        { ...base.units[1]!, knockoutCount: 3, ct: 0 },
+        { id: 'h2', team: 'enemy', job: testHealer, x: 1, z: 0, commands: healerCmd, charging: { spellId: 'revive', target: { kind: 'unit', unitId: 'down' }, progress: 0 } },
+        base.units[2]!,
+      ],
+    });
+    expect(chooseReviveSpell(pending, pending.units[0]!, true)).toBeUndefined();
+  });
+
+  it('治癒師以外の味方が立っていない治癒師は、回復をやめて杖で攻撃する（前へ出る）', () => {
+    // 隣に傷ついた味方の治癒師がいても、回復せずに攻撃する
+    const near = makeState({
+      heights: flat(6, 1),
+      units: [
+        { id: 'h', team: 'enemy', job: testHealer, x: 2, z: 0, commands: healerCmd },
+        { id: 'h2', team: 'enemy', job: testHealer, x: 1, z: 0, hp: 5, commands: healerCmd },
+        { id: 'p', team: 'player', x: 3, z: 0 },
+      ],
+    });
+    expect(decideNextAction(near, testAi)).toEqual({ type: 'attack', targetId: 'p' });
+    // 届かなければ、相手の攻撃が届く位置へも近づく
+    const far = makeState({
+      heights: flat(10, 1),
+      units: [
+        { id: 'h', team: 'enemy', job: testHealer, x: 0, z: 0, commands: healerCmd },
+        { id: 'p', team: 'player', x: 9, z: 0 },
+      ],
+    });
+    const move = decideNextAction(far, testAi);
+    expect(move).toEqual({ type: 'move', x: 3, z: 0 });
+  });
+
+  it('治癒師だけが残った戦闘も、AI 同士で必ず決着する', () => {
+    const state = makeState({
+      heights: flat(6, 6),
+      units: [
+        { id: 'a', team: 'player', job: testHealer, x: 0, z: 0, commands: healerCmd },
+        { id: 'b', team: 'enemy', job: testHealer, x: 5, z: 5, commands: healerCmd },
+      ],
+    });
+    const { state: end } = runAutoBattle(state, 400, testAiConfigs);
+    expect(end.winner).not.toBeNull();
+  });
+
+  it('攻撃の相手は、向きと高さが同じなら治癒師（蘇生役）を優先する', () => {
+    const state = makeState({
+      heights: flat(3, 3),
+      units: [
+        { id: 'w', team: 'enemy', x: 1, z: 1 },
+        { id: 'pw', team: 'player', x: 1, z: 0, facing: 'north', hp: 5 },
+        { id: 'ph', team: 'player', job: testHealer, x: 1, z: 2, facing: 'south' },
+      ],
+    });
+    expect(chooseAttack(state, state.units[0]!, false)?.targetId).toBe('ph');
   });
 });

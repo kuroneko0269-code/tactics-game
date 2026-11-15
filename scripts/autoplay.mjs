@@ -235,7 +235,7 @@ async function main() {
       console.log(`✔ ${label}: ${r.screens}画面で、画面全体のスクロールなし・ボタンが画面の内側（${r.seconds}秒）`);
     } else if (r.ok) {
       console.log(
-        `✔ ${label}: ${r.winner === 'player' ? '勝利' : '敗北'}（${r.turns}手番、味方の手番 ${r.playerTurns}、` +
+        `✔ ${label}: ${r.winner === 'player' ? '勝利' : '敗北'}（${r.turns}手番、味方の手番 ${r.playerTurns}、戦闘の途中での読み込み直しと再開 ${r.reloads}回、` +
           `魔法の指定 ${r.casts}回（ユニット狙い ${r.unitCasts}・マス狙い ${r.tileCasts}）、詠唱の中断 ${r.interrupts}回、` +
           `向きを変えた ${r.facingChanges}回、移動のやり直し ${r.undos}回、カメラ操作 ${r.cameraOps}回、タップ ${r.taps}回、${r.seconds}秒）`,
       );
@@ -264,6 +264,7 @@ async function main() {
           `  ダンジョン: 第1戦からクリアまで ✔（戦闘 ${r.dungeonBattles}回、うちタップで戦った ${r.dungeonTapped}回）、` +
             `負けた後のやり直し ${r.retries}回、編成の画面への行き来 ✔、読み込み直して再開 ✔、クリアの報酬と記録 ✔`,
         );
+        console.log(`  戦闘不能と蘇生: 頭上のカウント・情報の欄・蘇生の予測・復帰・退場 ✔（蘇生 ${r.revives}回）、撤退 ${r.retreats}回`);
       }
       const f = r.finger;
       const sum = (o) => Object.values(o).reduce((a, b) => a + b, 0);
@@ -347,6 +348,9 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
     sells: 0,
     equips: 0,
     autoEquips: 0,
+    reloads: 0,
+    revives: 0,
+    retreats: 0,
   };
   /** 指に近いタップ（狙いの中央から少しずれる）の回数と、そのうち押し直しが必要だった回数（種類ごと） */
   const finger = {
@@ -584,6 +588,22 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
         return { d: b.dataset.direction, x: r.left, y: r.top, w: r.width, h: r.height };
       }),
     );
+    // 勝敗条件の帯・カメラのボタン・行動のボタンなどに重ならない（重なると、ボタンが隠れて押せない・帯の方が押されて一覧が開く）
+    const others = await T(() =>
+      ['.objective-bar', '.camera-buttons', '.actions button', '.undo-area button'].flatMap((sel) =>
+        [...document.querySelectorAll(sel)].flatMap((e) => {
+          if (e.hidden) return [];
+          const r = e.getBoundingClientRect();
+          return r.width > 0 && r.height > 0 ? [{ sel, x: r.left, y: r.top, w: r.width, h: r.height }] : [];
+        }),
+      ),
+    );
+    for (const o of others) {
+      for (const b of boxes) {
+        const overlap = b.x < o.x + o.w && o.x < b.x + b.w && b.y < o.y + o.h && o.y < b.y + b.h;
+        check(!overlap, `向きのボタン ${b.d} が、${o.sel} に重なっています`);
+      }
+    }
     check(boxes.length === 4, `向きのボタンが4つありません（${boxes.length}）`);
     check(new Set(boxes.map((b) => b.d)).size === 4, `向きのボタンの向きが重複しています（${JSON.stringify(boxes)}）`);
     for (const b of boxes) {
@@ -738,11 +758,14 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
     check(command, `${unit.id} のコマンドに ${abilityId} がありません`);
     await pressButton(text.commands[command.jobId]);
     await waitFor('使うものを選ぶ', () => window.__tactics.mode() === 'abilityMenu');
-    // 武器が合わないアビリティと、MP が足りない魔法のボタンは押せないこと
+    // 武器が合わないアビリティと、MP が足りない魔法のボタンは押せないこと（蘇生は、戦闘不能の味方がいない時も押せない）
+    const st = await getState();
+    const downAlly = st.units.some((u) => u.team === unit.team && u.hp <= 0 && !u.retired);
     for (const id of command.abilityIds) {
       const spell = unit.spells.find((s) => s.id === id);
       const weapons = spell?.weapons ?? unit.strikes.find((s) => s.id === id)?.weapons;
-      const usable = (!weapons || weapons.includes(unit.weapon)) && (!spell || unit.mp >= spell.mpCost);
+      const usable =
+        (!weapons || weapons.includes(unit.weapon)) && (!spell || unit.mp >= spell.mpCost) && (spell?.effect !== 'revive' || downAlly);
       const disabled = await page.getByRole('button', { name: text.abilities[id], exact: true }).isDisabled();
       check(disabled === !usable, `「${text.abilities[id]}」のボタンの押せる・押せないが、武器や MP と合いません`);
     }
@@ -946,8 +969,32 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   await waitForInput();
   const initialCamera = await getCamera();
   await screenshot('00-start');
+  /**
+   * 戦闘の途中でページを読み込み直し、拠点の「戦闘を再開」で続きから戦う（フェーズ2-5）。
+   * exact なら、保存された状態が読み込み直す前の状態と同じであることも確かめる（入力待ちの時だけ。敵の手番の途中は進み続けるため）
+   */
+  const reloadAndResume = async (when, exact) => {
+    const before = await getState();
+    await page.reload();
+    await page.waitForFunction(() => window.__tactics?.screen() === 'base', null, { timeout: 30000 });
+    check(await page.locator('.resume-battle').isVisible(), `途中の戦闘があるのに、拠点に「${text.base.resumeBattle}」が出ていません（${when}）`);
+    check(await page.locator('.retreat-battle').isVisible(), `途中の戦闘があるのに、拠点に「${text.base.retreatBattle}」が出ていません（${when}）`);
+    check(!(await page.getByRole('button', { name: text.base.roster, exact: true }).isVisible()), '途中の戦闘があるのに、編成のボタンが出ています');
+    const saved = await T(() => window.__tactics.suspended());
+    check(saved && saved.state, `途中の戦闘が保存されていません（${when}）`);
+    if (exact) check(JSON.stringify(saved.state) === JSON.stringify(before), `保存された戦闘の状態が、読み込み直す前と違います（${when}）`);
+    if (!stats.reloads) await screenshot('resume-base');
+    await pressButton(text.base.resumeBattle);
+    await waitFor('戦闘の再開', () => window.__tactics.screen() === 'battle' && window.__tactics.state() !== null);
+    const resumed = await getState();
+    // 敵の手番の途中から再開した時は、すぐに続きの敵の行動が進むので、比べられるのは入力待ちの時だけ
+    if (exact) check(JSON.stringify(resumed) === JSON.stringify(saved.state), `再開した戦闘の状態が、保存したものと違います（${when}）`);
+    stats.reloads++;
+    log(`${resumed.turnNumber}手番目（${when}）: ページを読み込み直して、拠点の「${text.base.resumeBattle}」から再開`);
+  };
+
   /** 今の戦闘を、味方の手番は画面のタップで（AI と同じ動かし方で）、決着まで進める */
-  const playByTaps = async (stop) => {
+  const playByTaps = async (stop, reloads = false) => {
   let lastTurn = -1;
   for (;;) {
     check(Date.now() < deadline, `時間切れ（${BATTLE_TIMEOUT_MS / 1000}秒）`);
@@ -1018,6 +1065,11 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
             },
             [unit.id, action.x, action.z],
           );
+        }
+        // 最初の移動の後で、ページを読み込み直して再開する（移動だけして閉じた場合も、その状態から再開できる）
+        if (reloads && stats.reloads === 0 && (await getMode()).kind === 'main') {
+          await waitForInput();
+          await reloadAndResume('移動の後', true);
         }
         continue;
       }
@@ -1112,12 +1164,29 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
       const turn = state.turnNumber;
       await pressButton('確定');
       await waitFor('次の手番へ', (turn) => window.__tactics.state().turnNumber !== turn || window.__tactics.mode() === 'ended', turn);
+      // 2回目の読み込み直し: 敵の手番の途中（敵が移動か行動をした後）で閉じても、最後に保存した状態から続きの敵の行動を再生する
+      if (reloads && stats.reloads === 1) {
+        const enemyMid = await page
+          .waitForFunction(
+            () => {
+              const s = window.__tactics.state();
+              const u = s?.turn && s.units.find((x) => x.id === s.turn.unitId);
+              return u?.team === 'enemy' && (s.turn.moved || s.turn.acted);
+            },
+            null,
+            { timeout: 15000, polling: 20 },
+          )
+          .then(() => true)
+          .catch(() => false);
+        if (enemyMid) await reloadAndResume('敵の手番の途中', false);
+      }
     } else {
       throw new CheckError(`想定していない行動: ${JSON.stringify(action)}`);
     }
   }
   };
-  const stopped = await playByTaps(quickStop);
+  const stopped = await playByTaps(quickStop, true);
+  check(stats.reloads >= 1, '戦闘の途中での読み込み直しと再開を確かめられませんでした');
 
   // ---- 結果の照合 ----
   const final = stopped ? expected : await getState();
@@ -1278,7 +1347,7 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
     await viaTwoTaps('job', `.job-choice[data-job-id="${jobId}"]`, 'job');
     check((await page.locator('.sheet .compare-grid').count()) === 1, '能力値と成長率の比較が出ていません');
     const first = stats.jobChanges === 0;
-    // 魔術師になると、剣と鎧が外れる（変える前の欄と、変えた後の知らせに出る）
+    // 魔道士になると、剣と鎧が外れる（変える前の欄と、変えた後の知らせに出る）
     const removedNames = plan.removed.map((id) => text.equipment[id].name).join('・');
     if (first) {
       check((await page.locator('.sheet .sheet-warning').textContent()).includes(removedNames), `外れる装備の知らせが出ていません（${removedNames}）`);
@@ -1530,7 +1599,7 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
 
   // ---- 詠唱の中断 ----
-  // 詠唱中の味方の魔術師に手番が来た場面を用意して、移動しようとすると確認が出ること、
+  // 詠唱中の味方の魔道士に手番が来た場面を用意して、移動しようとすると確認が出ること、
   // 「やめない」で何も変わらないこと、「詠唱をやめる」で中断されて移動することを確かめる
   await waitForInput();
   const drill = interruptDrill(core);
@@ -1571,6 +1640,66 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   const drillActual = (await getState()).units.find((u) => u.id === drill.unitId);
   const pick = (u) => JSON.stringify([u.x, u.z, u.facing, u.mp, u.charging, u.ct === 0 ? 0 : 'later']);
   check(pick(drillActual) === pick(drillExpected), `詠唱の中断の後の状態が core の計算と違います（${pick(drillActual)} / ${pick(drillExpected)}）`);
+  check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
+
+  // ---- 戦闘不能と蘇生（フェーズ2-5） ----
+  // 蘇生を覚えた治癒師の手番で、近くに戦闘不能の味方（カウント 2）と、まもなく退場する敵（カウント 1）がいる場面を用意する。
+  // 倒れた姿の頭上にカウントが出ること、タップすると情報の欄に残りのカウントが出ること、
+  // 「回復魔法」→「蘇生」→ 倒れた味方 → 予測（復帰後の HP）→ 確定 → 発動して復帰すること、敵が退場することを確かめる
+  await waitForInput();
+  const ko = knockoutDrill(core);
+  await page.evaluate((r) => window.__tactics.load(r), ko.start);
+  await waitFor('蘇生の手番', (id) => window.__tactics.mode() === 'main' && window.__tactics.state().turn?.unitId === id, ko.unitId);
+  await waitForInput();
+  const badgeOf = (id) =>
+    T((id) => {
+      const labels = [...document.querySelectorAll('.unit-label')];
+      const st = window.__tactics.state();
+      const i = st.units.findIndex((u) => u.id === id);
+      const b = labels[i]?.querySelector('.unit-label-knockout');
+      return b && !b.hidden ? b.textContent : null;
+    }, id);
+  check((await badgeOf(ko.downId)) === text.knockout.badge(2), `戦闘不能の味方の頭上にカウントが出ていません（${await badgeOf(ko.downId)}）`);
+  check((await badgeOf(ko.enemyId)) === text.knockout.badge(1), `戦闘不能の敵の頭上にカウントが出ていません（${await badgeOf(ko.enemyId)}）`);
+  await tapUnit(ko.enemyId);
+  await waitFor('戦闘不能の敵の情報', (t) => document.querySelector('.info-knockout')?.textContent === t, text.knockout.info(1));
+  await screenshot('knockout-info');
+  await tapUnit(ko.downId);
+  await waitFor('戦闘不能の味方の情報', (t) => document.querySelector('.info-knockout')?.textContent === t, text.knockout.info(2));
+  check((await getMode()).kind === 'main', '戦闘不能のユニットをタップしたら、操作が変わりました');
+  const koUnit = (await getState()).units.find((u) => u.id === ko.unitId);
+  await openCommandOf(koUnit, 'revive');
+  await pressButton(text.abilities.revive);
+  await waitFor('蘇生の狙いを選ぶ', () => window.__tactics.mode() === 'spellTarget');
+  await tapUnit(ko.downId);
+  const koMode = await getMode();
+  check(
+    koMode.kind === 'spellConfirm' && koMode.target.kind === 'unit' && koMode.target.unitId === ko.downId,
+    `蘇生の狙いが違います（${JSON.stringify(koMode)}）`,
+  );
+  const revivePreview = await page.locator('.preview').textContent();
+  check(revivePreview.includes(text.spellPreview.revive(ko.reviveHp, ko.maxHp)), `蘇生の予測に復帰後の HP がありません（${revivePreview}）`);
+  await screenshot('revive-preview');
+  await pressButton('確定');
+  await waitFor('蘇生の指定の後', () => window.__tactics.mode() === 'main');
+  await pressButton('待機');
+  await waitFor('向きを選ぶ', () => window.__tactics.mode() === 'facing');
+  const koFacing = (await getMode()).facing;
+  const sawRevive = page
+    .waitForFunction((t) => [...document.querySelectorAll('.popup')].some((p) => p.textContent === t), text.knockout.revived, { timeout: 30000, polling: 20 })
+    .then(() => true)
+    .catch(() => false);
+  await pressButton('確定');
+  check(await sawRevive, `復帰の表示（${text.knockout.revived}）が出ませんでした`);
+  await waitFor('蘇生の後の手番', (id) => window.__tactics.mode() === 'main' && window.__tactics.state().turn?.unitId === id, ko.unitId);
+  await waitForInput();
+  const koAfter = await getState();
+  const koExpected = ko.finish(koFacing);
+  const pickKo = (st) => JSON.stringify(st.units.filter((u) => [ko.downId, ko.enemyId, ko.unitId].includes(u.id)).map((u) => [u.id, u.hp, u.ct, u.knockoutCount, u.retired, u.progress?.gainedExp ?? null]));
+  check(pickKo(koAfter) === pickKo(koExpected), `蘇生と退場の結果が core の計算と違います（画面 ${pickKo(koAfter)} / core ${pickKo(koExpected)}）`);
+  check((await badgeOf(ko.downId)) === null, '蘇生した味方の頭上に、まだカウントが出ています');
+  await screenshot('revived');
+  stats.revives++;
   check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
 
   // ---- ページを読み込み直しても、部隊の状態が残る ----
@@ -1625,6 +1754,30 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   await page.reload();
   await page.waitForFunction(() => window.__tactics?.screen() === 'base', null, { timeout: 30000 });
   await sameRoster(pd.expected, '受動的なアビリティを付けて読み込み直した後');
+  check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
+
+  // ---- 撤退（フェーズ2-5）: 戦闘の途中で読み込み直すと、拠点に「戦闘を再開」と「撤退する」が出る。撤退すると負けとして、
+  // それまでに得た経験値と JP を持ち帰り、途中の戦闘は消える ----
+  check(await page.locator('.resume-battle').isVisible(), `出撃した戦闘の途中で読み込み直したのに、「${text.base.resumeBattle}」が出ていません`);
+  const toRetreat = await T(() => window.__tactics.suspended());
+  check(toRetreat?.origin.kind === 'training', `途中の戦闘の記録が違います（${JSON.stringify(toRetreat?.origin)}）`);
+  await pressButton(text.base.retreatBattle);
+  await waitFor('撤退の確認', () => document.querySelector('[data-view="retreat"]') !== null);
+  await screenshot('retreat-confirm');
+  await pressButton(text.base.cancel);
+  check(await page.locator('.resume-battle').isVisible(), '撤退をやめたのに、「戦闘を再開」が出ていません');
+  await pressButton(text.base.retreatBattle);
+  await pressButton(text.base.confirmRetreatYes);
+  await waitFor('撤退の結果の画面', () => window.__tactics.screen() === 'result');
+  const retreatTitle = await page.locator('.report-screen .result-title').textContent();
+  check(retreatTitle === text.report.retreatTitle, `撤退の結果の画面の題が違います（${retreatTitle}）`);
+  await screenshot('retreat-result');
+  const retreated = core.progression.applyBattleResult(pd.expected, { ...toRetreat.state, winner: 'enemy', turn: null }, core.data.catalog, core.data.progression).roster;
+  await sameRoster(retreated, '撤退の後');
+  check((await T(() => window.__tactics.suspended())) === null, '撤退した後も、途中の戦闘が残っています');
+  await pressButton(text.report.toBase);
+  await waitFor('拠点', () => window.__tactics.screen() === 'base');
+  stats.retreats++;
   check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
 
   // ---- 「はじめから」: 確認の後、最初の部隊に戻る（読み込み直しても最初のまま） ----
@@ -1924,6 +2077,15 @@ async function checkLayouts(browser, baseUrl, name, core) {
   await press(text.base.challenge);
   await startFromDeploy();
   await inspect('battle');
+  // 戦闘の途中で読み込み直す: 拠点の「戦闘を再開」「撤退する」と、撤退の確認（フェーズ2-5）
+  await page.reload();
+  await screenIs('base');
+  await inspect('base-suspended');
+  await press(text.base.retreatBattle);
+  await inspect('base-retreat-confirm');
+  await press(text.base.cancel);
+  await press(text.base.resumeBattle);
+  await until(() => window.__tactics.screen() === 'battle' && window.__tactics.mode() === 'main' && window.__tactics.camera().idle);
   await finish('player');
   await inspect('dungeon-between');
   await press(text.report.next(2, text.mapNames[core.data.dungeon.battles[1].map.id]));
@@ -1948,6 +2110,33 @@ async function checkLayouts(browser, baseUrl, name, core) {
   await press(text.report.toBase);
   await screenIs('base');
   await inspect('base-cleared');
+  // 戦闘不能の表示（倒れた姿・頭上のカウント・情報の欄）（フェーズ2-5）
+  const ko = knockoutDrill(core);
+  await page.evaluate((r) => window.__tactics.load(r), ko.start);
+  await until(() => window.__tactics.mode() === 'main' && window.__tactics.camera().idle);
+  await inspect('battle-knockout');
+  // マスターの印（編成の画面のジョブのタブ）
+  const P = core.progression;
+  const mastered = core.data.roster.units.map((u, i) =>
+    i === 0
+      ? {
+          ...u,
+          jobs: {
+            ...u.jobs,
+            [u.jobId]: { jp: 0, jpTotal: 1500, learned: [...core.data.jobs.find((j) => j.id === u.jobId).abilities, ...core.data.jobs.find((j) => j.id === u.jobId).passives].map((a) => a.id) },
+          },
+        }
+      : u,
+  );
+  const masteredRoster = { ...core.data.roster, units: mastered };
+  check(P.isJobMastered(mastered[0], core.data.jobs.find((j) => j.id === mastered[0].jobId), core.data.progression), 'マスターの場面の部隊が想定と違います');
+  await page.evaluate((r) => window.__tactics.setRoster(r), masteredRoster);
+  await screenIs('base');
+  await press(text.base.roster);
+  await screenIs('roster');
+  await tab('job');
+  check((await page.locator('.job-current[data-mastered="true"]').count()) === 1, '編成の画面で、マスターしたジョブに印がありません');
+  await inspect('roster-job-mastered');
   await context.close();
   return { screens, seconds: Math.round((Date.now() - started) / 1000) };
 }
@@ -1973,7 +2162,7 @@ function playerPolicy(core) {
 }
 
 /**
- * 詠唱の中断を確かめる場面。新しい戦闘の最初の状態から、味方の魔術師が「炎」を詠唱中のまま手番を迎えた状態を作る。
+ * 詠唱の中断を確かめる場面。新しい戦闘の最初の状態から、味方の魔道士が「炎」を詠唱中のまま手番を迎えた状態を作る。
  * finish(facing) は、同じ操作（移動 → 向きを決めて終了）を core だけで行った結果。
  */
 function interruptDrill(core) {
@@ -2009,7 +2198,7 @@ function interruptDrill(core) {
 /**
  * 戦闘の後の部隊と、編成の画面で行う変更を core だけで計算する。
  * - 習得: 戦闘で得た JP で覚えられるアビリティ（強打を優先）
- * - ジョブチェンジ: 2人目の戦士を魔術師にして（風を覚える）、戦士に戻す
+ * - ジョブチェンジ: 2人目の戦士を魔道士にして（風を覚える）、戦士に戻す
  * - 副コマンド: その戦士の副コマンドを「攻撃魔法」にする
  */
 function rosterPlan(core, finalState) {
@@ -2042,7 +2231,7 @@ function rosterPlan(core, finalState) {
   learn = candidates.find((c) => c.abilityId === 'powerStrike' && c.unitId === 'hero-1') ?? candidates.find((c) => c.abilityId === 'powerStrike') ?? candidates[0];
   let roster = afterBuy;
   if (learn) roster = P.replaceUnit(roster, P.learnAbility(P.findUnit(roster, learn.unitId), learn.jobId, learn.abilityId, catalog, rules));
-  // ジョブを変えて戻る（魔術師になると剣と鎧が外れ、戦士に戻っても外れたまま）
+  // ジョブを変えて戻る（魔道士になると剣と鎧が外れ、戦士に戻っても外れたまま）
   const jobUnitId = 'hero-2';
   const homeJobId = P.findUnit(roster, jobUnitId).jobId;
   const subJobId = 'mage';
@@ -2113,6 +2302,51 @@ function strikeDrill(core, plan) {
   };
   const expected = core.battle.applyAction(state, { type: 'attack', targetId, abilityId: 'powerStrike' }).state;
   return { unitId, targetId, subAbilityId: 'wind', start: { state, events: [{ type: 'turnStarted', unitId, turnNumber: 1 }] }, expected };
+}
+
+/**
+ * 戦闘不能と蘇生の場面（フェーズ2-5）。蘇生を覚えた治癒師（hero-5）の手番。
+ * 隣に戦闘不能の味方（hero-1。カウント 2）、少し先に戦闘不能の敵（e-archer-1。カウント 1、CT 99 なので、すぐ退場する）。
+ * finish(facing) は、蘇生を指定して待機し、向きを決めて手番を終えた後の状態（core だけで計算。蘇生は次の手番までに発動する）。
+ */
+function knockoutDrill(core) {
+  const P = core.progression;
+  const { catalog, progression: rules } = core.data;
+  const unitId = 'hero-5';
+  const downId = 'hero-1';
+  const enemyId = 'e-archer-1';
+  const healer = P.findUnit(core.data.roster, unitId);
+  const learned = { ...healer, jobs: { ...healer.jobs, healer: { ...healer.jobs.healer, learned: [...healer.jobs.healer.learned, 'revive'] } } };
+  const roster = P.replaceUnit(core.data.roster, learned);
+  if (P.validateRoster(roster, catalog, rules).length > 0) throw new Error('蘇生の場面の部隊が正しくありません');
+  const base = core.start(roster, 'easy', SEED + 6).state;
+  const me = base.units.find((u) => u.id === unitId);
+  const taken = (x, z) => base.units.some((u) => u.id !== downId && u.x === x && u.z === z);
+  const spot = [
+    [1, 0],
+    [-1, 0],
+    [0, -1],
+    [0, 1],
+  ]
+    .map(([dx, dz]) => ({ x: me.x + dx, z: me.z + dz }))
+    .find((c) => c.x >= 0 && c.z >= 0 && c.x < base.map.width && c.z < base.map.depth && !taken(c.x, c.z));
+  const enemy = base.units.find((u) => u.id === enemyId);
+  const state = drillState(base, unitId, {
+    [downId]: { x: spot.x, z: spot.z, hp: 0, knockoutCount: 2, statuses: [] },
+    [enemyId]: { hp: 0, knockoutCount: 1, ct: 99, x: enemy.x, z: enemy.z },
+  });
+  const down = state.units.find((u) => u.id === downId);
+  const reviveSpell = core.data.spells.find((s) => s.id === 'revive');
+  const cast = core.battle.applyAction(state, { type: 'cast', spellId: 'revive', target: { kind: 'unit', unitId: downId } }).state;
+  return {
+    unitId,
+    downId,
+    enemyId,
+    maxHp: down.stats.maxHp,
+    reviveHp: Math.max(1, Math.floor((down.stats.maxHp * reviveSpell.power) / 100)),
+    start: { state, events: [{ type: 'turnStarted', unitId, turnNumber: 1 }] },
+    finish: (facing) => core.battle.applyAction(cast, { type: 'endTurn', facing }).state,
+  };
 }
 
 /** 敵を動かさずに、指定したユニットの手番から始まる状態を作る（ほかのユニットは CT 0） */

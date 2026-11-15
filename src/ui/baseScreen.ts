@@ -17,6 +17,12 @@ export interface BaseScreenHandlers {
   dungeonStatus(): { readonly nextBattle: number | null; readonly clears: number };
   /** 所持金（ゴールド） */
   gold(): number;
+  /** 途中の戦闘の題（なければ null。フェーズ2-5） */
+  suspended(): string | null;
+  /** 途中の戦闘を再開する */
+  onResumeBattle(): void;
+  /** 途中の戦闘から撤退する（それまでに得た経験値と JP は持ち帰る） */
+  onRetreatBattle(): void;
   onSortie(tierId: string): void;
   /** ダンジョンに挑む。fresh なら第1戦から（挑戦中のものはやめる）、そうでなければ挑戦中の戦闘から再開 */
   onDungeon(fresh: boolean): void;
@@ -34,11 +40,11 @@ export function createBaseScreen(root: HTMLElement, handlers: BaseScreenHandlers
    * 画面全体はスクロールさせない（.two-col: 縦向きは上下、横向きと PC は左右2列）。
    * info に題と説明・一覧、actions にボタンを入れる。
    */
-  const render = (view: 'menu' | 'sortie' | 'tiers' | 'dungeon' | 'restart' | 'confirm') => {
+  const render = (view: 'menu' | 'sortie' | 'tiers' | 'dungeon' | 'restart' | 'confirm' | 'retreat') => {
     root.innerHTML = '';
     root.hidden = false;
     const box = el('div', 'screen-box two-col base-screen');
-    box.dataset.screen = view === 'menu' || view === 'confirm' ? 'base' : view;
+    box.dataset.screen = view === 'menu' || view === 'confirm' || view === 'retreat' ? 'base' : view;
     box.dataset.view = view;
     const info = el('div', 'screen-col base-info');
     const actions = el('div', 'screen-col base-actions');
@@ -80,6 +86,24 @@ export function createBaseScreen(root: HTMLElement, handlers: BaseScreenHandlers
       actions.append(
         screenButton(TEXT.base.cancel, () => render('dungeon')),
         screenButton(TEXT.base.confirmRestartYes, () => handlers.onDungeon(true), { className: 'danger' }),
+      );
+    } else if (view === 'menu' && handlers.suspended()) {
+      // 途中の戦闘がある時は、「戦闘を再開」を一番目立つ位置に出す。編成と店は、戦闘を終えるまで使えない
+      info.append(
+        el('h1', 'screen-title', TEXT.base.title),
+        el('p', 'suspended-title', handlers.suspended()!),
+        el('p', 'screen-note', TEXT.base.suspendedNote),
+      );
+      box.dataset.suspended = 'true';
+      actions.append(
+        screenButton(TEXT.base.resumeBattle, () => handlers.onResumeBattle(), { className: 'primary big resume-battle', sub: TEXT.base.resumeBattleHelp }),
+        screenButton(TEXT.base.retreatBattle, () => render('retreat'), { className: 'big retreat-battle', sub: TEXT.base.retreatBattleHelp }),
+      );
+    } else if (view === 'retreat') {
+      info.append(el('h1', 'screen-title', TEXT.base.retreatBattle), el('p', 'screen-warning', TEXT.base.confirmRetreat));
+      actions.append(
+        screenButton(TEXT.base.cancel, () => render('menu')),
+        screenButton(TEXT.base.confirmRetreatYes, () => handlers.onRetreatBattle(), { className: 'danger' }),
       );
     } else if (view === 'menu') {
       info.append(el('h1', 'screen-title', TEXT.base.title));

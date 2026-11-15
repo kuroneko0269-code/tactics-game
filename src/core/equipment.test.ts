@@ -100,6 +100,7 @@ const rules: ProgressionRules = {
   growthCap: ZERO_GROWTH,
   growthWeights: ZERO_GROWTH,
   growthTotalCap: 0,
+  masteryGrowthCapPercent: 5,
 };
 const weights: AutoEquipWeights = {
   stats: { maxHp: 1, maxMp: 1, attack: 4, magic: 4, speed: 20, move: 12, jump: 6 },
@@ -117,7 +118,7 @@ const member = (id: string, jobId: string, equipment: Partial<RosterUnit['equipm
   equipment: { weapon: null, armor: null, accessory: null, ...equipment },
 });
 
-/** 戦士 a（剣・鎧）、魔術師 b（杖）。所持品は剣・大剣・弓・杖・鎧・ローブ・靴・首飾り・護符 */
+/** 戦士 a（剣・鎧）、魔道士 b（杖）。所持品は剣・大剣・弓・杖・鎧・ローブ・靴・首飾り・護符 */
 const party = (): Roster => ({
   units: [member('a', 'warrior', { weapon: 'i1', armor: 'i5' }), member('b', 'mage', { weapon: 'i4' }, ['fire'])],
   gold: 0,
@@ -269,7 +270,7 @@ describe('「おまかせ」', () => {
     expect(a.equipment.armor).toBe('i5');
     // 装飾品: 戦士は魔法を使わないので、MP の首飾りより移動力の靴
     expect(a.equipment.accessory).toBe('i7');
-    // 魔術師は、MP の首飾り（MP +30 = 30点）を靴（12点）より選ぶ。杖は自分の物のまま、ローブを付ける
+    // 魔道士は、MP の首飾り（MP +30 = 30点）を靴（12点）より選ぶ。杖は自分の物のまま、ローブを付ける
     const b = findUnit(autoEquip(party(), 'b', catalog, weights), 'b');
     expect(b.equipment).toEqual({ weapon: 'i4', armor: 'i6', accessory: 'i8' });
   });

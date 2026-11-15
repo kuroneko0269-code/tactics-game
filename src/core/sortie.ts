@@ -15,7 +15,18 @@ import type { BattleObjectives, BattleSetup, MapEventDefinition, TrapPlacement, 
 import type { Direction } from './geometry';
 import type { MapDefinition } from './map';
 import { equippedDefinitions } from './equipment';
-import { equippedPassives, jobProgress, unitCommands, type GameCatalog, type ProgressionRules, type Roster } from './progression';
+import {
+  equippedPassives,
+  findJob,
+  growthTotalCapOf,
+  hasLearnedAll,
+  isJobMastered,
+  jobProgress,
+  unitCommands,
+  type GameCatalog,
+  type ProgressionRules,
+  type Roster,
+} from './progression';
 import type { BattleReward } from './shop';
 
 /** 配置の場所 */
@@ -75,7 +86,15 @@ export function buildSortie(
     passives: equippedPassives(u),
     equipment: equippedDefinitions(u, roster, catalog),
     ...(progression
-      ? { progress: { exp: u.exp, jp: jobProgress(u, u.jobId).jp, jpTotal: jobProgress(u, u.jobId).jpTotal } }
+      ? {
+          progress: {
+            exp: u.exp,
+            jp: jobProgress(u, u.jobId).jp,
+            jpTotal: jobProgress(u, u.jobId).jpTotal,
+            growthTotalCap: growthTotalCapOf(u, catalog, progression),
+            masteryPending: !isJobMastered(u, findJob(catalog, u.jobId), progression) && hasLearnedAll(u, findJob(catalog, u.jobId)),
+          },
+        }
       : {}),
   }));
   const enemies: UnitPlacement[] = tier.units.map((u) => ({ ...u, team: 'enemy' }));
