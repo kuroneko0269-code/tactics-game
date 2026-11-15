@@ -22,7 +22,7 @@ import { characterIds } from './characters';
 /** 戦士「武技」: 隣接マスに近接攻撃。高さの差が 2 以内の相手だけ攻撃できる。HP と攻撃力が高く、HP と攻撃力が伸びやすい */
 export const warrior: JobDefinition = {
   id: 'warrior',
-  stats: { maxHp: 60, attack: 10, speed: 6, move: 4, jump: 2, maxMp: 0, magic: 0 },
+  stats: { maxHp: 58, attack: 10, speed: 6, move: 4, jump: 2, maxMp: 0, magic: 0 },
   attack: { kind: 'melee', maxHeightDiff: 2 },
   weaponTypes: ['sword'],
   armorTypes: ['heavy'],
@@ -182,7 +182,7 @@ export const monk: JobDefinition = {
  */
 export const thief: JobDefinition = {
   id: 'thief',
-  stats: { maxHp: 56, attack: 10, speed: 6, move: 4, jump: 3, maxMp: 0, magic: 0 },
+  stats: { maxHp: 56, attack: 11, speed: 6, move: 4, jump: 3, maxMp: 0, magic: 0 },
   attack: { kind: 'melee', maxHeightDiff: 2 },
   weaponTypes: ['dagger'],
   armorTypes: ['light'],

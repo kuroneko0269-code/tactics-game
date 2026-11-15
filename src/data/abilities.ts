@@ -404,7 +404,7 @@ export const powerStrike: StrikeDefinition = {
  */
 export const knockback: StrikeDefinition = {
   id: 'knockback',
-  damagePercent: 50,
+  damagePercent: 40,
   hitBonus: 0,
   weapons: ['sword', 'staff'],
   knockback: true,

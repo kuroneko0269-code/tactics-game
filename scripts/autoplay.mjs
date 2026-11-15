@@ -1226,9 +1226,12 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   check(levelUps === expectedUps, `レベルが上がったユニットの数が違います（画面 ${levelUps} / core ${expectedUps}）`);
   // 新しく就けるようになったジョブの札（フェーズ2-6）
   const unlockChips = await page.locator('.report-ups .report-chip.unlock').count();
-  const expectedUnlocks = plan.afterBattle.units.flatMap((u) =>
-    core.progression.newlyUnlockedJobs(core.data.roster.units.find((x) => x.id === u.id), u, core.data.catalog, core.data.progression),
-  ).length;
+  // 新しく就けるジョブは、1つの札にまとめる
+  const expectedUnlocks = plan.afterBattle.units.some(
+    (u) => core.progression.newlyUnlockedJobs(core.data.roster.units.find((x) => x.id === u.id), u, core.data.catalog, core.data.progression).length > 0,
+  )
+    ? 1
+    : 0;
   check(unlockChips === expectedUnlocks, `新しく就けるジョブの札の数が違います（画面 ${unlockChips} / core ${expectedUnlocks}）`);
   const jobUps = await page.locator('.report-job-up:not([hidden])').count();
   const expectedJobUps = plan.report.units.filter((u) => u.jobLevelAfter > u.jobLevelBefore).length;

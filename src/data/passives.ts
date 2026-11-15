@@ -12,7 +12,7 @@ import type { PassiveDefinition } from '../core/battleTypes';
 // ---- リアクション ----
 
 /** 反撃（戦士）: 隣接するマスから近接攻撃を受けて生き残った時、通常攻撃で反撃する。反撃に対する反撃は起きない */
-export const counter: PassiveDefinition = { id: 'counter', slot: 'reaction', effect: { kind: 'counter', damagePercent: 75 } };
+export const counter: PassiveDefinition = { id: 'counter', slot: 'reaction', effect: { kind: 'counter', damagePercent: 60 } };
 
 /** 身かわし（弓使い）: 正面と側面からの、武器による攻撃の命中率 -20 */
 export const evade: PassiveDefinition = { id: 'evade', slot: 'reaction', effect: { kind: 'evade', hitPenalty: 20 } };

@@ -885,7 +885,8 @@ export const TEXT = {
     /** 解放条件を満たした瞬間の知らせ */
     unlockToast: (name: string, job: string) => `${name}が「${job}」に就けるようになった！`,
     /** 結果の画面の札 */
-    unlockChip: (name: string, job: string) => `${name}: ${job}に就ける`,
+    unlockChip: (parts: string) => `解放: ${parts}`,
+    unlockPart: (name: string, jobs: string) => `${name} ${jobs}`,
     changeJobTitle: (job: string) => `${job}に変える`,
     compareNow: '今',
     compareAfter: '変更後',

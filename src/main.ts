@@ -253,14 +253,16 @@ function main(): void {
 
   const jobOf = (id: string) => findUnit(roster, id).jobId;
   /** before から after になって新しく就けるようになったジョブの知らせ（結果の画面に出す。フェーズ2-6） */
-  const unlockNotes = (before: Roster, after: Roster): string[] =>
-    after.units.flatMap((u) => {
+  const unlockNotes = (before: Roster, after: Roster): string[] => {
+    // 1つの札にまとめる（小さめのスマホでも、結果の画面とクリアの画面に収まるように）
+    const parts = after.units.flatMap((u) => {
       const b = before.units.find((x) => x.id === u.id);
       if (!b) return [];
-      return newlyUnlockedJobs(b, u, catalog, progressionRules).map((jobId) =>
-        TEXT.roster.unlockChip(unitName(u.id, u.jobId), TEXT.jobs[jobId] ?? jobId),
-      );
+      const jobIds = newlyUnlockedJobs(b, u, catalog, progressionRules);
+      return jobIds.length === 0 ? [] : [TEXT.roster.unlockPart(unitName(u.id, u.jobId), jobIds.map((j) => TEXT.jobs[j] ?? j).join('・'))];
     });
+    return parts.length === 0 ? [] : [TEXT.roster.unlockChip(parts.join('、'))];
+  };
   /** 戦闘中: そのユニットの jobId の JP の累計が jpTotal になった時に、新しく就けるようになったジョブ */
   const unlockedInBattle = (unitId: string, jobId: string, jpTotal: number): string[] => {
     const u = roster.units.find((x) => x.id === unitId);

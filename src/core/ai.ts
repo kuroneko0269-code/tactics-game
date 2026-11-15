@@ -532,6 +532,9 @@ export function chooseStatusSpell(state: BattleState, unit: UnitState, canMove: 
   const spells = unit.spells.filter(
     (s) => s.effect === 'status' && s.inflicts && s.inflicts !== 'silence' && s.inflicts !== 'protect' && canCast(unit, s),
   );
+  // 停止を先に考える（相手の手番をまるごと奪えるので、最も値打ちが高い）
+  const stopPlan = chooseSingleStatusSpell(state, unit, canMove, config, spells.filter((s) => s.areaRadius === 0 && s.inflicts === 'stop'));
+  if (stopPlan) return stopPlan;
   // 範囲に、敵だけ・味方だけに付けるもの（加速・減速。フェーズ2-6）: 付く相手が最も多い場所に（1体以上）
   const area = spells.filter((s) => s.areaRadius > 0 && s.affects);
   if (area.length > 0) {
