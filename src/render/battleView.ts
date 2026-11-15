@@ -3,6 +3,8 @@ import type { BattleEvent, BattleState, SpellElement, Team, TrapKind, UnitState 
 import { DIRECTION_VECTORS, DIRECTIONS, type Coord, type Direction } from '../core/geometry';
 import type { MapView, OverlayTile, ReservedTile, TileCoord, TileMark } from './mapView';
 import { createPuppet, YAW_OF, type Puppet, type PuppetLook } from './puppet';
+import { createPropModel } from './props';
+import type { BattleMap } from '../core/map';
 import { judgeTap, type TapCandidates, type TapHit } from './tapJudge';
 import { createTweens, easeInOut, easeOutCubic } from './tweens';
 
@@ -50,6 +52,10 @@ export interface BattleView {
   animateDefeat(unitId: string): Promise<void>;
   /** 戦闘不能のカウントが 0 になって退場する（消える） */
   animateRetire(unitId: string): Promise<void>;
+  /** 対象物が壊れて消える（物語の土台） */
+  animateBreak(unitId: string): Promise<void>;
+  /** 地形が変わった（物語の土台）: マスを作り直し、ユニットを新しい高さに置き直す */
+  updateMap(map: BattleMap): Promise<void>;
   /** 蘇生で立ち上がる */
   animateRevive(unitId: string): Promise<void>;
   wait(seconds: number): Promise<void>;
@@ -75,6 +81,7 @@ export interface BattleView {
 const TEAM_COLORS: Record<Team, { body: number; ring: number }> = {
   player: { body: 0x2f6fe0, ring: 0x58a6ff },
   enemy: { body: 0xc8352e, ring: 0xff5a4f },
+  neutral: { body: 0xb0a890, ring: 0xffc857 },
 };
 const JOB_LOOKS: Record<string, Omit<PuppetLook, 'body'>> = {
   warrior: { accent: 0xf2c14e, weapon: 'sword' },
@@ -145,9 +152,11 @@ export function createBattleView(options: {
   /** ユニットの見た目を作る（戦闘の開始時と、増援が現れた時） */
   const addVisual = (unit: Pick<UnitState, 'id' | 'jobId' | 'team' | 'x' | 'z' | 'facing'>) => {
     const look = JOB_LOOKS[unit.jobId] ?? JOB_LOOKS.warrior!;
-    const puppet = createPuppet({ ...look, body: TEAM_COLORS[unit.team].body });
+    // 対象物（物語の土台）は、物の見た目に足もとの輪だけを付ける（向きの目印は付けない）
+    const isObject = unit.team === 'neutral';
+    const puppet = isObject ? createPropModel(unit.jobId.replace(/^object:/, '')) : createPuppet({ ...look, body: TEAM_COLORS[unit.team].body });
     puppet.group.add(teamRing(TEAM_COLORS[unit.team].ring));
-    puppet.group.add(facingPointer(TEAM_COLORS[unit.team].ring));
+    if (!isObject) puppet.group.add(facingPointer(TEAM_COLORS[unit.team].ring));
     puppet.group.userData.unitId = unit.id;
     const chargeRing = new THREE.Mesh(
       new THREE.TorusGeometry(0.42, 0.035, 6, 28).rotateX(Math.PI / 2),
@@ -569,6 +578,25 @@ export function createBattleView(options: {
       });
       v.alive = false;
       v.down = true;
+    },
+    async animateBreak(unitId) {
+      const v = visual(unitId);
+      const base = v.puppet.group.position.x;
+      await tweens.play(0.5, (t) => {
+        v.puppet.group.position.x = base + 0.06 * Math.sin(t * 40) * (1 - t);
+        v.puppet.setFlash(1 - t);
+        v.puppet.body.scale.setScalar(1 - 0.6 * t);
+        v.puppet.setOpacity(1 - t);
+      });
+      v.puppet.group.position.x = base;
+      v.alive = false;
+      v.down = false;
+      v.puppet.group.visible = false;
+    },
+    async updateMap(map) {
+      mapView.setMap(map);
+      for (const v of visuals.values()) place(v, v.coord);
+      await tweens.wait(0.3);
     },
     async animateRetire(unitId) {
       const v = visual(unitId);

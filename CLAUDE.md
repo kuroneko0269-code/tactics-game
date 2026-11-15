@@ -8,6 +8,17 @@
 
 - 開発計画: [docs/ROADMAP.md](docs/ROADMAP.md)
 - 仕様の要点: [docs/GAME_DESIGN.md](docs/GAME_DESIGN.md)
+- 物語の資料: [docs/story/design.md](docs/story/design.md)（設計書）、[docs/story/novel.md](docs/story/novel.md)（小説の本文）
+- 台本の書き方: [docs/SCRIPT_GUIDE.md](docs/SCRIPT_GUIDE.md)
+
+## 物語の決まり
+
+- **物語の内容は docs/story/ が正。** 筋、人物、台詞を、実装の都合で変えない。変える必要があると考えた時は、
+  理由と影響する章を PR の説明に質問として書き、発注者の判断を待つ。
+- **台詞は小説の本文から取る。** 設計書の「6. 台詞と表現の決まり」を守る。
+- 設計書の「7. 宣伝」で伏せるとされている事柄を、画面の説明文、ジョブやアイテムの名前、PR の題名で明かさない。
+- **分岐とマルチエンディングは作らない。**（会話に選択肢は置かない）
+- 物語の台本（`src/data/story/scripts/`）と章の「これまで」は、例外として text.ts ではなく台本と章のデータに書く。
 
 ## 技術構成
 
@@ -127,6 +138,12 @@ npm run balance      # バランス確認: 画面を使わず AI 同士を戦わ
   3つ同時・高解像度の時に1戦の制限時間（12分）を超えて止まったように見えた（フェーズ1 の仕上げで修正）。
   それでも遅い時は、画面サイズを1つずつ（`--viewports=portrait` など）実行するか、`--timeout=ミリ秒` で制限時間を延ばす。
 - 画面の状態は、開発用サーバーの時だけ用意される `window.__tactics`（`src/main.ts`）から読む。公開ページには含まれない。
+- 起動すると題名の画面が出る。今までの確認（拠点から始めるもの）は、URL に `&start=base`（開発用サーバーの時だけ効く）を付けて題名の画面を飛ばす。
+- 物語の土台（物語の土台の PR）: スマホ縦向きで、試しの場面を題名の画面から最後まで通す（会話をタップ・ルビ・語り・読み返し・早送り・暗転、
+  押し続ける・歩かせる、会話の途中と戦闘中の会話の途中で読み込み直して「これまで」から再開、戦闘は味方も AI に任せて（`setAutoPlayer`）
+  戦闘中の会話と地形の変化を確かめ、途中保存から core だけで計算した結果と照合、最後はスキップ）。2回目はすべての会話をスキップで通す。
+  CI の短くした版でも、画面の収まりの確認と同時に動かす（約40秒）。`-- --story-only` でこれだけ、`-- --layouts-only` で画面の収まりだけを確かめられる。
+  画面の収まりの確認には、題名・会話（語りと台詞）・読み返し・スキップの確認・押し続ける・歩かせる・「これまで」・対象物のある戦闘を足した。
 
 育成とセーブについて:
 - 育成の計算（レベル・成長値・JP・習得・ジョブチェンジ・副コマンド・受動的なアビリティの付け替え・編成の検証）は `src/core/progression.ts`、数値は `src/data/progression.ts` と `src/data/jobs.ts`。
@@ -138,8 +155,12 @@ npm run balance      # バランス確認: 画面を使わず AI 同士を戦わ
   数値は `src/data/battleRules.ts` の `knockout`。ジョブのマスターの判定と成長の上限は `src/core/progression.ts`。
 - 状態変化と受動的なアビリティの効果は `src/core/effects.ts`、受動的なアビリティの定義は `src/data/passives.ts`、状態変化の数値は `src/data/battleRules.ts`。
 - 膠着（両軍で 30 手番、ダメージ・回復・状態変化がない時の決着。フェーズ2-6）の判定は `src/core/scenario.ts` の `judgeStalemate`、数値は `src/data/battleRules.ts` の `stalemate`。
+- 物語の土台: 章と場面は `src/core/story.ts`（本の定義は `src/data/story/books.ts`）、台本の読み込みは `src/core/script.ts`、
+  会話の進行と舞台の様子は `src/core/dialogue.ts`、会話の枠と操作の場面は `src/ui/dialogue.ts`、舞台の見た目は `src/render/sceneView.ts`。
+  台本は `src/data/story/scripts/`、仕草・物・人物の見た目の名前は `src/data/story/stageDefs.ts`、会話用のマップは `src/data/story/stages.ts`。
+  対象物（陣営 `neutral` の行動しない物。ジョブの欄は `object:種類`）は戦場の定義の `objects`、見た目は `src/render/props.ts`。
 - 勝敗条件・マップ上のイベント・罠の判定は `src/core/scenario.ts`、起こす処理は `src/core/battle.ts`。戦場ごとの定義は `src/data/battles/`（ダンジョンは `ruins/`）。
-- ダンジョンの進み具合・クリアの記録・報酬は `src/core/dungeon.ts`。セーブデータは版 5（部隊（所持金・所持品・装備を含む）とダンジョンの記録と訓練戦の記録、途中の戦闘）。
+- ダンジョンの進み具合・クリアの記録・報酬は `src/core/dungeon.ts`。セーブデータは版 6（部隊（所持金・所持品・装備を含む）とダンジョンの記録と訓練戦の記録、途中の戦闘、物語の進み具合）。
 - 人物（フェーズ2-6）: 部隊のユニットの id が、その人物の変わらない id（`src/data/characters.ts`。名前は text.ts に id で引く）。
   ジョブの「就ける対象」（だれでも・特定の人物だけの専用ジョブ・敵専用）と解放条件の判定は `src/core/progression.ts`（`canTakeJob`・`newlyUnlockedJobs`）。
 - 装備（フェーズ2-4）: 個体・枠・ジョブごとの制限・能力値は `src/core/items.ts`、付け替え・ジョブを変えた時に外れる物・「おまかせ」は `src/core/equipment.ts`、

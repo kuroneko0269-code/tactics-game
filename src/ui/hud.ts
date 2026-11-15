@@ -1,4 +1,4 @@
-import type { SpellEffect, SpellElement, Team, UnitState } from '../core/battleTypes';
+import type { SpellEffect, SpellElement, Side, Team, UnitState } from '../core/battleTypes';
 import type { Direction, RelativeSide } from '../core/geometry';
 import { TEXT, unitName } from './text';
 
@@ -14,7 +14,7 @@ export interface BattleHud {
   setActions(actions: readonly HudAction[]): void;
   showPreview(preview: AttackPreviewView | undefined): void;
   showSpellPreview(preview: SpellPreviewView | undefined): void;
-  showResult(winner: Team | undefined, turns: number, onRetry?: () => void): void;
+  showResult(winner: Side | undefined, turns: number, onRetry?: () => void): void;
   /**
    * 移動を取り消してやり直すボタン。移動した直後（まだ行動していない間）だけ、行動のボタンの上に目立たせて出す。
    * undefined で消す。
@@ -343,6 +343,12 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
       job.textContent = ` ${TEXT.teams[unit.team]}・${TEXT.jobs[unit.jobId] ?? unit.jobId} ${TEXT.roster.level(unit.level)}`;
       const hp = el('div', 'info-hp');
       hp.append(`${TEXT.hp} ${unit.hp} / ${unit.stats.maxHp}`, hpBar(unit.hp, unit.stats.maxHp, unit.team));
+      // 対象物（物語の土台）は、名前と HP と札だけ
+      if (unit.object) {
+        job.textContent = ` ${TEXT.teams.neutral}`;
+        info.append(name, job, hp, Object.assign(el('div', 'info-target'), { textContent: TEXT.objectives.objectTag }));
+        return;
+      }
       // MP は HP と並べて表示する（MP を持たないジョブは出さない）
       if (unit.stats.maxMp > 0) {
         const mp = el('span', 'info-mp');

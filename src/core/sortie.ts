@@ -11,7 +11,7 @@
  *   （味方1, 敵1, 敵2, 味方2, 味方3, 敵3, ...）。どちらかの陣営を先にまとめると、同じ素早さのユニットどうしでは
  *   常にその陣営が先に動いてしまうため。
  */
-import type { BattleObjectives, BattleSetup, MapEventDefinition, TrapPlacement, UnitPlacement } from './battleTypes';
+import type { BattleObjectives, BattleSetup, MapEventDefinition, ObjectPlacement, TrapPlacement, UnitPlacement } from './battleTypes';
 import type { Direction } from './geometry';
 import type { MapDefinition } from './map';
 import { equippedDefinitions } from './equipment';
@@ -59,6 +59,8 @@ export interface BattleSite {
   readonly events?: readonly MapEventDefinition[];
   /** 罠 */
   readonly traps?: readonly TrapPlacement[];
+  /** 対象物（物語の土台） */
+  readonly objects?: readonly ObjectPlacement[];
 }
 
 /**
@@ -105,6 +107,7 @@ export function buildSortie(
     objectives: site.objectives,
     events: site.events,
     traps: site.traps,
+    ...(site.objects ? { objects: site.objects } : {}),
     ...(progression ? { progression } : {}),
   };
 }

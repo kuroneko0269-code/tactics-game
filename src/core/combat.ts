@@ -298,11 +298,13 @@ export function previewAttack(
     const coverer = coverFor(state, attacker, target);
     if (coverer) return { ...previewAttack(state, attacker, coverer, from, strike, { noCover: true }), coveredBy: coverer.id };
   }
-  const side = relativeSide(from, target, target.facing);
+  // 対象物（物語の土台）には向きがない: いつも正面として数え、必ず当たる
+  const side = target.object ? 'front' : relativeSide(from, target, target.facing);
   const heightPercent = heightDamagePercent(rules, heightAt(state.map, from), heightAt(state.map, target));
   const chargingPercent = chargingPercentOf(rules, target);
   const protectPercent = hasStatus(target, 'protect') ? rules.status.protect.damageTakenPercent : 100;
-  const hit = weaponHit(rules, attacker, target, side, strike);
+  const weapon = weaponHit(rules, attacker, target, side, strike);
+  const hit = target.object ? { ...weapon, hitPercent: 100 } : weapon;
   // 背水: 背面からのダメージの補正を受けない。不意打ち: 背面からの時だけ倍率が上がる
   const damageSide = side === 'back' && passiveEffect(target, 'backGuard') ? 'side' : side;
   const abilityPercent = side === 'back' && strike?.backDamagePercent !== undefined ? strike.backDamagePercent : (strike?.damagePercent ?? 100);

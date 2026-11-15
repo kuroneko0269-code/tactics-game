@@ -3,7 +3,7 @@
  * 文言はここ以外に書かない（将来の翻訳と表記の統一のため）。
  * core は文言を作らず、出来事や状態（例: 地形 'grass'、向き 'back'）だけを返す。それを文言に変えるのがここの役割。
  */
-import type { ArmorType, EquipmentEffect, EquipSlot, GrowthStat, PassiveSlot, SpellElement, StatusId, Team, UnitStats, WeaponType } from '../core/battleTypes';
+import type { ArmorType, EquipmentEffect, EquipSlot, GrowthStat, PassiveSlot, SpellElement, Side, StatusId, Team, UnitStats, WeaponType } from '../core/battleTypes';
 import type { EquipRefusal } from '../core/equipment';
 import type { BuyRefusal, SellRefusal } from '../core/shop';
 import type { LearnRefusal } from '../core/progression';
@@ -19,7 +19,60 @@ export const TEXT = {
     'ruins-entrance': '入口',
     'ruins-corridor': '崩れた回廊',
     'ruins-altar': '祭壇の間',
+    'trial-weir': '試しの堰',
+    'stage-room': '室内',
+    'stage-yard': '野外',
   } as Readonly<Record<string, string>>,
+
+  /** 物語の本の名前（物語の土台） */
+  books: {
+    main: '消された暦',
+    trial: '試しの場面',
+  } as Readonly<Record<string, string>>,
+
+  /** 題名の画面（物語の土台） */
+  title: {
+    name: '消された暦',
+    sub: '（仮・開発中）',
+    story: '物語',
+    storyHelp: '序章は次の更新で遊べます（準備中）',
+    storyContinue: '物語の続きから',
+    play: '訓練と遺跡',
+    playHelp: '訓練戦と、はじまりの遺跡（部隊は物語と共通）',
+    trial: '試しの場面',
+    trialHelp: '会話・操作の場面・戦闘の仕組みを確かめる（1〜2分。仮の内容）',
+    trialContinue: '試しの場面の続きから',
+    trialRestart: '試しの場面を最初から',
+    toTitle: 'タイトルへ',
+  },
+
+  /** 物語の流れ（物語の土台） */
+  story: {
+    recapTitle: 'これまで',
+    recapContinue: '続ける',
+    finished: (title: string) => `${title}を最後まで見ました`,
+    next: '物語を進める',
+    retry: 'やり直す',
+    battleWon: '勝利！ 物語を進めます',
+    battleLost: '敗北……',
+    baseNote: '編成と店を使えます。準備ができたら「物語を進める」',
+  },
+
+  /** 会話の枠（物語の土台） */
+  dialogue: {
+    fast: '早送り',
+    backlog: '読み返し',
+    backlogTitle: '読み返し',
+    skip: 'スキップ',
+    skipTitle: 'この会話を飛ばしますか？',
+    skipNote: '操作の場面も飛ばして、会話の終わりまで進みます。',
+    skipYes: '飛ばす',
+    skipNo: 'やめる',
+    close: '閉じる',
+    holdDefault: '押し続ける',
+    holdHint: 'ボタンを押し続けると、少しずつ進みます。指を離すと止まります。',
+    walkHint: '光っているマスを押すと、1マスずつ歩きます。',
+  },
 
   /** ダンジョンの名前（名称は仮） */
   dungeons: {
@@ -41,6 +94,17 @@ export const TEXT = {
     reachTile: '味方のだれかが光る輪のマスに到達',
     reachTileShort: '光る輪のマスに到達',
     surviveTurns: (n: number) => `${n}手番を耐える`,
+    /** 対象物をすべて壊す（物語の土台）。left は残りの数 */
+    destroyObjects: (names: string, left: number, total: number) => `${names}をすべて壊す（${total - left} / ${total}）`,
+    destroyObjectsShort: (left: number, total: number) => `物を壊す ${total - left}/${total}`,
+    /** 正面以外から攻撃を当てる（物語の土台） */
+    hitUnit: (label: string, name: string, count: number, times: number) => `${name}の${label}に、正面以外から攻撃を ${times} 回当てる（${Math.min(count, times)} / ${times}）`,
+    hitUnitShort: (label: string, count: number, times: number) => `${label} ${Math.min(count, times)}/${times}`,
+    hitUnitDefaultLabel: '体',
+    /** 頭上に出す、数えた回数 */
+    tallyPop: (count: number, times: number) => `${Math.min(count, times)} / ${times}`,
+    /** 対象物の情報の欄の札 */
+    objectTag: '◆ 壊す物',
     allDefeated: '味方の全滅',
     unitDefeated: (name: string) => `${name}が倒れる`,
     turnLimit: (n: number) => `${n}手番を過ぎる`,
@@ -62,13 +126,14 @@ export const TEXT = {
     stalemateResult: '膠着（HP の割合で決着）',
   },
 
-  /** マップ上のイベントのメッセージ（messageId で引く） */
-  messages: {
-    ruinsEntranceIntro: '遺跡の入口を守る敵がいる。高い所を取って戦おう',
-    ruinsCorridorIntro: '回廊の奥の扉を目指せ。後ろから敵が迫ってくる',
-    reinforcementBehind: '後ろから足音が近づいてくる……',
-    ruinsAltarIntro: '祭壇の主が強力な魔法を唱える。予約された範囲から逃げるか、詠唱を止めよう',
-    ruinsAltarRage: '祭壇の主が仲間を呼んだ！',
+  /** 対象物が壊れた時の頭上の文字 */
+  objectBroken: '壊れた！',
+  /** 対象物の名前（種類の id で引く。物語の土台） */
+  objectNames: {
+    seam: '積み石の合わせ目',
+    pillar: '結界の柱',
+    crate: '木箱',
+    oathSword: '誓いの剣',
   } as Readonly<Record<string, string>>,
 
   /** 罠（フェーズ2-2） */
@@ -285,8 +350,8 @@ export const TEXT = {
     swiftFeet: '移動力 +2',
     ice: '単体の攻撃魔法。威力は炎と風の間',
     earth: '単体の攻撃魔法。相手が自分より低い位置にいるほど威力が上がる（1 段ごとに +25%）',
-    haste: '単体に加速（素早さ +50%、3手番）を付ける。詠唱は速い',
-    decelerate: '単体に素早さ低下（-25%、3手番）を付ける。詠唱は速い',
+    haste: '中心と上下左右の5マスにいる全員（敵も味方も）に加速（素早さ +50%、4手番）を付ける。詠唱は速い',
+    decelerate: '中心と上下左右の5マスにいる全員（敵も味方も）に素早さ低下（-35%、3手番）を付ける。詠唱は速い',
     stop: '単体に停止（次の手番が何もできずに過ぎる）を付ける。詠唱は長い',
     quicken: '味方ひとりの CT を満たし、すぐに行動させる。消費 MP が大きい',
     fireSpirit: '中心から 2 マス以内の、敵だけにダメージ。詠唱は長い',
@@ -446,6 +511,7 @@ export const TEXT = {
   teams: {
     player: '味方',
     enemy: '敵',
+    neutral: '物',
   } satisfies Record<Team, string>,
 
   /** ユニットの名前。id で引く（最初の部隊の5人は人物の id。フェーズ2-6 で物語の確定に合わせて名前を変えた） */
@@ -700,7 +766,7 @@ export const TEXT = {
   result: {
     player: '勝利',
     enemy: '敗北',
-  } satisfies Record<Team, string>,
+  } satisfies Record<Side, string>,
   resultDetail: (turns: number) => `${turns}手番で決着`,
 
   /** 能力値の名前（編成の画面） */
@@ -753,6 +819,7 @@ export const TEXT = {
     saved: '部隊の状態は、この端末に自動で保存されます',
     /** 途中の戦闘（フェーズ2-5） */
     suspendedTraining: (tier: string) => `途中の戦闘: 訓練戦（${tier}）`,
+    suspendedStory: (book: string) => `途中の戦闘: ${book}`,
     suspendedDungeon: (name: string, n: number, mapName: string) => `途中の戦闘: ${name} 第${n}戦「${mapName}」`,
     suspendedNote: '戦闘の途中です。編成と店は、戦闘を終えると使えます',
     resumeBattle: '戦闘を再開',
@@ -946,5 +1013,11 @@ export const TEXT = {
 } as const;
 
 export function unitName(id: string, jobId: string): string {
+  if (jobId.startsWith(OBJECT_JOB_PREFIX)) return TEXT.objectNames[jobId.slice(OBJECT_JOB_PREFIX.length)] ?? id;
   return TEXT.unitNames[id] ?? TEXT.jobs[jobId] ?? id;
 }
+
+/** 対象物（物語の土台）の名前を unitName で引くための、ジョブの欄の書き方（`object:種類`） */
+export const OBJECT_JOB_PREFIX = 'object:';
+/** 対象物の名前（ジョブの欄を `object:種類` にして unitName に渡す） */
+export const objectJobId = (kind: string) => `${OBJECT_JOB_PREFIX}${kind}`;

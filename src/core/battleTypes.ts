@@ -4,9 +4,15 @@
  * 数値（能力値や命中率）は src/data の定義データから受け取り、ここには書かない。
  */
 import type { Coord, Direction, RelativeSide } from './geometry';
-import type { BattleMap, MapDefinition } from './map';
+import type { BattleMap, MapDefinition, Terrain, Tile } from './map';
 
-export type Team = 'player' | 'enemy';
+/** 戦う陣営（勝敗を争う側） */
+export type Side = 'player' | 'enemy';
+/**
+ * ユニットの陣営。neutral は、どちらの陣営でもない「物」（対象物。物語の土台）。
+ * 物は行動せず、HP を持ち、攻撃と魔法の対象にでき、HP が 0 になると壊れて消える（戦闘不能にはならない）
+ */
+export type Team = Side | 'neutral';
 
 /** 能力値 */
 export interface UnitStats {
@@ -521,6 +527,20 @@ export interface TrapState extends TrapPlacement {
  */
 export type VictoryCondition =
   | { readonly kind: 'defeatAll' }
+  /** 指定の物（対象物）をすべて壊す（物語の土台） */
+  | { readonly kind: 'destroyObjects'; readonly unitIds: readonly string[] }
+  /**
+   * 指定のユニットに、sides の向き（省くと正面以外 = 側面と背面）から、味方の武器による攻撃を times 回当てる（物語の土台）。
+   * id は数えた回数（scenario.tallies）の名前。labelId は画面に出す名前（text.ts。例: 誓いの剣）
+   */
+  | {
+      readonly kind: 'hitUnit';
+      readonly id: string;
+      readonly unitId: string;
+      readonly times: number;
+      readonly sides?: readonly RelativeSide[];
+      readonly labelId?: string;
+    }
   | { readonly kind: 'defeatUnit'; readonly unitId: string }
   | { readonly kind: 'reachTile'; readonly tiles: readonly Coord[] }
   | { readonly kind: 'surviveTurns'; readonly turns: number };
@@ -553,18 +573,33 @@ export type EventTrigger =
   | { readonly kind: 'turn'; readonly turn: number; readonly every?: number }
   | { readonly kind: 'enterTile'; readonly tiles: readonly Coord[]; readonly team?: Team }
   | { readonly kind: 'hpBelow'; readonly unitId: string; readonly percent: number }
-  | { readonly kind: 'unitDefeated'; readonly unitId: string };
+  | { readonly kind: 'unitDefeated'; readonly unitId: string }
+  /** 指定の対象物のうち count 個が壊れた時（どれが壊れたかは問わない。1回だけ。物語の土台） */
+  | { readonly kind: 'objectsBroken'; readonly unitIds: readonly string[]; readonly count: number }
+  /** 数えた回数（hitUnit の勝利条件など。scenario.tallies）が count に届いた時（1回だけ。物語の土台） */
+  | { readonly kind: 'tally'; readonly id: string; readonly count: number };
+
+/** 地形の変化（イベント。物語の土台）: マスの高さか種類（どちらか一方でもよい）を変える */
+export interface TileChange {
+  readonly x: number;
+  readonly z: number;
+  readonly height?: number;
+  readonly terrain?: Terrain;
+}
 
 /**
  * マップ上のイベントで起きること（src/data に置く形）。
  * - reinforce: 増援。きっかけの delay 手番後に、units の位置に現れる（それまでは出現するマスに予告の目印を出す）。
  *   出現するマスにユニットがいる時は、近くの空いたマスに出す
- * - message: 短いメッセージを出す（文言は src/ui/text.ts に messageId で引く）
+ * - dialogue: 会話を出す（物語の土台。以前の「短いメッセージ」を置き換えた）。台本は scriptId で引く。
+ *   会話は画面の見せ方だけで、戦闘の結果は変えない
+ * - terrain: マスの高さや種類を変える（例: 堰が切れて、低いマスが水になる）
  * - trap: 指定のマスにいるユニットに、罠と同じ効果を与える（マスに置いた罠とは別。見えない罠を増やすものではない）
  */
 export type EventEffect =
   | { readonly kind: 'reinforce'; readonly units: readonly UnitPlacement[]; readonly delay: number }
-  | { readonly kind: 'message'; readonly messageId: string }
+  | { readonly kind: 'dialogue'; readonly scriptId: string }
+  | { readonly kind: 'terrain'; readonly tiles: readonly TileChange[] }
   | { readonly kind: 'trap'; readonly trap: TrapKind; readonly tiles: readonly Coord[] };
 
 /** マップ上のイベント（src/data に置く）。times は起きる回数の上限（省くと 1。every のあるきっかけで繰り返す時に使う） */
@@ -578,7 +613,8 @@ export interface MapEventDefinition {
 /** 戦闘中の「起きること」。増援は、戦闘の開始時に能力値まで組み立てたユニット（id は出現の時に付け直す）を持つ */
 export type EventEffectState =
   | { readonly kind: 'reinforce'; readonly units: readonly UnitState[]; readonly delay: number }
-  | { readonly kind: 'message'; readonly messageId: string }
+  | { readonly kind: 'dialogue'; readonly scriptId: string }
+  | { readonly kind: 'terrain'; readonly tiles: readonly TileChange[] }
   | { readonly kind: 'trap'; readonly trap: TrapKind; readonly tiles: readonly Coord[] };
 
 /** 戦闘中のイベント。fired は起きた回数 */
@@ -604,6 +640,19 @@ export interface ScenarioState {
   readonly events: readonly MapEventState[];
   readonly traps: readonly TrapState[];
   readonly reinforcements: readonly PendingReinforcement[];
+  /** 数えた回数（hitUnit の勝利条件の id ごと。物語の土台）。省いた状態（以前の途中の戦闘）は空とみなす */
+  readonly tallies?: Readonly<Record<string, number>>;
+}
+
+/** 対象物の配置（物語の土台）。kind は見た目と名前（text.ts）の id */
+export interface ObjectPlacement {
+  readonly id: string;
+  readonly kind: string;
+  readonly x: number;
+  readonly z: number;
+  readonly hp: number;
+  /** 経験値の計算に使うレベル（省くと 1） */
+  readonly level?: number;
 }
 
 /** 魔法の狙い先 */
@@ -738,6 +787,8 @@ export interface BattleSetup {
   readonly events?: readonly MapEventDefinition[];
   /** 罠 */
   readonly traps?: readonly TrapPlacement[];
+  /** 対象物（物語の土台） */
+  readonly objects?: readonly ObjectPlacement[];
   /** 育成の数値。渡すと、progress を持つユニットが戦闘中に経験値と JP を得る */
   readonly progression?: ProgressionRules;
 }
@@ -806,6 +857,8 @@ export interface UnitState {
   readonly turnStartHp: number;
   /** この戦闘で「踏みとどまる」を使ったか */
   readonly endureUsed: boolean;
+  /** 対象物なら、その種類（見た目と名前の id）。ユニットなら省く（物語の土台） */
+  readonly object?: { readonly kind: string };
 }
 
 /** いま手番を持っているユニットの進み具合 */
@@ -831,7 +884,7 @@ export interface BattleState {
   /** 手番を持っているユニット。決着後は null */
   readonly turn: TurnState | null;
   /** 勝った陣営。決着前は null */
-  readonly winner: Team | null;
+  readonly winner: Side | null;
   /** 乱数生成器の内部状態（rng.ts の getState の値） */
   readonly rngState: number;
   /** 育成の数値（戦闘中の経験値・JP・レベルアップに使う）。なければ、戦闘中に経験値と JP は入らない */
@@ -1028,7 +1081,14 @@ export type BattleEvent =
       readonly type: 'eventFired';
       readonly eventId: string;
     }
-  | { readonly type: 'message'; readonly messageId: string }
+  /** 会話を出す（物語の土台）。戦闘の結果は変えない */
+  | { readonly type: 'dialogue'; readonly scriptId: string }
+  /** 地形が変わった（tiles は変わった後のマス） */
+  | { readonly type: 'terrainChanged'; readonly tiles: readonly Tile[] }
+  /** 対象物が壊れた（マップから消える） */
+  | { readonly type: 'objectBroken'; readonly unitId: string }
+  /** 数えた回数が増えた（hitUnit の勝利条件。count は今の回数、times は必要な回数） */
+  | { readonly type: 'tallied'; readonly id: string; readonly count: number; readonly times: number }
   | {
       /** 増援の予告。appearAfterTurn 回の手番が終わった時点で、tiles に現れる */
       readonly type: 'reinforcementWarned';
@@ -1073,7 +1133,7 @@ export type BattleEvent =
   | {
       /** 決着した。reason は決め手になった条件（勝利なら勝利条件、敗北なら敗北条件の kind） */
       readonly type: 'battleEnded';
-      readonly winner: Team;
+      readonly winner: Side;
       readonly reason: VictoryCondition['kind'] | DefeatCondition['kind'] | 'stalemate';
     };
 

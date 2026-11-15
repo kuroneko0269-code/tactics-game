@@ -29,6 +29,10 @@ export interface BaseScreenHandlers {
   onRoster(): void;
   onShop(): void;
   onNewGame(): void;
+  /** タイトルの画面へ（物語の土台） */
+  onTitle(): void;
+  /** 物語の拠点の場面なら、「物語を進める」を押した時の処理（物語の土台）。そうでなければ null */
+  storyNext(): (() => void) | null;
 }
 
 export interface BaseScreen {
@@ -112,12 +116,24 @@ export function createBaseScreen(root: HTMLElement, handlers: BaseScreenHandlers
       const gold = el('p', 'base-gold', TEXT.base.gold(handlers.gold()));
       gold.dataset.gold = String(handlers.gold());
       info.append(gold, el('p', 'screen-note', TEXT.base.saved));
-      actions.append(
-        screenButton(TEXT.base.sortie, () => render('sortie'), { className: 'primary big' }),
-        screenButton(TEXT.base.roster, () => handlers.onRoster(), { className: 'big' }),
-        screenButton(TEXT.base.shop, () => handlers.onShop(), { className: 'big' }),
-        screenButton(TEXT.base.newGame, () => render('confirm'), { className: 'quiet' }),
-      );
+      const storyNext = handlers.storyNext();
+      if (storyNext) {
+        // 物語の拠点の場面: 編成と店だけを使い、「物語を進める」で次の場面へ
+        info.append(el('p', 'screen-note', TEXT.story.baseNote));
+        actions.append(
+          screenButton(TEXT.story.next, storyNext, { className: 'primary big story-next' }),
+          screenButton(TEXT.base.roster, () => handlers.onRoster(), { className: 'big' }),
+          screenButton(TEXT.base.shop, () => handlers.onShop(), { className: 'big' }),
+        );
+      } else {
+        actions.append(
+          screenButton(TEXT.base.sortie, () => render('sortie'), { className: 'primary big' }),
+          screenButton(TEXT.base.roster, () => handlers.onRoster(), { className: 'big' }),
+          screenButton(TEXT.base.shop, () => handlers.onShop(), { className: 'big' }),
+          screenButton(TEXT.base.newGame, () => render('confirm'), { className: 'quiet' }),
+        );
+      }
+      actions.append(screenButton(TEXT.title.toTitle, () => handlers.onTitle(), { className: 'quiet to-title' }));
     } else if (view === 'tiers') {
       info.append(el('h1', 'screen-title', TEXT.base.sortie), el('p', 'screen-note', TEXT.base.chooseTier(mapName(handlers.mapId))));
       for (const { id, level } of handlers.tiers) {

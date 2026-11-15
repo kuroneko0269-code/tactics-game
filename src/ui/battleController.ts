@@ -62,6 +62,10 @@ export interface BattleViewPort {
   setOverlays(tiles: readonly { x: number; z: number; kind: OverlayKind }[]): void;
   /** 増援が現れる */
   animateAppear(unit: UnitState): Promise<void>;
+  /** 対象物が壊れて消える（物語の土台） */
+  animateBreak(unitId: string): Promise<void>;
+  /** 地形が変わった（物語の土台） */
+  updateMap(map: BattleState['map']): Promise<void>;
   /** 罠が発動する */
   animateTrap(event: Extract<BattleEvent, { type: 'trapTriggered' }>): Promise<void>;
   wait(seconds: number): Promise<void>;
@@ -90,6 +94,13 @@ export interface BattleControllerDeps {
    * jpTotal は、そのジョブの今の JP の累計
    */
   readonly unlockedJobs?: (unitId: string, jobId: string, jpTotal: number) => readonly string[];
+  /**
+   * 戦闘中の会話（物語の土台。マップ上のイベントの「会話」）を出し、読み終わるか飛ばされたら解決する。
+   * 渡さなければ会話は出さない（戦闘の結果は変わらない）
+   */
+  readonly playDialogue?: (scriptId: string) => Promise<void>;
+  /** 開発中の自動テスト用: true の間は、味方の手番も AI が動かす（会話の差し込みや地形の変化を、戦闘を通して確かめるため） */
+  readonly autoPlayer?: () => boolean;
 }
 
 export interface BattleController {
@@ -103,6 +114,8 @@ export interface BattleController {
   load(result: ActionResult): void;
   /** 戦闘を途中でやめる（敵の手番を進めるのをやめ、決着も知らせない） */
   dispose(): void;
+  /** 開発中の自動テスト用: 味方の入力を待っていれば、AI で続きを進める（autoPlayer を true にした後で呼ぶ） */
+  resumeAuto?(): void;
   readonly state: BattleState;
   /** プレイヤーの入力を待っているか（自動テスト用） */
   readonly mode: Mode['kind'];
@@ -867,9 +880,31 @@ export function createBattleController(start: ActionResult, deps: BattleControll
           await view.wait(0.35);
           break;
         }
-        case 'message':
-          hud.showMessage(TEXT.messages[ev.messageId] ?? ev.messageId);
-          await view.wait(0.9);
+        case 'dialogue':
+          if (deps.playDialogue) {
+            hud.setHint('');
+            await deps.playDialogue(ev.scriptId);
+          }
+          break;
+        case 'terrainChanged':
+          await view.focusTiles(ev.tiles);
+          await view.updateMap(state.map);
+          refresh();
+          break;
+        case 'objectBroken':
+          await view.focusTiles([getUnit(state, ev.unitId)]);
+          labels.popText(ev.unitId, TEXT.objectBroken);
+          await view.animateBreak(ev.unitId);
+          labels.setKnockout(ev.unitId, null, true);
+          showScenario();
+          break;
+        case 'tallied':
+        {
+          const c = state.scenario.objectives.victory.find((v) => v.kind === 'hitUnit' && v.id === ev.id);
+          if (c?.kind === 'hitUnit') labels.popText(c.unitId, TEXT.objectives.tallyPop(ev.count, ev.times), 'reaction');
+        }
+          showScenario();
+          await view.wait(0.35);
           break;
         case 'reinforcementWarned':
           showScenario();
@@ -963,7 +998,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
         return;
       }
       const unit = actor();
-      if (unit.team === 'player') {
+      if (unit.team === 'player' && !deps.autoPlayer?.()) {
         // 移動と行動を済ませた後で再開した時は、向きを選ぶところから
         const t = turn()!;
         setMode(t.moved && t.acted ? facingMode() : { kind: 'main' });
@@ -1090,6 +1125,10 @@ export function createBattleController(start: ActionResult, deps: BattleControll
   return {
     onTap,
     load: startFrom,
+    resumeAuto() {
+      if (disposed || mode.kind === 'busy' || mode.kind === 'ended') return;
+      void proceed();
+    },
     dispose() {
       disposed = true;
       mode = { kind: 'ended' };

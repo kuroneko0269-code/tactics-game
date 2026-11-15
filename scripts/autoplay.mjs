@@ -76,6 +76,10 @@ const FULL_DUNGEON = args['full-dungeon'] === 'true';
  * 一致することを確かめてから、開発用の決着で勝ちにする。最後まで戦って照合するのは、手元で実行する全体の自動プレイ（npm run autoplay）
  */
 const QUICK = args.quick === 'true';
+/** 物語の土台（試しの場面）だけを確かめる（手元で直す時に。--story-only） */
+const STORY_ONLY = args['story-only'] === 'true';
+/** 画面の収まりだけを確かめる（手元で直す時に。--layouts-only） */
+const LAYOUTS_ONLY = args['layouts-only'] === 'true';
 /** 画面全体がスクロールしないかを確かめる画面サイズ（各画面を開いて調べるだけなので短い） */
 /**
  * 画面全体がスクロールしないかを確かめる画面サイズ。短くした版（CI）は、縦向きより厳しい「小さめのスマホ」と、横向き・PC の3つ
@@ -207,10 +211,26 @@ async function main() {
   };
   // 短くした版（CI）は、画面の収まりの確認も同時に動かして時間を抑える。全体では、ブラウザが多すぎて遅くならないよう、
   // 1戦を戦う画面サイズを先に、画面の収まりの確認をその後に動かす
-  const layoutsAlongside = QUICK ? LAYOUT_VIEWPORTS.map(layoutRun) : [];
+  const layoutsAlongside = QUICK && !STORY_ONLY ? LAYOUT_VIEWPORTS.map(layoutRun) : [];
+  // 物語の土台（試しの場面を、最初から最後まで・スキップで・途中で読み込み直して通す）。スマホ縦向きの1つで
+  const storyAlongside = LAYOUTS_ONLY ? undefined : (async () => {
+    const browser = await chromium.launch({
+      headless: !HEADED,
+      args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist'],
+    });
+    try {
+      const r = await storyRun(browser, baseUrl, 'portrait', core);
+      return { name: 'portrait', ok: true, ...r };
+    } catch (e) {
+      return { name: 'portrait', ok: false, story: true, error: e };
+    } finally {
+      await browser.close();
+    }
+  })();
   const battleResults = await Promise.all([
-    ...layoutsAlongside,
-    ...VIEWPORTS.map(async (name) => {
+    ...(storyAlongside ? [storyAlongside] : []),
+    ...(LAYOUTS_ONLY ? LAYOUT_VIEWPORTS.map(layoutRun) : layoutsAlongside),
+    ...(STORY_ONLY || LAYOUTS_ONLY ? [] : VIEWPORTS).map(async (name) => {
       const browser = await chromium.launch({
         headless: !HEADED,
         args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--ignore-gpu-blocklist'],
@@ -225,14 +245,19 @@ async function main() {
       }
     }),
   ]);
-  const results = QUICK ? battleResults : [...battleResults, ...(await Promise.all(LAYOUT_VIEWPORTS.map(layoutRun)))];
+  const results = QUICK || STORY_ONLY || LAYOUTS_ONLY ? battleResults : [...battleResults, ...(await Promise.all(LAYOUT_VIEWPORTS.map(layoutRun)))];
   await server.close();
 
   console.log('');
   let failed = false;
   for (const r of results) {
-    const label = `${r.layout ? '画面の収まり・' : ''}${VIEWPORT_OPTIONS[r.name]?.label ?? r.name}`;
-    if (r.ok && r.layout) {
+    const label = `${r.layout ? '画面の収まり・' : r.story ? '物語の土台・' : ''}${VIEWPORT_OPTIONS[r.name]?.label ?? r.name}`;
+    if (r.ok && r.story) {
+      console.log(
+        `✔ ${label}: 試しの場面を最初から最後まで（台詞 ${r.lines}行・押し続ける ${r.holds}回・歩かせる ${r.walks}歩・戦闘中の会話 ${r.dialoguesInBattle}回・` +
+          `地形の変化 ${r.terrain}マス・読み込み直し ${r.reloads}回）と、スキップ ${r.skips}回で通す（${r.seconds}秒）`,
+      );
+    } else if (r.ok && r.layout) {
       console.log(`✔ ${label}: ${r.screens}画面で、画面全体のスクロールなし・ボタンが画面の内側（${r.seconds}秒）`);
     } else if (r.ok) {
       console.log(
@@ -385,7 +410,7 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   await page.addInitScript(() =>
     window.addEventListener('unhandledrejection', (e) => console.error(`unhandledrejection: ${e.reason?.stack ?? e.reason}`)),
   );
-  await page.goto(`${baseUrl}?seed=${SEED}&speed=${SPEED}`);
+  await page.goto(`${baseUrl}?seed=${SEED}&speed=${SPEED}&start=base&autodialogue=1`);
   await page.waitForFunction(() => window.__tactics?.screen() === 'base', null, { timeout: 30000 });
 
   // ---- 画面から読むもの ----
@@ -2145,6 +2170,250 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
  * 配置・戦闘・結果・戦闘の間・負けた時・クリア）を開き、画面全体がスクロールしないこと（収まらない内容は枠の中だけでスクロールする）、
  * ボタンが画面の内側にあること、画面のボタンが指で押せる大きさ（高さ 48px 以上）であることを確かめる。
  */
+/**
+ * 物語の土台（試しの場面）を、題名の画面から最初から最後まで通す（物語の土台）。
+ * 1回目: 会話をタップで進め（ルビ・語り・読み返し・早送り・暗転）、操作の場面（押し続ける・歩かせる）を操作し、
+ *   会話の途中と、戦闘中の会話の途中で読み込み直して「これまで」から再開する。戦闘は味方も AI に任せ、戦闘中の会話・地形の変化を確かめ、
+ *   読み込み直した時点の途中保存から core だけで計算した結果と一致することを確かめる。最後の会話はスキップする。
+ * 2回目: 「最初から」選び直し、すべての会話（操作の場面を含む）をスキップで通す。
+ */
+async function storyRun(browser, baseUrl, name, core) {
+  const options = VIEWPORT_OPTIONS[name];
+  const { label, ...contextOptions } = options;
+  delete contextOptions.defaultBrowserType;
+  contextOptions.deviceScaleFactor = 1;
+  const context = await browser.newContext(contextOptions);
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e));
+  page.on('console', (m) => {
+    if (m.type() === 'error') errors.push(new Error(m.text()));
+  });
+  const started = Date.now();
+  const { text } = core.data;
+  const log = (msg) => console.log(`[物語・${label}] ${msg}`);
+  const until = (fn, arg, timeout = 90000) => page.waitForFunction(fn, arg, { timeout, polling: 50 });
+  const press = async (n) => page.getByRole('button', { name: n, exact: true }).click();
+  const T = (fn, arg) => page.evaluate(fn, arg);
+  const status = () => T(() => window.__tactics.dialogue());
+  const screen = () => T(() => window.__tactics.screen());
+  const stats = { lines: 0, holds: 0, walks: 0, skips: 0, reloads: 0, dialoguesInBattle: 0, terrain: 0 };
+  const open = async () => {
+    await page.goto(`${baseUrl}?seed=${SEED}&speed=${SPEED}`);
+    await until(() => window.__tactics?.screen() === 'title');
+  };
+  /** 会話が待っている状態（台詞・操作）になるか、会話が終わるまで待つ */
+  const settle = () =>
+    until(() => {
+      const d = window.__tactics.dialogue();
+      return !d || d.waiting === 'line' || d.waiting === 'hold' || d.waiting === 'walk';
+    });
+  const tapLine = async () => {
+    const before = await status();
+    await page.locator('.dialogue-body').click();
+    stats.lines++;
+    await until((i) => {
+      const d = window.__tactics.dialogue();
+      return !d || d.index !== i;
+    }, before.index);
+  };
+  const doHold = async (partial) => {
+    const box = await page.locator('.hold-button').boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    if (partial) {
+      // 押してから離すと止まる（進み具合が増えない）
+      await page.mouse.down();
+      await until(() => window.__tactics.dialogue().holdProgress >= 2);
+      await page.mouse.up();
+      const p1 = (await status()).holdProgress;
+      await page.waitForTimeout(400);
+      check((await status()).holdProgress === p1, '押し続けるボタンから指を離しても、進み続けています');
+    }
+    await page.mouse.down();
+    await until(() => window.__tactics.dialogue()?.waiting !== 'hold');
+    await page.mouse.up();
+    stats.holds++;
+  };
+  const doWalk = async () => {
+    for (let guard = 0; guard < 20; guard++) {
+      const d = await status();
+      if (!d || d.waiting !== 'walk') return;
+      if (!d.walkNext) {
+        await page.waitForTimeout(50);
+        continue;
+      }
+      // カメラが動き終わってから押す
+      await until(() => window.__tactics.camera().idle);
+      const p = await T((c) => window.__tactics.sceneTileScreen(c.x, c.z), d.walkNext);
+      await page.mouse.click(p.x, p.y);
+      await until((c) => {
+        const s = window.__tactics.dialogue();
+        return !s || s.waiting !== 'walk' || !s.walkNext || s.walkNext.x !== c.x || s.walkNext.z !== c.z;
+      }, d.walkNext);
+      stats.walks++;
+    }
+  };
+  /** 会話を最後まで進める。hook(status) が true を返したら、そこで止める */
+  const drive = async (hook) => {
+    for (let guard = 0; guard < 200; guard++) {
+      await settle();
+      const d = await status();
+      if (!d) return 'ended';
+      if (hook && (await hook(d))) return 'stopped';
+      if (d.waiting === 'line') await tapLine();
+      else if (d.waiting === 'hold') await doHold(false);
+      else if (d.waiting === 'walk') await doWalk();
+    }
+    throw new CheckError('会話が終わりません');
+  };
+  const skip = async () => {
+    await settle();
+    await press(text.dialogue.skip);
+    await until(() => document.querySelector('.sheet[data-sheet="skip"]') !== null);
+    await press(text.dialogue.skipYes);
+    stats.skips++;
+  };
+  const sceneId = () => T(() => window.__tactics.story().trial?.scene ?? -1);
+  const waitScene = (n) => until((n) => window.__tactics.story().trial?.scene === n, n);
+
+  // ---- 1回目: タップで進める ----
+  await open();
+  await press(text.title.trial);
+  await until(() => window.__tactics.screen() === 'scene');
+  // 場面1: 会話（語り・ルビ・読み返し・早送り・暗転・物の出し入れ）
+  let checkedRuby = false;
+  let checkedBacklog = false;
+  let sawDark = false;
+  await drive(async (d) => {
+    if (d.index === 0 || (d.speaker === null && d.text.startsWith('これは'))) {
+      check(await T(() => document.querySelector('.dialogue-text.narration') !== null && document.querySelector('.dialogue-name').hidden), '語りが、名前なしの語りの書体で出ていません');
+    }
+    if (!checkedRuby && d.speaker === '教官' && d.text.includes('会話')) {
+      const rts = await T(() => [...document.querySelectorAll('.dialogue-text rt')].map((r) => r.textContent));
+      check(rts.join(',') === 'かいわ,しく', `ルビが出ていません（${rts.join(',')}）`);
+      checkedRuby = true;
+    }
+    if (!checkedBacklog && d.text.startsWith('教官「') === false && d.text.includes('椀を、もうひとつ')) {
+      await press(text.dialogue.backlog);
+      await until(() => document.querySelector('.sheet[data-sheet="backlog"]') !== null);
+      const rows = await T(() => [...document.querySelectorAll('.backlog-row')].map((r) => r.textContent));
+      check(rows.length === 4 && rows[3].includes('椀を、もうひとつ'), `読み返しの一覧が違います（${rows.length}行）`);
+      await press(text.dialogue.close);
+      checkedBacklog = true;
+      // ここから早送り（台詞を待たずに進む）
+      await press(text.dialogue.fast);
+      return false;
+    }
+    if (d.text === '少しのあいだ、時が過ぎた。') sawDark = sawDark || (await T(() => window.__tactics.dark()));
+    return false;
+  });
+  check(checkedRuby && checkedBacklog, 'ルビと読み返しを確かめられませんでした');
+  check(sawDark, '暗転の間に語りが出ませんでした');
+  // 早送りの後は、操作の場面で止まる（場面2へ進む）
+  await waitScene(1);
+  log('会話（語り・ルビ・仕草・物の出し入れ・暗転・読み返し・早送り）✔');
+  // 場面2: 操作の場面。押し続ける（途中で離すと止まる）→ 読み込み直し → 「これまで」から再開 → 最初から操作する
+  await drive(async (d) => {
+    if (d.waiting !== 'hold') return false;
+    check(await T(() => document.querySelector('.dialogue-hint') !== null), '初めての押し続けるで、操作の手引きが出ません');
+    await doHold(true);
+    return true;
+  });
+  await settle();
+  await page.reload();
+  stats.reloads++;
+  await until(() => window.__tactics?.screen() === 'title');
+  await press(text.title.trialContinue);
+  await until(() => window.__tactics.screen() === 'recap');
+  check((await T(() => document.querySelectorAll('.recap-line').length)) > 0, '「これまで」が出ません');
+  await press(text.story.recapContinue);
+  await until(() => window.__tactics.screen() === 'scene');
+  check((await sceneId()) === 1, '読み込み直した後、操作の場面の始めから再開していません');
+  await drive(async (d) => {
+    if (d.waiting === 'hold') check(await T(() => document.querySelector('.dialogue-hint') === null), '2回目の押し続けるで、手引きがまた出ています');
+    return false;
+  });
+  await waitScene(2);
+  log('操作の場面（押し続ける・歩かせる・初めての時の手引き）、会話の途中での読み込み直しと「これまで」✔');
+  // 場面3: 戦闘の前の会話
+  await drive();
+  // 場面4: 戦闘（物を2つ壊すと勝利）。味方も AI に任せる。最初の戦闘中の会話で読み込み直す
+  await until(() => window.__tactics.mode() === 'deploy');
+  await press(text.objectives.close);
+  await press(text.deploy.start);
+  await until(() => window.__tactics.screen() === 'battle' && window.__tactics.state() !== null);
+  await T(() => window.__tactics.setAutoPlayer(true));
+  await until(() => window.__tactics.dialogue()?.waiting === 'line', undefined, 240000);
+  stats.dialoguesInBattle++;
+  const firstLine = (await status()).text;
+  const saved = await T(() => window.__tactics.suspended());
+  check(['trialFirstSeam', 'trialWeirBreaks'].includes(saved?.dialogue), `戦闘中の会話が途中の戦闘に残っていません（${saved?.dialogue}）`);
+  await page.reload();
+  stats.reloads++;
+  await until(() => window.__tactics?.screen() === 'title');
+  await press(text.title.trialContinue);
+  await until(() => window.__tactics.screen() === 'recap');
+  await press(text.story.recapContinue);
+  await until(() => window.__tactics.dialogue()?.waiting === 'line');
+  check((await status()).text === firstLine, '再開した時に、戦闘中の会話をもう一度出していません');
+  await T(() => window.__tactics.setAutoPlayer(true));
+  // 読み込み直した時点の途中保存から、core だけで最後まで進めた結果
+  const expected = core.ai.runAutoBattle(saved.state, 3000, { player: core.data.ai, enemy: core.data.ai }).state;
+  let last;
+  for (let guard = 0; guard < 400; guard++) {
+    const s = await T(() => ({ screen: window.__tactics.screen(), d: window.__tactics.dialogue(), state: window.__tactics.state() }));
+    if (s.state) last = s.state;
+    if (s.screen === 'result') break;
+    if (s.d?.waiting === 'line') {
+      if (s.d.text !== firstLine) stats.dialoguesInBattle++;
+      await tapLine();
+      continue;
+    }
+    await page.waitForTimeout(100);
+  }
+  check((await screen()) === 'result', '試しの戦闘が終わりません');
+  check(last?.winner === 'player', '試しの戦闘に勝てませんでした');
+  check(last.units.filter((u) => u.team === 'neutral').every((u) => u.retired), '物が壊れていません');
+  stats.terrain = last.map.tiles.filter((t) => t.terrain === 'water').length;
+  check(stats.terrain > 0, '地形が変わっていません（低いマスが水になっていない）');
+  check(
+    expected.winner === last.winner && expected.turnNumber === last.turnNumber && JSON.stringify(expected.units.map((u) => u.hp)) === JSON.stringify(last.units.map((u) => u.hp)),
+    `途中保存から再開した戦闘が、core だけの計算と一致しません（画面 ${last.turnNumber}手番・core ${expected.turnNumber}手番）`,
+  );
+  log(`戦闘（物を2つ壊すと勝利・戦闘中の会話 ${stats.dialoguesInBattle}回・地形の変化 ${stats.terrain}マス・会話の途中での読み込み直しと再開・core との一致）✔`);
+  await until(() => document.querySelector('.report-screen[data-done="true"]') !== null);
+  await press(text.story.next);
+  await waitScene(4);
+  // 場面5: 最後の会話はスキップ
+  await skip();
+  await until(() => window.__tactics.screen() === 'story-end');
+  check((await T(() => window.__tactics.story().trial?.finished)) === true, '試しの場面が終わった記録がありません');
+  await press(text.title.toTitle);
+  await until(() => window.__tactics.screen() === 'title');
+
+  // ---- 2回目: すべてスキップで通す ----
+  await T(() => window.__tactics.setAutoPlayer(false));
+  await press(text.title.trial);
+  for (let n = 0; n < 3; n++) {
+    await until((n) => window.__tactics.screen() === 'scene' && window.__tactics.story().trial?.scene === n, n);
+    await skip();
+  }
+  await until(() => window.__tactics.mode() === 'deploy');
+  await press(text.objectives.close);
+  await press(text.deploy.start);
+  await until(() => ['main', 'ended'].includes(window.__tactics.mode()), undefined, 120000);
+  await T(() => window.__tactics.finishBattle('player'));
+  await until(() => document.querySelector('.report-screen[data-done="true"]') !== null);
+  await press(text.story.next);
+  await waitScene(4);
+  await skip();
+  await until(() => window.__tactics.screen() === 'story-end');
+  log('スキップで最初から最後まで ✔');
+  check(errors.length === 0, `ページでエラー: ${errors.map((e) => e.message).join(' / ')}`);
+  await context.close();
+  return { story: true, seconds: Math.round((Date.now() - started) / 1000), ...stats };
+}
+
 async function checkLayouts(browser, baseUrl, name, core) {
   const options = VIEWPORT_OPTIONS[name];
   check(options, `画面サイズ ${name} は未定義です`);
@@ -2157,7 +2426,7 @@ async function checkLayouts(browser, baseUrl, name, core) {
   page.on('pageerror', (e) => errors.push(e));
   const started = Date.now();
   const { text } = core.data;
-  await page.goto(`${baseUrl}?seed=${SEED}&speed=${SPEED}`);
+  await page.goto(`${baseUrl}?seed=${SEED}&speed=${SPEED}&start=base&autodialogue=1`);
   await page.waitForFunction(() => window.__tactics?.screen() === 'base', null, { timeout: 30000 });
   const press = async (n) => page.getByRole('button', { name: n, exact: true }).click();
   const until = (fn, arg) => page.waitForFunction(fn, arg, { timeout: 60000, polling: 50 });
@@ -2179,7 +2448,7 @@ async function checkLayouts(browser, baseUrl, name, core) {
       if (!s.hidden && (s.scrollHeight > s.clientHeight + 1 || s.scrollWidth > s.clientWidth + 1)) {
         out.push(`画面の中身があふれている ${s.scrollWidth}×${s.scrollHeight}`);
       }
-      for (const b of document.querySelectorAll('#screen button, #hud button')) {
+      for (const b of document.querySelectorAll('#screen button, #hud button, #dialogue button')) {
         if (b.offsetParent === null) continue;
         const r = b.getBoundingClientRect();
         if (r.width === 0 || r.height === 0) continue;
@@ -2188,7 +2457,7 @@ async function checkLayouts(browser, baseUrl, name, core) {
         const area = b.closest('.scroll-area');
         const box = area ? area.getBoundingClientRect() : r;
         if (box.top < -1 || box.left < -1 || box.bottom > vh + 1 || box.right > vw + 1) out.push(`画面の外: ${name}`);
-        if (b.closest('#screen') && r.height < 47.5) out.push(`小さいボタン（高さ ${Math.round(r.height)}px）: ${name}`);
+        if ((b.closest('#screen') || b.closest('#dialogue')) && r.height < 47.5) out.push(`小さいボタン（高さ ${Math.round(r.height)}px）: ${name}`);
       }
       return out;
     });
@@ -2339,6 +2608,67 @@ async function checkLayouts(browser, baseUrl, name, core) {
   await tab('job');
   check((await page.locator('.job-current[data-mastered="true"]').count()) === 1, '編成の画面で、マスターしたジョブに印がありません');
   await inspect('roster-job-mastered');
+
+  // ---- 物語の土台: 題名・会話・読み返し・スキップの確認・操作の場面・対象物のある戦闘・「これまで」 ----
+  await page.goto(`${baseUrl}?seed=${SEED}&speed=${SPEED}`);
+  await screenIs('title');
+  await inspect('title');
+  await press(text.title.trial);
+  await screenIs('scene');
+  const lineReady = () =>
+    until(() => {
+      const d = window.__tactics.dialogue();
+      return d && (d.waiting === 'line' || d.waiting === 'hold' || d.waiting === 'walk') && window.__tactics.camera().idle;
+    });
+  await lineReady();
+  await inspect('dialogue-narration');
+  const tapLine = async () => {
+    const i = await page.evaluate(() => window.__tactics.dialogue().index);
+    await page.locator('.dialogue-body').click();
+    await until((i) => window.__tactics.dialogue()?.index !== i, i);
+    await lineReady();
+  };
+  await tapLine();
+  await inspect('dialogue-line');
+  await press(text.dialogue.backlog);
+  await inspect('dialogue-backlog');
+  await press(text.dialogue.close);
+  await press(text.dialogue.skip);
+  await inspect('dialogue-skip-confirm');
+  await press(text.dialogue.skipYes);
+  // 操作の場面: 押し続ける（初めての時の手引きつき）と、歩かせる
+  await until(() => window.__tactics.story().trial?.scene === 1 && window.__tactics.dialogue() !== null);
+  await lineReady();
+  while ((await page.evaluate(() => window.__tactics.dialogue().waiting)) === 'line') await tapLine();
+  await inspect('interactive-hold');
+  const hold = await page.locator('.hold-button').boundingBox();
+  await page.mouse.move(hold.x + hold.width / 2, hold.y + hold.height / 2);
+  await page.mouse.down();
+  await until(() => window.__tactics.dialogue()?.waiting !== 'hold');
+  await page.mouse.up();
+  await lineReady();
+  while ((await page.evaluate(() => window.__tactics.dialogue().waiting)) === 'line') await tapLine();
+  await inspect('interactive-walk');
+  // 「これまで」: 読み込み直して続きから
+  await page.reload();
+  await screenIs('title');
+  await press(text.title.trialContinue);
+  await screenIs('recap');
+  await inspect('recap');
+  await press(text.story.recapContinue);
+  await screenIs('scene');
+  await lineReady();
+  await press(text.dialogue.skip);
+  await press(text.dialogue.skipYes);
+  await until(() => window.__tactics.story().trial?.scene === 2 && window.__tactics.dialogue() !== null);
+  await lineReady();
+  await press(text.dialogue.skip);
+  await press(text.dialogue.skipYes);
+  // 対象物のある戦闘（配置の画面と、戦闘中の物の情報の欄）
+  await startFromDeploy();
+  const seam = await page.evaluate(() => window.__tactics.unitScreen('trial-seam-1'));
+  await page.mouse.click(seam.x, seam.y);
+  await inspect('battle-objects');
   await context.close();
   return { screens, seconds: Math.round((Date.now() - started) / 1000) };
 }

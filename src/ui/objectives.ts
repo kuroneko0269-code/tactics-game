@@ -1,5 +1,5 @@
 import type { BattleState, DefeatCondition, VictoryCondition } from '../core/battleTypes';
-import { goalTiles, stalemateTurnsLeft, turnsRemaining } from '../core/scenario';
+import { goalTiles, stalemateTurnsLeft, tallyOf, turnsRemaining } from '../core/scenario';
 import type { ObjectivesView } from './hud';
 import { TEXT, unitName } from './text';
 
@@ -12,8 +12,21 @@ import { TEXT, unitName } from './text';
 const namer = (state: BattleState) => (id: string) => unitName(id, state.units.find((x) => x.id === id)?.jobId ?? '');
 
 /** 勝利条件の文言。nameOf はユニットの名前の引き方（省くと id で引ける名前） */
-export function victoryText(c: VictoryCondition, nameOf: (id: string) => string = (id) => unitName(id, '')): string {
+export function victoryText(
+  c: VictoryCondition,
+  nameOf: (id: string) => string = (id) => unitName(id, ''),
+  state?: BattleState,
+): string {
   switch (c.kind) {
+    case 'destroyObjects': {
+      const left = state ? c.unitIds.filter((id) => (state.units.find((u) => u.id === id)?.hp ?? 0) > 0).length : c.unitIds.length;
+      const names = [...new Set(c.unitIds.map(nameOf))].join('・');
+      return TEXT.objectives.destroyObjects(names, left, c.unitIds.length);
+    }
+    case 'hitUnit': {
+      const label = c.labelId ? (TEXT.objectNames[c.labelId] ?? c.labelId) : TEXT.objectives.hitUnitDefaultLabel;
+      return TEXT.objectives.hitUnit(label, nameOf(c.unitId), state ? tallyOf(state, c.id) : 0, c.times);
+    }
     case 'defeatAll':
       return TEXT.objectives.defeatAll;
     case 'defeatUnit':
@@ -27,7 +40,16 @@ export function victoryText(c: VictoryCondition, nameOf: (id: string) => string 
 
 /** 常に出す短い文に使う、勝利条件の短い表記 */
 function victoryShort(state: BattleState, c: VictoryCondition): string {
-  return c.kind === 'reachTile' ? TEXT.objectives.reachTileShort : victoryText(c, namer(state));
+  if (c.kind === 'reachTile') return TEXT.objectives.reachTileShort;
+  if (c.kind === 'destroyObjects') {
+    const left = c.unitIds.filter((id) => (state.units.find((u) => u.id === id)?.hp ?? 0) > 0).length;
+    return TEXT.objectives.destroyObjectsShort(left, c.unitIds.length);
+  }
+  if (c.kind === 'hitUnit') {
+    const label = c.labelId ? (TEXT.objectNames[c.labelId] ?? c.labelId) : TEXT.objectives.hitUnitDefaultLabel;
+    return TEXT.objectives.hitUnitShort(label, tallyOf(state, c.id), c.times);
+  }
+  return victoryText(c, namer(state), state);
 }
 
 export function defeatText(c: DefeatCondition, nameOf: (id: string) => string = (id) => unitName(id, '')): string {
@@ -64,7 +86,7 @@ export function objectivesView(state: BattleState): ObjectivesView {
   notes.push(TEXT.objectives.alwaysNote);
   return {
     summary: short.join(' ・ '),
-    victory: victory.map((c) => victoryText(c, namer(state))),
+    victory: victory.map((c) => victoryText(c, namer(state), state)),
     defeat: defeat.map((c) => defeatText(c, namer(state))),
     notes,
   };

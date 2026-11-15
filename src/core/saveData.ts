@@ -21,18 +21,24 @@
  * - 版 5（フェーズ2-6）: ユニットの id を、人物の変わらない id（例: hero-1 → touma）にした。
  *   版 4 のデータは、部隊と途中の戦闘の中のユニットの id を付け替え、途中の戦闘のユニットに新しい項目
  *   （最後に手番が始まった時の HP、「踏みとどまる」を使ったか）を足す。育てた状態（今のジョブを含む）はそのまま残る。
+ * - 版 6（物語の土台）: 物語の進み具合（story。本ごとの章と場面の番号）と、途中の戦闘の出どころ「物語の戦闘」を追加。
+ *   マップ上のイベントの「短いメッセージ」を「会話」に置き換えたので、途中の戦闘の中のイベントも直す（文の id がそのまま台本の id）。
+ *   版 5 のデータは「物語はまだ始めていない」として直す。
  */
 import type { BattleState, EquipmentDefinition } from './battleTypes';
 import type { DungeonState } from './dungeon';
 import type { Roster } from './progression';
+import type { StoryProgress } from './story';
 
 /** 今のセーブデータの版 */
-export const SAVE_VERSION = 5;
+export const SAVE_VERSION = 6;
 
 /** 途中の戦闘が、どこの戦闘か（訓練戦の段階か、ダンジョンの何戦目か） */
 export type BattleOrigin =
   | { readonly kind: 'training'; readonly tierId: string }
-  | { readonly kind: 'dungeon'; readonly dungeonId: string; readonly battle: number };
+  | { readonly kind: 'dungeon'; readonly dungeonId: string; readonly battle: number }
+  /** 物語の戦闘（本・章・場面の番号。物語の土台） */
+  | { readonly kind: 'story'; readonly bookId: string; readonly chapter: number; readonly scene: number };
 
 /**
  * 途中の戦闘（フェーズ2-5）。行動がひとつ確定するたびに保存し直す。決着したら消す。
@@ -41,6 +47,8 @@ export type BattleOrigin =
 export interface SuspendedBattle {
   readonly origin: BattleOrigin;
   readonly state: BattleState;
+  /** 戦闘中の会話を出している途中で閉じた時の、その会話の台本の id（再開した時に、もう一度出す。物語の土台） */
+  readonly dialogue?: string;
 }
 
 /** 進み具合の記録（ダンジョンのクリアは dungeon にある） */
@@ -59,6 +67,10 @@ export interface SaveData {
   readonly records: GameRecords;
   /** 途中の戦闘（なければ null） */
   readonly battle: SuspendedBattle | null;
+  /** 物語の進み具合（本の id ごと。始めていない本は持たない） */
+  readonly story: Readonly<Record<string, StoryProgress>>;
+  /** 出したことのある操作の手引き（初めての時だけ出すため）。省いた時は、まだ1つも出していない */
+  readonly seenHints?: readonly string[];
 }
 
 /**
@@ -141,6 +153,19 @@ export const SAVE_MIGRATIONS: SaveMigrations = {
     }
     return { ...old, version: 5, roster: { ...roster, units }, battle };
   },
+  /** 版 5 → 6: 物語の進み具合を足す（まだ始めていない）。途中の戦闘のイベントの「メッセージ」を「会話」に直す */
+  5: (old) => {
+    let battle = old.battle as unknown;
+    if (typeof battle === 'object' && battle !== null) {
+      const b = JSON.parse(JSON.stringify(battle)) as { state?: { scenario?: { events?: { effects?: Record<string, unknown>[] }[] } } };
+      for (const e of b.state?.scenario?.events ?? []) {
+        if (!Array.isArray(e.effects)) continue;
+        e.effects = e.effects.map((x) => (x.kind === 'message' ? { kind: 'dialogue', scriptId: x.messageId } : x));
+      }
+      battle = b;
+    }
+    return { ...old, version: 6, battle, story: {} };
+  },
 };
 
 export function createSaveData(
@@ -148,8 +173,10 @@ export function createSaveData(
   dungeon: DungeonState,
   records: GameRecords,
   battle: SuspendedBattle | null = null,
+  story: Readonly<Record<string, StoryProgress>> = {},
+  seenHints: readonly string[] = [],
 ): SaveData {
-  return { version: SAVE_VERSION, roster, dungeon, records, battle };
+  return { version: SAVE_VERSION, roster, dungeon, records, battle, story, ...(seenHints.length > 0 ? { seenHints } : {}) };
 }
 
 /** 読み込みに失敗した理由（画面ではなく、開発者向けの記録に使う） */
@@ -180,9 +207,19 @@ export function migrateSaveData(
   if (!looksLikeRecords(data.records)) return { ok: false, reason: 'badShape' };
   // 途中の戦闘は、形が崩れていたら捨てる（部隊などはそのまま使う）
   const battle = looksLikeSuspendedBattle(data.battle) ? data.battle : null;
+  // 物語の進み具合は、形の崩れた本だけを捨てる
+  const story = looksLikeStory(data.story);
   return {
     ok: true,
-    data: { version: currentVersion, roster: data.roster, dungeon: data.dungeon, records: data.records, battle },
+    data: {
+      version: currentVersion,
+      roster: data.roster,
+      dungeon: data.dungeon,
+      records: data.records,
+      battle,
+      story,
+      ...(Array.isArray(data.seenHints) && data.seenHints.length > 0 ? { seenHints: data.seenHints.filter((h): h is string => typeof h === 'string') } : {}),
+    },
     migratedFrom: from,
   };
 }
@@ -196,7 +233,8 @@ function looksLikeSuspendedBattle(value: unknown): value is SuspendedBattle {
     typeof o === 'object' &&
     o !== null &&
     ((o.kind === 'training' && typeof o.tierId === 'string') ||
-      (o.kind === 'dungeon' && typeof o.dungeonId === 'string' && Number.isInteger(o.battle)));
+      (o.kind === 'dungeon' && typeof o.dungeonId === 'string' && Number.isInteger(o.battle)) ||
+      (o.kind === 'story' && typeof o.bookId === 'string' && Number.isInteger(o.chapter) && Number.isInteger(o.scene)));
   const s = v.state as Record<string, unknown> | null | undefined;
   const stateOk =
     typeof s === 'object' &&
@@ -218,16 +256,39 @@ function looksLikeSuspendedBattle(value: unknown): value is SuspendedBattle {
  * - 味方のユニット（経験値と JP を持つもの）は、すべて部隊にいて、ジョブが同じであること
  * - ダンジョンの戦闘なら、挑戦中のダンジョンの、その戦闘であること
  */
-export function suspendedBattleFits(battle: SuspendedBattle, roster: Roster, dungeon: DungeonState): boolean {
+export function suspendedBattleFits(
+  battle: SuspendedBattle,
+  roster: Roster,
+  dungeon: DungeonState,
+  story: Readonly<Record<string, StoryProgress>> = {},
+): boolean {
   const players = battle.state.units.filter((u) => u.team === 'player' && u.progress);
   if (players.length === 0) return false;
   const fits = players.every((u) => roster.units.some((r) => r.id === u.id && r.jobId === u.jobId));
   if (!fits) return false;
+  // 物語の戦闘なら、物語の今の場面の戦闘であること
+  if (battle.origin.kind === 'story') {
+    const p = story[battle.origin.bookId];
+    return p !== undefined && !p.finished && p.chapter === battle.origin.chapter && p.scene === battle.origin.scene;
+  }
   if (battle.origin.kind === 'dungeon') {
     const run = dungeon.run;
     return run !== null && run.dungeonId === battle.origin.dungeonId && run.battle === battle.origin.battle;
   }
   return true;
+}
+
+/** 物語の進み具合（本ごと）のうち、形の正しいものだけを残す */
+function looksLikeStory(value: unknown): Record<string, StoryProgress> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
+  const out: Record<string, StoryProgress> = {};
+  for (const [id, raw] of Object.entries(value as Record<string, unknown>)) {
+    const p = raw as Record<string, unknown> | null;
+    if (typeof p === 'object' && p !== null && Number.isInteger(p.chapter) && Number.isInteger(p.scene) && typeof p.finished === 'boolean') {
+      out[id] = { chapter: p.chapter as number, scene: p.scene as number, finished: p.finished };
+    }
+  }
+  return out;
 }
 
 /** 記録として最低限の形をしているか */

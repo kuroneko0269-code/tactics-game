@@ -144,8 +144,10 @@ export function reviveHp(target: UnitState, spell: SpellDefinition): number {
  * 狙える相手が決まっている業（時守の業。フェーズ2-6）は、caster から見て自分以外の味方か、敵だけ
  */
 export function affectsUnit(spell: SpellDefinition, unit: UnitState, caster?: Pick<UnitState, 'id' | 'team'>): boolean {
-  if (spell.effect === 'revive') return isKnockedOut(unit);
+  if (spell.effect === 'revive') return isKnockedOut(unit) && !unit.object;
   if (!isAlive(unit)) return false;
+  // 対象物（物語の土台）は、ダメージの魔法・技だけを受ける（味方だけに効くもの・味方を狙う業は除く）
+  if (unit.object) return spell.effect === 'damage' && spell.affects !== 'allies' && spell.targets !== 'ally' && spell.targets !== 'allyOrSelf';
   if (spell.targets === 'ally') return caster !== undefined && unit.team === caster.team && unit.id !== caster.id;
   if (spell.targets === 'enemy') return caster !== undefined && unit.team !== caster.team;
   if (spell.targets === 'allyOrSelf') return caster !== undefined && unit.team === caster.team;

@@ -89,14 +89,14 @@ export const ruinsCorridor: BattleSite = {
   ],
   objectives: { victory: [{ kind: 'reachTile', tiles: [{ x: 2, z: 0 }, { x: 3, z: 0 }, { x: 4, z: 0 }] }], defeat: [{ kind: 'allDefeated' }] },
   events: [
-    { id: 'r2-intro', trigger: { kind: 'turn', turn: 0 }, effects: [{ kind: 'message', messageId: 'ruinsCorridorIntro' }] },
+    { id: 'r2-intro', trigger: { kind: 'turn', turn: 0 }, effects: [{ kind: 'dialogue', scriptId: 'ruinsCorridorIntro' }] },
     // 6 手番目の後から 10 手番ごとに予告し、3 手番後に現れる（2体ずつ、最大 4 回）
     {
       id: 'r2-wave',
       trigger: { kind: 'turn', turn: 8, every: 11 },
       times: 4,
       effects: [
-        { kind: 'message', messageId: 'reinforcementBehind' },
+        { kind: 'dialogue', scriptId: 'reinforcementBehind' },
         { kind: 'reinforce', delay: 3, units: wave },
       ],
     },

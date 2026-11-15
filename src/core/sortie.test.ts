@@ -99,7 +99,7 @@ describe('出撃', () => {
         ...site,
         objectives: { victory: [{ kind: 'defeatUnit', unitId: 'e2' }], defeat: [{ kind: 'allDefeated' }] },
         traps: [{ x: 2, z: 2, kind: 'drain' }],
-        events: [{ id: 'm', trigger: { kind: 'turn', turn: 0 }, effects: [{ kind: 'message', messageId: 'x' }] }],
+        events: [{ id: 'm', trigger: { kind: 'turn', turn: 0 }, effects: [{ kind: 'dialogue', scriptId: 'x' }] }],
       },
       'easy',
       { gold: 0, items: [], nextItemSeq: 1, units: [unit('a', 'warrior')] },

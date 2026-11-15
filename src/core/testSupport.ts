@@ -256,8 +256,8 @@ export const testEarthWave: SpellDefinition = {
 
 /** 時魔道士・召喚士・魔法剣士・魔道士の追加（フェーズ2-6） */
 const single = { kind: 'magic', element: 'none', power: 0, range: 4, areaRadius: 0, heightTolerance: 0 } as const;
-export const testHaste: SpellDefinition = { ...single, id: 'haste', effect: 'status', inflicts: 'haste', mpCost: 0, castSpeed: 50 };
-export const testDecelerate: SpellDefinition = { ...single, id: 'decelerate', effect: 'status', inflicts: 'speedDown', mpCost: 0, castSpeed: 50 };
+export const testHaste: SpellDefinition = { ...single, id: 'haste', effect: 'status', inflicts: 'haste', areaRadius: 1, heightTolerance: 2, mpCost: 0, castSpeed: 50 };
+export const testDecelerate: SpellDefinition = { ...single, id: 'decelerate', effect: 'status', inflicts: 'speedDown', areaRadius: 1, heightTolerance: 2, mpCost: 0, castSpeed: 50 };
 export const testStop: SpellDefinition = { ...single, id: 'stop', effect: 'status', inflicts: 'stop', mpCost: 0, castSpeed: 15 };
 export const testQuicken: SpellDefinition = { ...single, id: 'quicken', effect: 'quicken', targets: 'ally', mpCost: 0, castSpeed: 34 };
 export const testEarth: SpellDefinition = { ...single, id: 'earth', element: 'earth', effect: 'damage', power: 100, heightPowerPerStep: 25, heightPowerCap: 100, mpCost: 0, castSpeed: 34 };
