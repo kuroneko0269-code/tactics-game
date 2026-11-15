@@ -425,6 +425,8 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
         b.disabled = a.disabled ?? false;
         actions.append(b);
       }
+      // 向きのボタンは行動のボタンを避けて置くので、行動のボタンが変わったら置き直す
+      placeFacingPad();
     },
     showPreview(p) {
       preview.hidden = !p;
