@@ -245,7 +245,7 @@ async function main() {
           `  装備と店: 店で買う ${r.buys}回・売る ${r.sells}回、装備の付け替え ${r.equips}回、「おまかせ」 ${r.autoEquips}回、ゴールドと戦利品の表示 ✔`,
         );
         console.log(
-          `  育成: 戦闘中のレベルアップの表示 ✔、結果の画面 ✔、編成のタブ ${r.tabs}回・習得 ${r.learned}回・ジョブチェンジ ${r.jobChanges}回・副コマンド ${r.subChanges}回、再び出撃 ✔、魔法のジョブの行動 ${r.newJobActions}回・状態変化の目印と膠着の表示 ✔`,
+          `  育成: 戦闘中のレベルアップの表示 ✔、結果の画面 ✔、編成のタブ ${r.tabs}回・習得 ${r.learned}回・ジョブチェンジ ${r.jobChanges}回・副コマンド ${r.subChanges}回、再び出撃 ✔、時守の業 ${r.timekeeper}回、新しいジョブの行動 ${r.newJobActions}回、状態変化の目印と膠着の表示 ✔`,
         );
         console.log(
           `  （技・突き飛ばし・罠・反撃・詠唱の中断・受動的なアビリティ・はじめから・ダンジョンは、短くした版では ${VIEWPORT_OPTIONS[VIEWPORTS[0]]?.label ?? VIEWPORTS[0]} だけで確かめる）`,
@@ -1442,6 +1442,64 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   }
   check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
 
+  // ---- 時守の4つの行動（フェーズ2-6）の本体 ----
+  async function timekeeperScenes() {
+    await waitForInput();
+    const tk = timekeeperDrill(core);
+    for (const d of tk.drills) {
+      await page.evaluate((r) => window.__tactics.load(r), tk.start);
+      await waitFor('時守の手番', (id) => window.__tactics.mode() === 'main' && window.__tactics.state().turn?.unitId === id, tk.unitId);
+      await waitForInput();
+      const me = (await getState()).units.find((u) => u.id === tk.unitId);
+      await openCommandOf(me, d.abilityId);
+      await pressButton(text.abilities[d.abilityId]);
+      await waitFor(`「${d.abilityId}」の相手を選ぶ`, (id) => {
+        const m = window.__tactics.modeDetail();
+        return (m.kind === 'targeting' && m.abilityId === id) || (m.kind === 'spellTarget' && m.spellId === id);
+      }, d.abilityId);
+      await tapUnit(d.targetId);
+      const m = await getMode();
+      check(m.kind === 'confirm' || (m.kind === 'spellConfirm' && m.target.kind === 'unit' && m.target.unitId === d.targetId), `「${d.abilityId}」の相手の選択が違います（${JSON.stringify(m)}）`);
+      const previewText = await page.locator('.preview').textContent();
+      for (const want of d.previewIncludes) check(previewText.includes(want), `「${d.abilityId}」の予測に「${want}」がありません（${previewText}）`);
+      check(!(await overlaps('.preview', '.actions')), `「${d.abilityId}」の予測が行動のボタンに重なっています`);
+      await screenshot(`timekeeper-${d.abilityId}`);
+      await pressButton('確定');
+      await waitFor(`「${d.abilityId}」の後`, () => !['busy', 'confirm', 'spellConfirm'].includes(window.__tactics.mode()));
+      const pick = (st) => JSON.stringify(st.units.filter((u) => d.compare.includes(u.id)).map((u) => [u.id, u.x, u.z, u.hp, u.ct]));
+      check(pick(await getState()) === pick(d.expected), `「${d.abilityId}」の結果が core の計算と違います（画面 ${pick(await getState())} / core ${pick(d.expected)}）`);
+      stats.timekeeper++;
+    }
+  }
+
+  // ---- 新しいジョブ（騎士・格闘家・盗賊）の行動の本体 ----
+  async function newJobActionScenes(jd) {
+    // (3) 新しいジョブの代表的な行動を1つずつ（騎士の武器破壊・格闘家の連撃・盗賊の装備を盗む）。予測の文言と、結果が core の計算と同じか
+    for (const d of jd.actions) {
+      await page.evaluate((r) => window.__tactics.load(r), d.start);
+      await waitFor('新しいジョブの手番', (id) => window.__tactics.mode() === 'main' && window.__tactics.state().turn?.unitId === id, d.unitId);
+      await waitForInput();
+      const me = (await getState()).units.find((u) => u.id === d.unitId);
+      await openCommandOf(me, d.abilityId);
+      await pressButton(text.abilities[d.abilityId]);
+      await waitFor(`「${d.abilityId}」の相手を選ぶ`, (id) => {
+        const m = window.__tactics.modeDetail();
+        return m.kind === 'targeting' && m.abilityId === id;
+      }, d.abilityId);
+      await tapUnit(d.targetId);
+      const previewText = await page.locator('.preview').textContent();
+      for (const want of d.previewIncludes) check(previewText.includes(want), `「${d.abilityId}」の予測に「${want}」がありません（${previewText}）`);
+      check(!(await overlaps('.preview', '.actions')), `「${d.abilityId}」の予測が行動のボタンに重なっています`);
+      await screenshot(`newjob-${d.abilityId}`);
+      await pressButton('確定');
+      await waitFor(`「${d.abilityId}」の後`, () => !['busy', 'confirm'].includes(window.__tactics.mode()));
+      const pick = (st) =>
+        JSON.stringify([st.stolen ?? null, ...st.units.filter((u) => [d.unitId, d.targetId].includes(u.id)).map((u) => [u.id, u.hp, u.statuses, u.equipment.map((e) => e.id), u.stats.attack])]);
+      check(pick(await getState()) === pick(d.expected), `「${d.abilityId}」の結果が core の計算と違います（画面 ${pick(await getState())} / core ${pick(d.expected)}）`);
+      stats.newJobActions++;
+    }
+  }
+
   // ---- 魔法のジョブと目印・膠着の表示（フェーズ2-6 PR C）----
   async function magicJobScenes(jd) {
     // (4) 魔法のジョブ（フェーズ2-6 PR C）: 時魔道士の早送り、召喚士の炎の精霊（敵だけに効く赤い範囲）、魔法剣士の炎の剣
@@ -1494,7 +1552,10 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   // 最初の画面サイズ（縦向き）だけで確かめる。画面サイズによって変わるのはタップの位置と画面の収まりで、それはここまでと画面の収まりの確認で見ているため。
   // 検査全体を5分以内に収めるため（フェーズ2-4 で店と装備の操作を足し、5分を少し超えた）
   if (QUICK && name !== VIEWPORTS[0]) {
-    await magicJobScenes(jobDrills(core, passiveDrill(core, plan.afterSell).expected));
+    await timekeeperScenes();
+    const quickJd = jobDrills(core, passiveDrill(core, plan.afterSell).expected);
+    await newJobActionScenes(quickJd);
+    await magicJobScenes(quickJd);
     check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
     await context.close();
     for (const d of finger.details) log(`押し直し: ${d}`);
@@ -1668,32 +1729,8 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   // ---- 時守の4つの行動（フェーズ2-6）----
   // トウマ（時守）が、敵の戦士2体（正面と、その左のマス）の前で手番を迎えた場面を用意して、
   // 斬り分け・引き戻し・門渡り・時送りを1つずつ、メニュー → 相手 → 予測 → 確定 で行い、結果を core の計算と比べる
-  await waitForInput();
-  const tk = timekeeperDrill(core);
-  for (const d of tk.drills) {
-    await page.evaluate((r) => window.__tactics.load(r), tk.start);
-    await waitFor('時守の手番', (id) => window.__tactics.mode() === 'main' && window.__tactics.state().turn?.unitId === id, tk.unitId);
-    await waitForInput();
-    const me = (await getState()).units.find((u) => u.id === tk.unitId);
-    await openCommandOf(me, d.abilityId);
-    await pressButton(text.abilities[d.abilityId]);
-    await waitFor(`「${d.abilityId}」の相手を選ぶ`, (id) => {
-      const m = window.__tactics.modeDetail();
-      return (m.kind === 'targeting' && m.abilityId === id) || (m.kind === 'spellTarget' && m.spellId === id);
-    }, d.abilityId);
-    await tapUnit(d.targetId);
-    const m = await getMode();
-    check(m.kind === 'confirm' || (m.kind === 'spellConfirm' && m.target.kind === 'unit' && m.target.unitId === d.targetId), `「${d.abilityId}」の相手の選択が違います（${JSON.stringify(m)}）`);
-    const previewText = await page.locator('.preview').textContent();
-    for (const want of d.previewIncludes) check(previewText.includes(want), `「${d.abilityId}」の予測に「${want}」がありません（${previewText}）`);
-    check(!(await overlaps('.preview', '.actions')), `「${d.abilityId}」の予測が行動のボタンに重なっています`);
-    await screenshot(`timekeeper-${d.abilityId}`);
-    await pressButton('確定');
-    await waitFor(`「${d.abilityId}」の後`, () => !['busy', 'confirm', 'spellConfirm'].includes(window.__tactics.mode()));
-    const pick = (st) => JSON.stringify(st.units.filter((u) => d.compare.includes(u.id)).map((u) => [u.id, u.x, u.z, u.hp, u.ct]));
-    check(pick(await getState()) === pick(d.expected), `「${d.abilityId}」の結果が core の計算と違います（画面 ${pick(await getState())} / core ${pick(d.expected)}）`);
-    stats.timekeeper++;
-  }
+  // 短くした版では、2つ目の画面サイズ（横向き）で確かめる（検査全体を5分以内に収めるため）
+  if (!QUICK) await timekeeperScenes();
   check(pageErrors.length === 0, `ページでエラー: ${pageErrors.map((e) => e.message).join(' / ')}`);
 
   // ---- 詠唱の中断 ----
@@ -1935,30 +1972,8 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   await pressButton(text.roster.back);
   await waitFor('拠点', () => window.__tactics.screen() === 'base');
 
-  // (3) 新しいジョブの代表的な行動を1つずつ（騎士の武器破壊・格闘家の連撃・盗賊の装備を盗む）。予測の文言と、結果が core の計算と同じか
-  for (const d of jd.actions) {
-    await page.evaluate((r) => window.__tactics.load(r), d.start);
-    await waitFor('新しいジョブの手番', (id) => window.__tactics.mode() === 'main' && window.__tactics.state().turn?.unitId === id, d.unitId);
-    await waitForInput();
-    const me = (await getState()).units.find((u) => u.id === d.unitId);
-    await openCommandOf(me, d.abilityId);
-    await pressButton(text.abilities[d.abilityId]);
-    await waitFor(`「${d.abilityId}」の相手を選ぶ`, (id) => {
-      const m = window.__tactics.modeDetail();
-      return m.kind === 'targeting' && m.abilityId === id;
-    }, d.abilityId);
-    await tapUnit(d.targetId);
-    const previewText = await page.locator('.preview').textContent();
-    for (const want of d.previewIncludes) check(previewText.includes(want), `「${d.abilityId}」の予測に「${want}」がありません（${previewText}）`);
-    check(!(await overlaps('.preview', '.actions')), `「${d.abilityId}」の予測が行動のボタンに重なっています`);
-    await screenshot(`newjob-${d.abilityId}`);
-    await pressButton('確定');
-    await waitFor(`「${d.abilityId}」の後`, () => !['busy', 'confirm'].includes(window.__tactics.mode()));
-    const pick = (st) =>
-      JSON.stringify([st.stolen ?? null, ...st.units.filter((u) => [d.unitId, d.targetId].includes(u.id)).map((u) => [u.id, u.hp, u.statuses, u.equipment.map((e) => e.id), u.stats.attack])]);
-    check(pick(await getState()) === pick(d.expected), `「${d.abilityId}」の結果が core の計算と違います（画面 ${pick(await getState())} / core ${pick(d.expected)}）`);
-    stats.newJobActions++;
-  }
+  // (3) は短くした版では、2つ目の画面サイズ（横向き）で確かめる
+  if (!QUICK) await newJobActionScenes(jd);
   // (4)(5) は短くした版では、2つ目の画面サイズ（横向き）で確かめる（検査全体を5分以内に収めるため。PR C）
   if (!QUICK) await magicJobScenes(jd);
 
