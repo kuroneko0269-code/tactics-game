@@ -19,15 +19,20 @@ export const TEXT = {
     'ruins-entrance': '入口',
     'ruins-corridor': '崩れた回廊',
     'ruins-altar': '祭壇の間',
-    'trial-weir': '試しの堰',
+    'prologue-weir': '谷の外れの堰',
+    'prologue-hill': 'アスタルの丘',
     'stage-room': '室内',
     'stage-yard': '野外',
+    'stage-home': 'トウマの家',
+    'stage-tower': '暦の塔',
+    'stage-city': '都',
+    'stage-weir': '谷の外れの堰',
+    'stage-hill': 'アスタルの丘',
   } as Readonly<Record<string, string>>,
 
   /** 物語の本の名前（物語の土台） */
   books: {
     main: '消された暦',
-    trial: '試しの場面',
   } as Readonly<Record<string, string>>,
 
   /** 題名の画面（物語の土台） */
@@ -35,14 +40,10 @@ export const TEXT = {
     name: '消された暦',
     sub: '（仮・開発中）',
     story: '物語',
-    storyHelp: '序章は次の更新で遊べます（準備中）',
+    storyHelp: '序章（約10分の会話と2つの戦闘）',
     storyContinue: '物語の続きから',
     play: '訓練と遺跡',
     playHelp: '訓練戦と、はじまりの遺跡（部隊は物語と共通）',
-    trial: '試しの場面',
-    trialHelp: '会話・操作の場面・戦闘の仕組みを確かめる（1〜2分。仮の内容）',
-    trialContinue: '試しの場面の続きから',
-    trialRestart: '試しの場面を最初から',
     toTitle: 'タイトルへ',
   },
 
@@ -51,6 +52,9 @@ export const TEXT = {
     recapTitle: 'これまで',
     recapContinue: '続ける',
     finished: (title: string) => `${title}を最後まで見ました`,
+    /** 序章を終えた時（第1章はまだない） */
+    nextChapterSoon: '第1章は準備中です',
+    nextChapterNote: '序章を最後まで遊んでいただき、ありがとうございました。「物語」から、もう一度序章を遊べます。',
     next: '物語を進める',
     retry: 'やり直す',
     battleWon: '勝利！ 物語を進めます',
@@ -107,11 +111,12 @@ export const TEXT = {
     skip: '手ほどきを飛ばす',
     label: '手ほどき',
     steps: {
-      'trial-move': '光っているマスを押すと、そこへ移動します。',
-      'trial-attack': '「攻撃」を押してから、攻撃する相手を押します。',
-      'trial-target': '赤く光っている相手を押します。',
-      'trial-confirm': '予測を確かめて「確定」を押します。',
-      'trial-facing': '最後に向きを選んで「手番を終える」を押します。',
+      'weir-move': '光っているマスを押すと、そこへ移動します。積み石の合わせ目（◆）を3つ壊せば勝ちです。',
+      'weir-attack': '移動したら「攻撃」を押します。',
+      'weir-target': '赤く光っている相手を押して選びます。届く相手がいなければ「戻る」。',
+      'weir-confirm': '当たる見込みとダメージを確かめて「確定」を押します。',
+      'weir-facing': '最後に向きを選んで「手番を終える」。背中から攻撃されると、大きな痛手になります。',
+      'weir-high': '高い所から撃つ矢は、遠くまで届きます。魔法は、唱えてから発動するまで少し時間がかかります。',
     } as Readonly<Record<string, string>>,
   },
 

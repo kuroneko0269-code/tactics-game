@@ -2,17 +2,14 @@ import { el, screenButton } from './dom';
 import { TEXT } from './text';
 
 /**
- * 題名の画面（物語の土台）。「物語」「訓練と遺跡」（今までの遊び）と、仕組みを確かめる「試しの場面」を選ぶ。
+ * 題名の画面（物語の土台）。「物語」と「訓練と遺跡」（今までの遊び）を選ぶ。「設定」で音量など。
  * 部隊と育てた状態は、どれを選んでも共通。
  */
 export interface TitleHandlers {
   /** 物語の本編を始められるか（序章ができるまでは false）と、続きがあるか */
   story(): { readonly available: boolean; readonly inProgress: boolean };
-  /** 試しの場面の進み具合（途中なら続きから・最初から を出す） */
-  trial(): { readonly inProgress: boolean };
   onStory(): void;
   onPlay(): void;
-  onTrial(fresh: boolean): void;
   /** 設定の欄を開く（序章に足りない仕組み） */
   onSettings?(): void;
 }
@@ -33,14 +30,6 @@ export function showTitleScreen(root: HTMLElement, handlers: TitleHandlers): voi
     }),
     screenButton(TEXT.title.play, () => handlers.onPlay(), { className: 'big title-play', sub: TEXT.title.playHelp }),
   );
-  if (handlers.trial().inProgress) {
-    actions.append(
-      screenButton(TEXT.title.trialContinue, () => handlers.onTrial(false), { className: 'big title-trial' }),
-      screenButton(TEXT.title.trialRestart, () => handlers.onTrial(true), { className: 'quiet title-trial-restart' }),
-    );
-  } else {
-    actions.append(screenButton(TEXT.title.trial, () => handlers.onTrial(true), { className: 'big title-trial', sub: TEXT.title.trialHelp }));
-  }
   if (handlers.onSettings) actions.append(screenButton(TEXT.settings.open, () => handlers.onSettings!(), { className: 'quiet title-settings' }));
   box.append(info, actions);
   root.append(box);
@@ -61,14 +50,15 @@ export function showRecapScreen(root: HTMLElement, lines: readonly string[], onC
   root.append(box);
 }
 
-/** 物語の本を最後まで見た */
+/** 物語の本を最後まで見た（序章の後は「第1章は準備中です」） */
 export function showStoryEndScreen(root: HTMLElement, title: string, onTitle: () => void): void {
   root.innerHTML = '';
   root.hidden = false;
   const box = el('div', 'screen-box two-col story-end-screen');
   box.dataset.screen = 'story-end';
   const info = el('div', 'screen-col');
-  info.append(el('h1', 'screen-title', TEXT.story.finished(title)));
+  void title;
+  info.append(el('h1', 'screen-title', TEXT.story.nextChapterSoon), el('p', 'screen-note', TEXT.story.nextChapterNote));
   const actions = el('div', 'screen-col');
   actions.append(screenButton(TEXT.title.toTitle, onTitle, { className: 'primary big' }));
   box.append(info, actions);

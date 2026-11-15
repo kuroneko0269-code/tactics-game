@@ -68,7 +68,7 @@ import { stages } from './data/story/stages';
 import { parties } from './data/story/parties';
 import { DEFAULT_LOOK, LOOKS } from './data/story/looks';
 import { SOUND_EFFECTS } from './data/sounds';
-import { trialWeirBattle } from './data/battles/trialWeir';
+import { prologueBattles } from './data/battles/prologue';
 import { createSceneView, type SceneView } from './render/sceneView';
 import { facingToward, runDialogue, type DialogueRun, type DialogueSound, type StagePort } from './ui/dialogue';
 import { showRecapScreen, showStoryBattleLost, showStoryEndScreen, showTitleScreen } from './ui/titleScreen';
@@ -92,7 +92,7 @@ import { chapterStartRecap } from './core/story';
 type ScreenName = 'title' | 'base' | 'roster' | 'shop' | 'deploy' | 'battle' | 'result' | 'scene' | 'recap' | 'story-end';
 
 /** 物語の戦闘の戦場（場面の battleId で引く） */
-const storySites: readonly BattleSite[] = [trialWeirBattle];
+const storySites: readonly BattleSite[] = prologueBattles;
 /** 会話の場面のカメラの寄り（その画面の形の最初の拡大率を 1 として） */
 const SCENE_ZOOM = { far: 0.85, mid: 1.25, near: 1.9 } as const;
 
@@ -896,6 +896,17 @@ function main(): void {
         case 'lightOff':
           await view.setLight(d.name, undefined);
           return;
+        // 物を置く・消す（戦闘の後の台本。見た目だけ）
+        case 'propPut':
+          return view.putProp(d.name, PROP_KINDS[d.prop] ?? 'box', d);
+        case 'propRemove':
+          return view.removeProp(d.name);
+        case 'carry':
+        case 'release': {
+          const id = battleActorId(d.actor);
+          if (id) view.setItems(id, d.slot, d.kind === 'carry' ? (PROP_KINDS[d.item] ?? '') : '');
+          return;
+        }
         default:
           return;
       }
@@ -925,10 +936,8 @@ function main(): void {
     setScreen('title');
     showTitleScreen(screenEl, {
       story: () => ({ available: bookOf('main').chapters.length > 0, inProgress: story.main !== undefined && !story.main.finished }),
-      trial: () => ({ inProgress: story.trial !== undefined && !story.trial.finished && !(story.trial.chapter === 0 && story.trial.scene === 0) }),
       onStory: () => playBook('main', false),
       onPlay: () => showBase(),
-      onTrial: (fresh) => playBook('trial', fresh),
       onSettings: () => showSettingsSheet(screenEl, () => settings, updateSettings),
     });
   };

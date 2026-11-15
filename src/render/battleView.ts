@@ -88,6 +88,11 @@ export interface BattleView {
   walkActor(id: string, path: readonly Coord[]): Promise<void>;
   /** 光にさらわれるように消える */
   vanish(id: string): Promise<void>;
+  /** 物を置く・消す（見た目だけ） */
+  putProp(name: string, model: string, c: Coord): Promise<void>;
+  removeProp(name: string): Promise<void>;
+  /** 持ち物を付け替える（model が空なら外す） */
+  setItems(id: string, slot: 'hand' | 'handL' | 'waist' | 'back', model: string): void;
   /** 光を立てる（マスかユニットに）・消す */
   setLight(name: string, light: { x?: number; z?: number; actor?: string; color: number } | undefined): Promise<void>;
 }
@@ -246,6 +251,8 @@ export function createBattleView(options: {
     return bystanders.get(id);
   };
   const lights = new Map<string, { pillar: LightPillar; actor?: string }>();
+  const props = new Map<string, Puppet>();
+  const items = new Map<string, Record<string, string>>();
   const dropLight = (name: string) => {
     lights.get(name)?.pillar.dispose();
     lights.delete(name);
@@ -741,6 +748,29 @@ export function createBattleView(options: {
       a.puppet.group.visible = false;
       a.puppet.setGlow(glow, 0);
     },
+    async putProp(name, model, c) {
+      props.get(name)?.group.removeFromParent();
+      const p = createPropModel(model);
+      p.group.position.copy(mapView.tileTop(c.x, c.z));
+      p.group.traverse((o) => (o.raycast = () => {}));
+      scene.add(p.group);
+      props.set(name, p);
+      await tweens.play(0.3, (t) => p.setOpacity(t));
+    },
+    async removeProp(name) {
+      const p = props.get(name);
+      if (!p) return;
+      await tweens.play(0.3, (t) => p.setOpacity(1 - t));
+      p.group.removeFromParent();
+      props.delete(name);
+    },
+    setItems(id, slot, model) {
+      const a = actorPuppet(id);
+      if (!a) return;
+      const next = { ...items.get(id), [slot]: model };
+      items.set(id, next);
+      a.puppet.setItems?.(next);
+    },
     async setLight(name, light) {
       if (!light) {
         const entry = lights.get(name);
@@ -784,6 +814,7 @@ export function createBattleView(options: {
       for (const v of visuals.values()) scene.remove(v.puppet.group);
       for (const b of bystanders.values()) scene.remove(b.puppet.group);
       for (const name of [...lights.keys()]) dropLight(name);
+      for (const p of props.values()) p.group.removeFromParent();
       for (const m of bursts) scene.remove(m);
       scene.remove(activeMarker, arrowGroup, projectile, rock);
       mapView.setMarks([]);

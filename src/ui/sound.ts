@@ -15,7 +15,10 @@ export interface SoundSystem {
   /** 旋律を鳴らす（前の旋律は止める）。timbre は台本の音色の名前（鼻歌・石・歌声） */
   playMelody(melody: string, timbre: string, mark?: string): void;
   stopMelody(): void;
-  /** 鳴っている旋律が、残り remaining 個の音になるまで待つ（0 なら終わるまで。鳴っていなければすぐ） */
+  /**
+   * 鳴っている旋律の、終わりから remaining 個目の音が鳴りはじめるまで待つ（3 なら「終わりの三つの音」の1つ目が鳴りはじめた時。
+   * 0 なら終わるまで。鳴っていないか、もう過ぎていればすぐ）
+   */
   waitMelody(remaining: number): Promise<void>;
   /** 効果音 */
   effect(id: SoundEffectId): void;
@@ -257,10 +260,12 @@ export function createSoundSystem(): SoundSystem {
     current = undefined;
   };
 
+  /** 終わりから remaining 個目の音が鳴りはじめたか（index は鳴りはじめた音の数） */
+  const reached = (index: number, total: number, remaining: number) => (remaining <= 0 ? index > total : index >= total - remaining + 1);
   const resolveWaiters = () => {
     if (!current) return;
-    const left = current.total - current.index;
-    const done = current.waiters.filter((w) => left <= w.remaining);
+    const c = current;
+    const done = c.waiters.filter((w) => reached(c.index, c.total, w.remaining));
     current.waiters = current.waiters.filter((w) => !done.includes(w));
     for (const w of done) w.resolve();
   };
@@ -301,7 +306,7 @@ export function createSoundSystem(): SoundSystem {
             if (current !== playing) return;
             playing.index = i + 1;
             resolveWaiters();
-          }, Math.round((n.start + n.length * 0.25) * 1000)),
+          }, Math.round(n.start * 1000)),
         );
         if (ac && master && n.frequency !== null) {
           const at = base + n.start;
@@ -331,7 +336,7 @@ export function createSoundSystem(): SoundSystem {
       notify();
     },
     waitMelody(remaining) {
-      if (!current || current.total - current.index <= remaining) return Promise.resolve();
+      if (!current || reached(current.index, current.total, remaining)) return Promise.resolve();
       return new Promise<void>((resolve) => current!.waiters.push({ remaining, resolve }));
     },
     effect(id) {
