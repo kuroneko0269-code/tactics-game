@@ -41,6 +41,23 @@ export interface StageState {
   readonly dark: boolean;
   /** 立っている光（呼び名 → 光）。省くとなし */
   readonly lights?: Readonly<Record<string, LightState>>;
+  /** 話者の名前の札に添える肩書き（人物の名前 → 肩書き）。省くとなし */
+  readonly titles?: Readonly<Record<string, string>>;
+}
+
+/**
+ * 物の名前の指定に合う、舞台にある物の名前。終わりが * なら、その前の文字で始まる名前の物すべて（* だけなら全部）
+ */
+export function propNamesMatching(stage: StageState, pattern: string): string[] {
+  if (!pattern.endsWith('*')) return stage.props[pattern] ? [pattern] : [];
+  const prefix = pattern.slice(0, -1);
+  return Object.keys(stage.props).filter((n) => n.startsWith(prefix));
+}
+
+/** 人物か物の位置（向きを変える相手・カメラを向ける先）。人物を先に探す */
+export function pointOf(stage: StageState, name: string): { x: number; z: number } | undefined {
+  const a = stage.actors[name] ?? stage.props[name];
+  return a ? { x: a.x, z: a.z } : undefined;
 }
 
 export const EMPTY_STAGE: StageState = { actors: {}, props: {}, dark: false };
@@ -79,16 +96,21 @@ export function applyDirective(stage: StageState, d: Directive): StageState {
     case 'face': {
       const a = stage.actors[d.actor];
       if (!a) return stage;
-      const other = d.toward ? stage.actors[d.toward] : undefined;
+      const other = d.toward ? pointOf(stage, d.toward) : undefined;
       const facing = d.facing ?? (other ? toward(a, other, a.facing) : a.facing);
       return { ...stage, actors: { ...stage.actors, [d.actor]: { ...a, facing } } };
     }
     case 'propPut':
       return { ...stage, props: { ...stage.props, [d.name]: { prop: d.prop, x: d.x, z: d.z } } };
     case 'propRemove': {
+      const names = propNamesMatching(stage, d.name);
       const props = { ...stage.props };
-      delete props[d.name];
-      return { ...stage, props };
+      for (const n of names) delete props[n];
+      // 片付ける: 人物は（最初の）物の方を向く
+      const a = d.actor ? stage.actors[d.actor] : undefined;
+      const first = names[0] ? stage.props[names[0]] : undefined;
+      if (!d.actor || !a || !first) return { ...stage, props };
+      return { ...stage, props, actors: { ...stage.actors, [d.actor]: { ...a, facing: toward(a, first, a.facing) } } };
     }
     case 'propChange': {
       const p = stage.props[d.name];
@@ -123,6 +145,21 @@ export function applyDirective(stage: StageState, d: Directive): StageState {
       items[d.slot] = d.kind === 'carry' ? d.item : '';
       return { ...stage, actors: { ...stage.actors, [d.actor]: { ...a, items } } };
     }
+    case 'give': {
+      // 渡す人は相手の方を向き、右手を空にする。受け取る人の持つ所に付ける
+      let next = applyDirective(stage, { kind: 'face', actor: d.actor, toward: d.to });
+      next = applyDirective(next, { kind: 'release', actor: d.actor, slot: 'hand' });
+      next = applyDirective(next, { kind: 'carry', actor: d.to, item: d.item, slot: d.slot });
+      return next;
+    }
+    case 'title': {
+      const titles = { ...stage.titles };
+      if (d.title) titles[d.actor] = d.title;
+      else delete titles[d.actor];
+      return { ...stage, titles };
+    }
+    case 'together':
+      return d.directives.reduce(applyDirective, stage);
     case 'posture': {
       const a = stage.actors[d.actor];
       if (!a) return stage;

@@ -5,6 +5,7 @@ import type { MapView, TileCoord } from './mapView';
 import { createLightPillar, playGesture, type GestureMotion, type LightPillar } from './motion';
 import { createPropModel } from './props';
 import { createPuppet, YAW_OF, type Puppet, type PuppetLook, type PuppetPose } from './puppet';
+import { headTop } from './speakerMark';
 import { createTweens } from './tweens';
 
 export type { GestureMotion } from './motion';
@@ -18,8 +19,8 @@ export interface SceneView {
   sync(stage: StageState): void;
   enter(name: string, actor: ActorState): Promise<void>;
   exit(name: string): Promise<void>;
-  /** 道順（始めのマスを含む）に沿って歩く */
-  walk(name: string, path: readonly Coord[]): Promise<void>;
+  /** 道順（始めのマスを含む）に沿って歩く。speed は速さの倍率（1 がふつう） */
+  walk(name: string, path: readonly Coord[], speed?: number): Promise<void>;
   turn(name: string, facing: Direction): Promise<void>;
   gesture(name: string, motion: GestureMotion): Promise<void>;
   putProp(name: string, kind: string, c: Coord): Promise<void>;
@@ -33,6 +34,10 @@ export interface SceneView {
   setLight(name: string, light: LightState | undefined): Promise<void>;
   /** 人物の頭上のあたりの位置（カメラを向ける先） */
   actorPoint(name: string): THREE.Vector3 | undefined;
+  /** 物の位置（カメラを向ける先） */
+  propPoint(name: string): THREE.Vector3 | undefined;
+  /** 人物の頭のてっぺんの位置（話者の印を出す所。歩いている途中も追う） */
+  actorHead(name: string): THREE.Vector3 | undefined;
   /** 歩かせる時に、進めるマスを色分けする（空なら消す） */
   setWalkTargets(tiles: readonly Coord[], goal?: Coord): void;
   /** 動きの速さ（早送りの時に上げる） */
@@ -185,9 +190,10 @@ export function createSceneView(options: {
       await play(0.35, (t) => a.puppet.setOpacity(1 - t));
       dropActor(name);
     },
-    async walk(name, path) {
+    async walk(name, path, pace = 1) {
       const a = actors.get(name);
       if (!a) return;
+      const seconds = STEP_SECONDS / Math.max(0.2, pace);
       for (let i = 1; i < path.length; i++) {
         const from = mapView.tileTop(path[i - 1]!.x, path[i - 1]!.z);
         const to = mapView.tileTop(path[i]!.x, path[i]!.z);
@@ -196,7 +202,7 @@ export function createSceneView(options: {
         const facing: Direction = dx > 0 ? 'east' : dx < 0 ? 'west' : dz > 0 ? 'south' : 'north';
         a.puppet.setFacing(facing);
         const hop = Math.abs(to.y - from.y) > 0.01 ? 0.25 : 0.06;
-        await play(STEP_SECONDS, (t) => {
+        await play(seconds, (t) => {
           a.puppet.group.position.lerpVectors(from, to, t);
           a.puppet.group.position.y += Math.sin(Math.PI * t) * hop;
         });
@@ -275,6 +281,14 @@ export function createSceneView(options: {
     actorPoint(name) {
       const a = actors.get(name);
       return a ? mapView.tileTop(a.coord.x, a.coord.z).add(new THREE.Vector3(0, 0.6, 0)) : undefined;
+    },
+    propPoint(name) {
+      const p = props.get(name);
+      return p ? mapView.tileTop(p.coord.x, p.coord.z).add(new THREE.Vector3(0, 0.3, 0)) : undefined;
+    },
+    actorHead(name) {
+      const a = actors.get(name);
+      return a ? headTop(a.puppet.group) : undefined;
     },
     setWalkTargets(tiles, goal) {
       // 次に進めるマスは黄色で目立たせ、行き先は青で示す

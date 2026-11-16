@@ -58,8 +58,10 @@ import { itemName } from './ui/equipmentText';
 import { showVersion } from './ui/version';
 import { TEXT, unitName } from './ui/text';
 import { createUnitLabels, type UnitLabels } from './ui/unitLabels';
-import { applyDirective, walkPath, type StageState } from './core/dialogue';
+import { applyDirective, pointOf, propNamesMatching, walkPath, type StageState } from './core/dialogue';
 import { parseScriptOrThrow, type Directive, type Script } from './core/script';
+import { createPortraitRenderer } from './render/portrait';
+import { createSpeakerMark } from './render/speakerMark';
 import { advanceScene, currentScene, normalizeProgress, recapFor, STORY_START, type BookDefinition, type StoryProgress } from './core/story';
 import { books } from './data/story/books';
 import { scriptTexts } from './data/story/scripts';
@@ -735,6 +737,24 @@ function main(): void {
     }
     return script;
   };
+  /**
+   * 話者の人形の見た目（顔の枠と名前の札の色）。台本の名前 → 人物の見た目。戦闘中は、戦場の人物の名前からユニットの見た目も引く。
+   * マップにいない人物（声だけ など）も、名前から引ける
+   */
+  const speakerLook = (name: string) => {
+    const direct = LOOKS[ACTOR_LOOK_IDS[name] ?? ''];
+    if (direct) return direct;
+    const id = battle ? battleActorId(name) : undefined;
+    return (id ? LOOKS[currentSite?.looks?.[id] ?? id] : undefined) ?? DEFAULT_LOOK;
+  };
+  /** 顔の枠（話者の人形を別のカメラで写す）と、マップ上の話者の印 */
+  const portrait = createPortraitRenderer(speakerLook);
+  const speakerMark = createSpeakerMark(stage.scene);
+  /** 話者の強調: 頭上に印を出し、カメラを少しだけ寄せる（null で印を消し、カメラを戻す） */
+  const highlightSpeaker = (headOf: (() => THREE.Vector3 | undefined) | null) => {
+    speakerMark.setTarget(headOf);
+    rig.nudge(headOf?.() ?? null);
+  };
   /** 会話の場面の舞台（会話の場面の間だけある） */
   let sceneView: SceneView | undefined;
   /** 進めている会話（会話の間だけある） */
@@ -752,9 +772,11 @@ function main(): void {
       window.setTimeout(resolve, ms);
     });
   const zoomOf = (d: Extract<Directive, { kind: 'camera' }>) => (d.zoom ? SCENE_ZOOM[d.zoom] : undefined);
+  /** カメラをゆっくり動かす秒（早送りの時は短く） */
+  const cameraSeconds = (d: Extract<Directive, { kind: 'camera' }>, fast: boolean) => (d.ms ? (fast ? Math.min(d.ms, 300) : d.ms) / 1000 : undefined);
   /** 台本を進める（終わるか飛ばすと解決する） */
-  const playScript = async (scriptId: string, port: StagePort, initial?: StageState) => {
-    const run = runDialogue(scriptOf(scriptId), {
+  const playScript = async (scriptId: string | Script, port: StagePort, initial?: StageState) => {
+    const run = runDialogue(typeof scriptId === 'string' ? scriptOf(scriptId) : scriptId, {
       root: dialogueEl,
       port,
       ...(initial ? { initial } : {}),
@@ -765,6 +787,11 @@ function main(): void {
       },
       setDark,
       sound: dialogueSound,
+      portrait,
+      speakerColors: (name) => {
+        const look = speakerLook(name);
+        return { body: look.body, accent: look.accent };
+      },
       ...(import.meta.env.DEV ? { autoAdvance: () => devAutoDialogue } : {}),
     });
     dialogueRun = run;
@@ -772,6 +799,7 @@ function main(): void {
       return await run.done;
     } finally {
       if (dialogueRun === run) dialogueRun = undefined;
+      speakerMark.setTarget(null);
       await setDark(false, 0);
       sound.stopMelody();
     }
@@ -792,7 +820,7 @@ function main(): void {
           return view.sync(after);
         case 'walk': {
           const a = before.actors[d.actor];
-          return a ? view.walk(d.actor, walkPath(a, d)) : undefined;
+          return a ? view.walk(d.actor, walkPath(a, d), (d.speed ?? 100) / 100) : undefined;
         }
         case 'face': {
           const a = after.actors[d.actor];
@@ -803,14 +831,37 @@ function main(): void {
           return g ? view.gesture(d.actor, g) : undefined;
         }
         case 'camera': {
-          const point = d.actor ? view.actorPoint(d.actor) : mapView.tileTop(d.x ?? 0, d.z ?? 0);
-          if (point) await rig.lookAt(point, zoomOf(d));
+          // 人物か物の名前（人物を先に探す）か、マス
+          const point = d.actor ? (view.actorPoint(d.actor) ?? view.propPoint(d.actor)) : mapView.tileTop(d.x ?? 0, d.z ?? 0);
+          if (point) await rig.lookAt(point, zoomOf(d), cameraSeconds(d, fast));
           return;
         }
         case 'propPut':
           return view.putProp(d.name, d.prop, d);
-        case 'propRemove':
-          return view.removeProp(d.name);
+        case 'propRemove': {
+          const names = propNamesMatching(before, d.name);
+          // 片付ける: 人物が物の方を向き、拾う仕草をしてから物が消える
+          const who = d.actor ? before.actors[d.actor] : undefined;
+          const first = names[0] ? pointOf(before, names[0]) : undefined;
+          if (d.actor && who && first) {
+            await view.turn(d.actor, facingToward(who, first, who.facing));
+            const g = GESTURES['拾う'];
+            if (g) await view.gesture(d.actor, g);
+          }
+          await Promise.all(names.map((n) => view.removeProp(n)));
+          return;
+        }
+        case 'give': {
+          // 渡す人が相手の方を向いて手渡し、物が相手に移る
+          const giver = before.actors[d.actor];
+          const taker = before.actors[d.to];
+          if (giver && taker) await view.turn(d.actor, facingToward(giver, taker, giver.facing));
+          const g = GESTURES['手渡す'];
+          if (g) await view.gesture(d.actor, g);
+          view.setItems(d.actor, after.actors[d.actor]?.items);
+          view.setItems(d.to, after.actors[d.to]?.items);
+          return;
+        }
         case 'propChange':
           return view.changeProp(d.name, d.prop);
         case 'carry':
@@ -834,6 +885,7 @@ function main(): void {
     step: async (actor, from, to) => {
       await view.walk(actor, [from, to]);
     },
+    highlight: (speaker) => highlightSpeaker(speaker && view.actorHead(speaker) ? () => view.actorHead(speaker) : null),
   });
 
   /**
@@ -849,14 +901,19 @@ function main(): void {
   };
   const battlePort: StagePort = {
     sync: () => {},
-    async run(d) {
+    highlight: (speaker) => {
+      const id = speaker ? battleActorId(speaker) : undefined;
+      const view = battle?.view;
+      highlightSpeaker(id && view?.actorHead(id) ? () => battle?.view.actorHead(id) : null);
+    },
+    async run(d, _before, fast) {
       const view = battle?.view;
       if (!view) return;
       switch (d.kind) {
         case 'camera': {
           const id = d.actor ? battleActorId(d.actor) : undefined;
           const point = id ? view.actorPoint(id) : d.x !== undefined && d.z !== undefined ? mapView.tileTop(d.x, d.z) : undefined;
-          if (point) await rig.lookAt(point, zoomOf(d));
+          if (point) await rig.lookAt(point, zoomOf(d), cameraSeconds(d, fast));
           return;
         }
         case 'gesture': {
@@ -879,7 +936,7 @@ function main(): void {
           const id = battleActorId(d.actor);
           const st = battle?.controller?.state;
           const from = id ? st?.units.find((u) => u.id === id) ?? st?.bystanders?.find((b) => b.id === id) : undefined;
-          if (id && from) await view.walkActor(id, walkPath(from, d));
+          if (id && from) await view.walkActor(id, walkPath(from, d), (d.speed ?? 100) / 100);
           return;
         }
         case 'exit': {
@@ -918,6 +975,15 @@ function main(): void {
         case 'release': {
           const id = battleActorId(d.actor);
           if (id) view.setItems(id, d.slot, d.kind === 'carry' ? (PROP_KINDS[d.item] ?? '') : '');
+          return;
+        }
+        case 'give': {
+          const from = battleActorId(d.actor);
+          const to = battleActorId(d.to);
+          const g = GESTURES['手渡す'];
+          if (from && g) await view.gesture(from, g);
+          if (from) view.setItems(from, 'hand', '');
+          if (to) view.setItems(to, d.slot, PROP_KINDS[d.item] ?? '');
           return;
         }
         default:
@@ -1000,31 +1066,7 @@ function main(): void {
     }
     const scene = now.scene;
     if (scene.kind === 'dialogue' || scene.kind === 'interactive') {
-      endBattle();
-      endScene();
-      const stageDef = stages.find((st) => st.id === scene.stageId);
-      if (!stageDef) throw new Error(`会話の場面のマップ ${scene.stageId} が見つかりません`);
-      currentStageId = stageDef.id;
-      useMap(stageDef.map);
-      setScreen('scene');
-      rig.reset();
-      const view = createSceneView({
-        scene: stage.scene,
-        mapView,
-        camera: () => rig.camera,
-        canvas: stage.renderer.domElement,
-        lookOf: (name) => LOOKS[ACTOR_LOOK_IDS[name] ?? ''] ?? DEFAULT_LOOK,
-        propModelOf: (kind) => PROP_KINDS[kind] ?? 'box',
-        postureOf: (name) => POSTURES[name],
-        lightColorOf: (name) => LIGHT_COLORS[name] ?? 0xffffff,
-      });
-      sceneView = view;
-      // 会話のマップに置いておく物（家具など）を、舞台の最初の様子にする
-      const initial: StageState = {
-        actors: {},
-        props: Object.fromEntries((stageDef.props ?? []).map((p) => [p.id, { prop: p.kind, x: p.x, z: p.z }])),
-        dark: false,
-      };
+      const { view, initial } = openScene(scene.stageId);
       void playScript(scene.scriptId, scenePort(view), initial).then(() => {
         if (sceneView === view) completeScene(bookId);
       });
@@ -1043,6 +1085,36 @@ function main(): void {
     storyBaseNext = () => completeScene(bookId);
     base.show();
   };
+
+  /** 会話の場面の舞台を用意する（会話用マップ・人形と物の舞台・最初の様子） */
+  function openScene(stageId: string): { view: SceneView; initial: StageState } {
+    endBattle();
+    endScene();
+    const stageDef = stages.find((st) => st.id === stageId);
+    if (!stageDef) throw new Error(`会話の場面のマップ ${stageId} が見つかりません`);
+    currentStageId = stageDef.id;
+    useMap(stageDef.map);
+    setScreen('scene');
+    rig.reset();
+    const view = createSceneView({
+      scene: stage.scene,
+      mapView,
+      camera: () => rig.camera,
+      canvas: stage.renderer.domElement,
+      lookOf: (name) => LOOKS[ACTOR_LOOK_IDS[name] ?? ''] ?? DEFAULT_LOOK,
+      propModelOf: (kind) => PROP_KINDS[kind] ?? 'box',
+      postureOf: (name) => POSTURES[name],
+      lightColorOf: (name) => LIGHT_COLORS[name] ?? 0xffffff,
+    });
+    sceneView = view;
+    // 会話のマップに置いておく物（家具など）を、舞台の最初の様子にする
+    const initial: StageState = {
+      actors: {},
+      props: Object.fromEntries((stageDef.props ?? []).map((p) => [p.id, { prop: p.kind, x: p.x, z: p.z }])),
+      dark: false,
+    };
+    return { view, initial };
+  }
 
   /** 今の場面を終えた: 進み具合を進めて保存し、次の場面へ */
   const completeScene = (bookId: string) => {
@@ -1144,6 +1216,8 @@ function main(): void {
   const candidatesAt = (x: number, y: number) =>
     battle ? battle.view.tapCandidates(pick, x, y) : { coords: [] as { x: number; z: number }[] };
   attachCameraInput(canvas, rig, (x, y) => {
+    // 会話で台詞・語りを読んでいる時は、マップのどこを押しても次へ進む
+    if (dialogueRun?.advance()) return;
     // 会話の場面の「歩かせる」: タップしたマス（人形を押した時はそのマス）を渡す
     if (sceneView && dialogueRun) {
       const coords = pick(x, y).flatMap((h) => {
@@ -1196,6 +1270,21 @@ function main(): void {
       },
       /** 今の会話の様子（会話がなければ null。物語の土台） */
       dialogue: () => dialogueRun?.status() ?? null,
+      /** 今の会話の舞台の様子（人物・物・肩書き。会話がなければ null） */
+      dialogueStage: () => dialogueRun?.stage() ?? null,
+      /**
+       * 渡した台本のテキストを、会話用マップの上で流す（会話の見せ方と台本の指示を確かめるため。物語の進み具合は変えない）。
+       * 終わると題名の画面に戻る
+       */
+      playScene: (text: string, stageId: string) => {
+        const script = parseScriptOrThrow('test', text, scriptCatalog);
+        const { view, initial } = openScene(stageId);
+        void playScript(script, scenePort(view), initial).then(() => {
+          if (sceneView !== view) return;
+          endScene();
+          showTitle();
+        });
+      },
       /** 鳴っている旋律と、最近の効果音（序章に足りない仕組み） */
       sound: () => ({ melody: sound.melody(), recent: sound.recent() }),
       /** 手ほどきの様子（なければ null） */
@@ -1206,6 +1295,8 @@ function main(): void {
       story: () => story,
       /** 暗転しているか */
       dark: () => fadeEl.classList.contains('dark'),
+      /** 話者の印が見えているか・顔の枠に写している人物（会話の見せ方） */
+      speakerView: () => ({ mark: speakerMark.visible, portrait: portrait.current }),
       /** 会話の場面の人物とマスの画面座標 */
       actorScreen: (name: string) => sceneView?.actorScreen(name) ?? null,
       sceneTileScreen: (x: number, z: number) => sceneView?.tileScreen(x, z) ?? null,
@@ -1288,6 +1379,7 @@ function main(): void {
     mapView.update(elapsed);
     if (battle) battle.view.update(dt, elapsed);
     sceneView?.update(dt, elapsed);
+    speakerMark.update(elapsed);
     stage.renderer.render(stage.scene, rig.camera);
     if (battle) {
       battle.labels.setPositions(battle.view.unitAnchors());
