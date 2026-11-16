@@ -5,9 +5,12 @@ import { enemyUnit, kit } from '../enemyUnits';
 
 /**
  * 序章の戦闘2「アスタルの丘」（設計書「4. 章の表」の序章: 誓いの剣を折る。5ターン前後。祭壇は坂の上）。
- * 坂の上の祭壇（高さ 4）にガレス。ガレスは倒れない（HP は 1 より下がらない。討てずに門に落ちる）。祭壇から動かない（移動力 0）。
- * 誓いの剣（ガレス）に、正面以外から武器の攻撃を4回当てると勝利。ガレスは反撃と受け流しを持ち、強い。
+ * 坂の上の祭壇（高さ 4）にガレス。ガレスの HP は尽きない（HP は 1 より下がらない。折るのは剣で、ガレスは生きたまま問いかけ、門に落ちる）。
+ * 祭壇から動かない（移動力 0）。
+ * 誓いの剣（ガレス）に、正面以外から武器の攻撃を4回当てると勝利。最後の1回（剣を折る一撃）はトウマだけが当てられる
+ * （ほかの仲間の攻撃では、3回の後は回数が進まない。PR の回答 4）。ガレスは反撃と受け流しを持ち、強い。
  * 衛士は、隊が退けて駆け上がった後（会話の「隊は衛士を退け、祭壇へ駆け上がった。」）なので、戦闘には出さない。
+ * 隊は祭壇の手前（高さ 2 の段）から始める。始めに演出（ゴードが斬りかかって剣ごと押し返され、キリの矢が2本払われる）を見せてから操作が始まる。
  * 坂の両わきに、七つの氏族の人々（戦わない）が立つ。
  */
 const map = stageMap('prologue-hill', [
@@ -25,12 +28,13 @@ const map = stageMap('prologue-hill', [
 export const hillBattle: BattleSite = {
   id: 'prologue-hill',
   map,
+  // トウマ・ゴード・キリ・フェン・ノノの順。ゴードは祭壇の正面の下（始めの演出で、ここから斬りかかって押し返される）
   playerSlots: [
-    { x: 4, z: 6, facing: 'north' },
-    { x: 3, z: 6, facing: 'north' },
-    { x: 6, z: 6, facing: 'north' },
-    { x: 5, z: 7, facing: 'north' },
-    { x: 4, z: 7, facing: 'north' },
+    { x: 3, z: 4, facing: 'north' },
+    { x: 4, z: 3, facing: 'north' },
+    { x: 6, z: 4, facing: 'north' },
+    { x: 5, z: 5, facing: 'north' },
+    { x: 4, z: 5, facing: 'north' },
   ],
   tiers: [
     {
@@ -48,12 +52,13 @@ export const hillBattle: BattleSite = {
             equipment: kit(warrior, 2),
           }),
           minHp: 1,
+          // 祭壇から動かず、HP も尽きないので、退場の決まりは関係しない
         },
       ],
     },
   ],
   objectives: {
-    victory: [{ kind: 'hitUnit', id: 'oath-sword', unitId: 'hill-gareth', times: 4, labelId: 'oathSword' }],
+    victory: [{ kind: 'hitUnit', id: 'oath-sword', unitId: 'hill-gareth', times: 4, labelId: 'oathSword', finisherId: 'touma' }],
     defeat: [{ kind: 'allDefeated' }],
   },
   events: [

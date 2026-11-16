@@ -160,6 +160,9 @@ export function startBattle(
     if ((c.kind === 'defeatUnit' || c.kind === 'unitDefeated' || c.kind === 'hitUnit') && !known(c.unitId)) {
       throw new Error(`勝敗条件のユニット ${c.unitId} がいません`);
     }
+    if (c.kind === 'hitUnit' && c.finisherId !== undefined && !known(c.finisherId)) {
+      throw new Error(`勝敗条件の最後の一撃のユニット ${c.finisherId} がいません`);
+    }
     if (c.kind === 'destroyObjects') {
       for (const id of c.unitIds) {
         if (!units.some((u) => u.id === id && u.object)) throw new Error(`勝敗条件の対象物 ${id} がいません`);
@@ -290,6 +293,8 @@ function buildUnit(
     turnStartHp: stats.maxHp,
     endureUsed: false,
     ...(p.minHp !== undefined ? { minHp: validMinHp(p) } : {}),
+    kind: p.kind ?? 'human',
+    ...(p.noRetire ? { noRetire: true as const } : {}),
   };
 }
 
@@ -340,6 +345,7 @@ function buildObject(o: ObjectPlacement, rules: BattleRules): UnitState {
     turnStartHp: o.hp,
     endureUsed: false,
     object: { kind: o.kind },
+    kind: 'object',
   };
 }
 
@@ -605,8 +611,16 @@ function validateBeforeInterrupt(state: BattleState, action: BattleAction): void
   }
 }
 
+/** 戦闘不能になった時のカウント（種類ごと。戦闘で人は死なない決まり）。0 ならすぐに退場する */
+export function knockoutCountOf(rules: BattleRules, unit: Pick<UnitState, 'kind'>): number {
+  const kind = unit.kind ?? 'human';
+  if (kind === 'object') return 0;
+  return rules.knockout.kinds?.[kind]?.count ?? rules.knockout.count;
+}
+
 /**
- * ユニットを戦闘不能にする（倒れた姿でマスに残り、カウントが始まる）。詠唱中だった魔法は不発になり、状態変化は消える
+ * ユニットを戦闘不能にする（人は膝をついた姿でマスに残り、カウントが始まる）。詠唱中だった魔法は不発になり、状態変化は消える。
+ * 種類のカウントが 0（影・獣）なら、すぐに退場する（蘇生できない）
  */
 function defeat(state: BattleState, unitId: string, events: BattleEvent[]): BattleState {
   // 対象物は、戦闘不能にならずに壊れて消える（物語の土台）
@@ -614,13 +628,19 @@ function defeat(state: BattleState, unitId: string, events: BattleEvent[]): Batt
     events.push({ type: 'objectBroken', unitId });
     return updateUnit(state, unitId, { hp: 0, retired: true });
   }
-  const count = state.rules.knockout.count;
-  events.push({ type: 'defeated', unitId, count });
   const unit = getUnit(state, unitId);
-  const next = updateUnit(setStatuses(state, unitId, []), unitId, { knockoutCount: count, hp: 0 });
-  if (!unit.charging) return next;
-  events.push({ type: 'spellFizzled', casterId: unitId, spellId: unit.charging.spellId, reason: 'casterDefeated' });
-  return updateUnit(next, unitId, { charging: null });
+  const count = knockoutCountOf(state.rules, unit);
+  events.push({ type: 'defeated', unitId, count });
+  let next = updateUnit(setStatuses(state, unitId, []), unitId, { knockoutCount: count, hp: 0 });
+  if (unit.charging) {
+    events.push({ type: 'spellFizzled', casterId: unitId, spellId: unit.charging.spellId, reason: 'casterDefeated' });
+    next = updateUnit(next, unitId, { charging: null });
+  }
+  if (count === 0 && !unit.noRetire) {
+    events.push({ type: 'retired', unitId });
+    next = updateUnit(next, unitId, { retired: true });
+  }
+  return next;
 }
 
 /** 詠唱を中断させる（詠唱中でなければ何もしない） */
@@ -1079,6 +1099,11 @@ function tallyHit(state: BattleState, attacker: UnitState, targetId: string, sid
     if (c.kind !== 'hitUnit' || c.unitId !== targetId) continue;
     if (!(c.sides ?? ['side', 'back']).includes(side)) continue;
     const count = (next.scenario.tallies?.[c.id] ?? 0) + 1;
+    // 最後の1回は、決めたユニットだけが当てられる（序章の丘: 誓いの剣を折るのはトウマ）
+    if (count >= c.times && c.finisherId !== undefined && attacker.id !== c.finisherId) {
+      if (count === c.times) events.push({ type: 'tallyBlocked', id: c.id, attackerId: attacker.id, finisherId: c.finisherId });
+      continue;
+    }
     events.push({ type: 'tallied', id: c.id, count, times: c.times });
     next = { ...next, scenario: { ...next.scenario, tallies: { ...next.scenario.tallies, [c.id]: count } } };
   }
@@ -1304,8 +1329,10 @@ function beginNextTurn(state: BattleState, events: BattleEvent[]): BattleState {
 /** 戦闘不能のユニットの手番が来るはずだった時: カウントを 1 減らす。0 になれば退場する */
 function countKnockout(state: BattleState, unitId: string, events: BattleEvent[]): BattleState {
   const unit = getUnit(state, unitId);
-  const count = Math.max(0, unit.knockoutCount - 1);
   const ct = state.rules.knockout.ctAfterTick;
+  // 退場しないユニット（戦闘で人は死なない決まり）: カウントは減らず、膝をついたまま残る
+  if (unit.noRetire) return updateUnit(state, unitId, { ct });
+  const count = Math.max(0, unit.knockoutCount - 1);
   if (count > 0) {
     events.push({ type: 'knockoutCounted', unitId, count });
     return updateUnit(state, unitId, { knockoutCount: count, ct });

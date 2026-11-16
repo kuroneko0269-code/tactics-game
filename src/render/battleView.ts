@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { BattleEvent, BattleState, SpellElement, Team, TrapKind, UnitState } from '../core/battleTypes';
+import type { BattleEvent, BattleState, SpellElement, Team, TrapKind, UnitKind, UnitState } from '../core/battleTypes';
 import { DIRECTION_VECTORS, DIRECTIONS, type Coord, type Direction } from '../core/geometry';
 import type { MapView, OverlayTile, ReservedTile, TileCoord, TileMark } from './mapView';
 import { createPuppet, YAW_OF, type Puppet, type PuppetLook, type PuppetPose } from './puppet';
@@ -49,10 +49,16 @@ export interface BattleView {
   animateAttack(event: Extract<BattleEvent, { type: 'attacked' }>, onImpact: () => void): Promise<void>;
   /** 突き飛ばしで押し出される動き（押し出せない時は、その場で揺れる）。止まった瞬間に onImpact を呼ぶ */
   animateKnockback(event: Extract<BattleEvent, { type: 'knockedBack' }>, onImpact: () => void): Promise<void>;
-  /** 戦闘不能になる（倒れた姿になって、そのマスに残る。フェーズ2-5） */
-  animateDefeat(unitId: string): Promise<void>;
-  /** 戦闘不能のカウントが 0 になって退場する（消える） */
-  animateRetire(unitId: string): Promise<void>;
+  /**
+   * 戦闘不能になる（戦闘で人は死なない決まり）。人はその場に膝をつき、そのマスに残る。
+   * 影と獣は、すぐ後の退場の動きに任せる（ここでは少し揺れるだけ）
+   */
+  animateDefeat(unitId: string, kind?: UnitKind): Promise<void>;
+  /**
+   * 退場する（戦闘で人は死なない決まり）。人と獣は立ち上がって、近いマップの端の方へ歩いて退く。
+   * 影は石に戻って消える
+   */
+  animateRetire(unitId: string, kind?: UnitKind): Promise<void>;
   /** 対象物が壊れて消える（物語の土台） */
   animateBreak(unitId: string): Promise<void>;
   /** 地形が変わった（物語の土台）: マスを作り直し、ユニットを新しい高さに置き直す */
@@ -68,6 +74,11 @@ export interface BattleView {
   tileScreenPoints(x: number, z: number): { x: number; y: number }[];
   /** ユニットの体の中ほどの画面座標（px）。自動テスト用 */
   unitScreenPosition(unitId: string): { x: number; y: number };
+  /**
+   * ユニットの見た目の様子（自動テスト用）: 見えているか、戦闘不能の姿か、膝をついている度合い（0 立つ〜1 膝をつく）、
+   * 見た目の上でいるマスと、体の位置
+   */
+  poseOf(unitId: string): { visible: boolean; down: boolean; kneel: number; coord: Coord; world: { x: number; z: number } } | undefined;
   update(deltaSeconds: number, elapsedSeconds: number): void;
   /** 戦闘の間ずっと出しておく目印（到達するマス・増援の予告・見えている罠） */
   setOverlays(tiles: readonly OverlayTile[]): void;
@@ -88,6 +99,13 @@ export interface BattleView {
   walkActor(id: string, path: readonly Coord[]): Promise<void>;
   /** 光にさらわれるように消える */
   vanish(id: string): Promise<void>;
+  /**
+   * 攻撃の動きを見せる（見た目だけ。序章の丘の始めの演出）。隣なら踏み込んで斬り、離れていれば矢を放つ。
+   * parry は受ける側が武器で払う（白く光る）。当たった瞬間に onImpact を呼ぶ
+   */
+  strikeActor(attackerId: string, targetId: string, outcome: 'hit' | 'miss' | 'parry', onImpact?: () => void): Promise<void>;
+  /** 押し返される（見た目だけ）: 向きを変えずに、滑るように to のマスへ下がる */
+  pushBackActor(id: string, to: Coord): Promise<void>;
   /** 物を置く・消す（見た目だけ） */
   putProp(name: string, model: string, c: Coord): Promise<void>;
   removeProp(name: string): Promise<void>;
@@ -137,14 +155,17 @@ const TAP_RING: readonly (readonly [number, number])[] = [5, 10].flatMap((r) =>
   [0, 1, 2, 3, 4, 5, 6, 7].map((k) => [Math.round(r * Math.cos((k * Math.PI) / 4)), Math.round(r * Math.sin((k * Math.PI) / 4))] as const),
 );
 const STEP_SECONDS = 0.2;
-/** 倒れた姿の透明度と、体をマスの中ほどに寄せる量（仰向けに倒すと、頭が奥へはみ出すため） */
-const DOWN_OPACITY = 0.8;
-const DOWN_SHIFT = 0.38;
+/** 戦闘不能の姿（膝をついた姿）の透明度。少しだけ淡くして、立っているユニットと見分ける */
+const DOWN_OPACITY = 0.85;
+/** 膝をついた姿（戦闘で人は死なない決まり）: 体を沈め、前にかがみ、うつむいて、手を膝の前に下ろす。血や呻き声は出さない */
+const KNEEL_POSE: PuppetPose = { drop: 0.2, bow: 0.35, head: 0.45, armL: 0.35, armR: 0.35 };
 
-/** 倒れた姿にする（t が 0 で立った姿、1 で倒れた姿） */
-function setLying(puppet: Puppet, t: number): void {
-  puppet.body.rotation.set(-(Math.PI / 2) * t, 0, 0);
-  puppet.body.position.set(0, 0.06 * t, DOWN_SHIFT * t);
+/** 膝をついた姿にする（t が 0 で立った姿、1 で膝をついた姿） */
+function setKneel(puppet: Puppet, t: number): void {
+  puppet.group.userData.kneel = t;
+  const pose: Record<string, number> = {};
+  for (const [k, v] of Object.entries(KNEEL_POSE)) pose[k] = (v as number) * t;
+  puppet.setPose?.(pose);
 }
 
 interface UnitVisual {
@@ -379,7 +400,8 @@ export function createBattleView(options: {
         v.puppet.group.visible = v.alive || v.down;
         v.puppet.setOpacity(v.down ? DOWN_OPACITY : 1);
         v.puppet.setFlash(0);
-        setLying(v.puppet, v.down ? 1 : 0);
+        v.puppet.body.scale.setScalar(1);
+        setKneel(v.puppet, v.down ? 1 : 0);
         const spell = unit.charging && unit.spells.find((sp) => sp.id === unit.charging!.spellId);
         v.chargeRing.visible = Boolean(spell) && v.alive;
         if (spell) v.chargeRing.material.color.setHex(ELEMENT_COLORS[spell.element]);
@@ -622,11 +644,20 @@ export function createBattleView(options: {
         await tweens.play(0.25, (t) => v.puppet.setFlash(1 - t));
       }
     },
-    async animateDefeat(unitId) {
+    async animateDefeat(unitId, kind = 'human') {
       const v = visual(unitId);
       v.chargeRing.visible = false;
-      await tweens.play(0.6, (t) => {
-        setLying(v.puppet, easeOutCubic(t));
+      if (kind !== 'human') {
+        // 影と獣は、すぐに退場の動きへ（ここでは小さく揺れるだけ）
+        await tweens.play(0.25, (t) => (v.puppet.body.position.x = Math.sin(t * Math.PI * 4) * 0.05 * (1 - t)));
+        v.puppet.body.position.x = 0;
+        v.alive = false;
+        v.down = true;
+        return;
+      }
+      // 人: その場に膝をつく
+      await tweens.play(0.7, (t) => {
+        setKneel(v.puppet, easeOutCubic(t));
         v.puppet.setOpacity(1 - (1 - DOWN_OPACITY) * t);
       });
       v.alive = false;
@@ -651,24 +682,52 @@ export function createBattleView(options: {
       for (const v of visuals.values()) place(v, v.coord);
       await tweens.wait(0.3);
     },
-    async animateRetire(unitId) {
+    async animateRetire(unitId, kind = 'human') {
       const v = visual(unitId);
-      await tweens.play(0.6, (t) => v.puppet.setOpacity(DOWN_OPACITY * (1 - t)));
+      v.chargeRing.visible = false;
+      if (kind === 'shade') {
+        // 影: 灰色に光りながら小さな石の大きさに縮み、消える
+        const grey = new THREE.Color(0x9a9a9a);
+        await tweens.play(0.8, (t) => {
+          v.puppet.setGlow(grey, Math.min(1, t * 2));
+          v.puppet.body.scale.setScalar(1 - 0.85 * easeInOut(t));
+          v.puppet.setOpacity(t < 0.7 ? 1 : 1 - (t - 0.7) / 0.3);
+        });
+        v.puppet.setGlow(grey, 0);
+        v.puppet.body.scale.setScalar(1);
+      } else {
+        // 人と獣: 立ち上がり、近いマップの端の方を向いて、歩いて退く（見た目だけ。マスの高さは気にしない）
+        if (kind === 'human') {
+          await tweens.play(0.5, (t) => {
+            setKneel(v.puppet, 1 - easeInOut(t));
+            v.puppet.setOpacity(DOWN_OPACITY + (1 - DOWN_OPACITY) * t);
+          });
+        }
+        const toward = exitDirection(v.coord, mapWidth, mapDepth);
+        await turnTo(unitId, toward);
+        const from = v.puppet.group.position.clone();
+        const step = DIRECTION_VECTORS[toward];
+        await tweens.play(1.2, (t) => {
+          v.puppet.group.position.set(from.x + step.x * 1.6 * t, from.y + Math.abs(Math.sin(t * Math.PI * 6)) * 0.03, from.z + step.z * 1.6 * t);
+          v.puppet.setOpacity(t < 0.4 ? 1 : 1 - (t - 0.4) / 0.6);
+        });
+        v.puppet.group.position.copy(from);
+      }
+      setKneel(v.puppet, 0);
       v.alive = false;
       v.down = false;
       v.puppet.group.visible = false;
-      v.chargeRing.visible = false;
     },
     async animateRevive(unitId) {
       const v = visual(unitId);
       const glow = new THREE.Color(ELEMENT_COLORS.light);
       v.puppet.group.visible = true;
       await tweens.play(0.6, (t) => {
-        setLying(v.puppet, 1 - easeInOut(t));
+        setKneel(v.puppet, 1 - easeInOut(t));
         v.puppet.setOpacity(DOWN_OPACITY + (1 - DOWN_OPACITY) * t);
         v.puppet.setGlow(glow, 1 - t);
       });
-      setLying(v.puppet, 0);
+      setKneel(v.puppet, 0);
       v.puppet.setOpacity(1);
       v.puppet.setGlow(glow, 0);
       v.alive = true;
@@ -698,10 +757,22 @@ export function createBattleView(options: {
     },
     unitScreenPosition(unitId) {
       const v = visual(unitId);
-      // 倒れた姿なら、低い位置（体の中ほど）
-      const offset = v.down ? new THREE.Vector3(0, 0.12, 0) : new THREE.Vector3(0, 0.5, 0);
+      // 膝をついた姿なら、少し低い位置（体の中ほど）
+      const offset = v.down ? new THREE.Vector3(0, 0.3, 0) : new THREE.Vector3(0, 0.5, 0);
       const s = screenOf(v.puppet.group.position.clone().add(offset));
       return { x: s.x, y: s.y };
+    },
+    poseOf(unitId) {
+      const v = visuals.get(unitId);
+      if (!v) return undefined;
+      const p = v.puppet.group.position;
+      return {
+        visible: v.puppet.group.visible,
+        down: v.down,
+        kneel: (v.puppet.group.userData.kneel as number | undefined) ?? 0,
+        coord: { ...v.coord },
+        world: { x: p.x, z: p.z },
+      };
     },
     actorPoint(id) {
       const a = actorPuppet(id);
@@ -709,7 +780,9 @@ export function createBattleView(options: {
     },
     async gesture(id, motion) {
       const a = actorPuppet(id);
-      if (a) await playGesture(tweens, a.puppet, motion, {} as PuppetPose);
+      // 膝をついたユニット（堰の番兵など）は、膝をついた姿に仕草を重ねる
+      const base = visuals.get(id)?.down ? KNEEL_POSE : ({} as PuppetPose);
+      if (a) await playGesture(tweens, a.puppet, motion, base);
     },
     async turnActor(id, facing) {
       const a = actorPuppet(id);
@@ -747,6 +820,75 @@ export function createBattleView(options: {
       });
       a.puppet.group.visible = false;
       a.puppet.setGlow(glow, 0);
+    },
+    async strikeActor(attackerId, targetId, outcome, onImpact) {
+      const a = actorPuppet(attackerId);
+      const b = actorPuppet(targetId);
+      if (!a || !b) return;
+      const dx = b.coord.x - a.coord.x;
+      const dz = b.coord.z - a.coord.z;
+      const facing: Direction = Math.abs(dx) >= Math.abs(dz) ? (dx > 0 ? 'east' : 'west') : dz > 0 ? 'south' : 'north';
+      a.puppet.setFacing(facing);
+      // 受ける側は攻める側を向く
+      b.puppet.setFacing(Math.abs(dx) >= Math.abs(dz) ? (dx > 0 ? 'west' : 'east') : dz > 0 ? 'north' : 'south');
+      const local = new THREE.Vector3(0, 0, 1);
+      const ranged = Math.abs(dx) + Math.abs(dz) > 1;
+      if (ranged) {
+        await tweens.play(0.18, (t) => a.puppet.body.position.copy(local).multiplyScalar(-0.08 * t));
+        a.puppet.body.position.set(0, 0, 0);
+        const start = mapView.tileTop(a.coord.x, a.coord.z).add(new THREE.Vector3(0, 0.55, 0));
+        const end = mapView.tileTop(b.coord.x, b.coord.z).add(new THREE.Vector3(0, 0.5, 0));
+        const arc = 0.6 + start.distanceTo(end) * 0.12;
+        const prev = start.clone();
+        projectile.visible = true;
+        await tweens.play(0.38, (t) => {
+          projectile.position.lerpVectors(start, end, t);
+          projectile.position.y += Math.sin(Math.PI * t) * arc;
+          if (t > 0) projectile.lookAt(prev.clone().lerp(projectile.position, 2));
+          prev.copy(projectile.position);
+        });
+        projectile.visible = false;
+      } else {
+        await tweens.play(0.14, (t) => a.puppet.body.position.copy(local).multiplyScalar(0.32 * easeOutCubic(t)));
+      }
+      onImpact?.();
+      const white = new THREE.Color(0xffffff);
+      if (outcome === 'parry') {
+        // 剣を振って払う（右腕を上げて振り下ろす）。打ち合った所が白く光る
+        await tweens.play(0.32, (t) => {
+          b.puppet.setPose?.({ armR: 2.2 * Math.sin(Math.PI * t), bow: 0.1 * Math.sin(Math.PI * t) });
+          b.puppet.setGlow(white, 0.8 * (1 - t));
+        });
+        b.puppet.setPose?.({});
+        b.puppet.setGlow(white, 0);
+      } else if (outcome === 'hit') {
+        await tweens.play(0.3, (t) => {
+          b.puppet.setFlash(1 - t);
+          b.puppet.body.position.x = Math.sin(t * Math.PI * 6) * 0.05 * (1 - t);
+        });
+      } else {
+        await tweens.play(0.3, (t) => (b.puppet.body.position.x = Math.sin(Math.PI * t) * 0.25));
+      }
+      b.puppet.body.position.set(0, 0, 0);
+      if (!ranged) await tweens.play(0.14, (t) => a.puppet.body.position.copy(local).multiplyScalar(0.32 * (1 - easeInOut(t))));
+      a.puppet.body.position.set(0, 0, 0);
+    },
+    async pushBackActor(id, to) {
+      const a = actorPuppet(id);
+      if (!a) return;
+      const from = a.puppet.group.position.clone();
+      const end = mapView.tileTop(to.x, to.z);
+      const white = new THREE.Color(0xffffff);
+      await tweens.play(0.45, (t) => {
+        const k = easeOutCubic(t);
+        a.puppet.group.position.set(from.x + (end.x - from.x) * k, from.y + (end.y - from.y) * k + Math.sin(Math.PI * t) * 0.08, from.z + (end.z - from.z) * k);
+        a.puppet.setGlow(white, 0.5 * (1 - t));
+        a.puppet.setPose?.({ bow: -0.2 * Math.sin(Math.PI * t) });
+      });
+      a.puppet.setPose?.({});
+      a.puppet.setGlow(white, 0);
+      a.puppet.group.position.copy(end);
+      a.coord = { x: to.x, z: to.z };
     },
     async putProp(name, model, c) {
       props.get(name)?.group.removeFromParent();
@@ -822,6 +964,18 @@ export function createBattleView(options: {
       mapView.setOverlays([]);
     },
   };
+}
+
+/** 退場する時に向かう向き: いちばん近いマップの端の方 */
+function exitDirection(c: Coord, width: number, depth: number): Direction {
+  const d: [Direction, number][] = [
+    ['west', c.x],
+    ['east', width - 1 - c.x],
+    ['north', c.z],
+    ['south', depth - 1 - c.z],
+  ];
+  d.sort((a, b) => a[1] - b[1]);
+  return d[0]![0];
 }
 
 /** 足もとの、陣営の色の輪 */

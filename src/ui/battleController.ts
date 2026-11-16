@@ -9,6 +9,7 @@ import type {
   SpellElement,
   SpellTarget,
   UnitState,
+  UnitKind,
 } from '../core/battleTypes';
 import { attackableTargets, attackRangeTiles, previewAttack, strikeOf, weaponFits, type AttackPreview } from '../core/combat';
 import { isSilencedFor, mpCostOf, passiveIdOf, statusBlocker } from '../core/effects';
@@ -53,9 +54,9 @@ export interface BattleViewPort {
   animateKnockback(event: Extract<BattleEvent, { type: 'knockedBack' }>, onImpact: () => void): Promise<void>;
   animateCast(event: Extract<BattleEvent, { type: 'castStarted' }>, element: SpellElement): Promise<void>;
   animateSpell(event: Extract<BattleEvent, { type: 'spellResolved' }>, onImpact: () => void): Promise<void>;
-  animateDefeat(unitId: string): Promise<void>;
+  animateDefeat(unitId: string, kind?: UnitKind): Promise<void>;
   /** 戦闘不能のカウントが 0 になって退場する */
-  animateRetire(unitId: string): Promise<void>;
+  animateRetire(unitId: string, kind?: UnitKind): Promise<void>;
   /** 蘇生で立ち上がる */
   animateRevive(unitId: string): Promise<void>;
   /** 戦闘の間ずっと出しておく目印（到達するマス・増援の予告・見えている罠） */
@@ -262,7 +263,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
   const syncKnockoutLabels = () => {
     for (const u of state.units) {
       if (u.retired) labels.setKnockout(u.id, null, true);
-      else labels.setKnockout(u.id, isKnockedOut(u) ? u.knockoutCount : null);
+      else labels.setKnockout(u.id, isKnockedOut(u) ? u.knockoutCount : null, false, Boolean(u.noRetire));
     }
   };
 
@@ -848,26 +849,31 @@ export function createBattleController(start: ActionResult, deps: BattleControll
           showReserved();
           await view.wait(0.4);
           break;
-        case 'defeated':
-          // 戦闘不能: 倒れた姿でマスに残り、頭上に残りのカウントを出す
+        case 'defeated': {
+          // 戦闘不能（戦闘で人は死なない決まり）: 人は膝をついてマスに残り、頭上に残りのカウントを出す（退場しないユニットは「膝」）
+          const u = getUnit(state, ev.unitId);
           labels.setStatuses(ev.unitId, []);
           labels.popText(ev.unitId, TEXT.knockout.down);
-          await view.animateDefeat(ev.unitId);
-          labels.setKnockout(ev.unitId, ev.count);
+          await view.animateDefeat(ev.unitId, u.kind);
+          if (ev.count > 0 || u.noRetire) labels.setKnockout(ev.unitId, ev.count, false, Boolean(u.noRetire));
           break;
+        }
         case 'knockoutCounted':
-          labels.setKnockout(ev.unitId, ev.count);
+          // 0 になった時は、すぐ後の退場で札ごと消す（退く動きの間に「退 0」を出さない）
+          if (ev.count > 0) labels.setKnockout(ev.unitId, ev.count);
           if (ev.count > 0) {
             labels.popText(ev.unitId, TEXT.knockout.count(ev.count));
             await view.wait(0.3);
           }
           break;
-        case 'retired':
-          await view.focusTiles([getUnit(state, ev.unitId)]);
-          labels.popText(ev.unitId, TEXT.knockout.retired);
-          await view.animateRetire(ev.unitId);
+        case 'retired': {
+          const u = getUnit(state, ev.unitId);
+          await view.focusTiles([u]);
+          labels.popText(ev.unitId, TEXT.knockout.retiredByKind[u.kind] ?? TEXT.knockout.retired);
+          await view.animateRetire(ev.unitId, u.kind);
           labels.setKnockout(ev.unitId, null, true);
           break;
+        }
         case 'revived': {
           const u = getUnit(state, ev.unitId);
           labels.setKnockout(ev.unitId, null);
@@ -931,6 +937,17 @@ export function createBattleController(start: ActionResult, deps: BattleControll
         {
           const c = state.scenario.objectives.victory.find((v) => v.kind === 'hitUnit' && v.id === ev.id);
           if (c?.kind === 'hitUnit') labels.popText(c.unitId, TEXT.objectives.tallyPop(ev.count, ev.times), 'reaction');
+        }
+          showScenario();
+          await view.wait(0.35);
+          break;
+        case 'tallyBlocked':
+        {
+          // 最後の一撃を当てられるのは決めたユニットだけ（序章の丘）: 理由を短く出す
+          const c = state.scenario.objectives.victory.find((v) => v.kind === 'hitUnit' && v.id === ev.id);
+          const finisher = getUnit(state, ev.finisherId);
+          if (c?.kind === 'hitUnit') labels.popText(c.unitId, TEXT.objectives.finisherPop(unitName(finisher.id, finisher.jobId)));
+          hud.showMessage(TEXT.objectives.finisherMessage(unitName(finisher.id, finisher.jobId)));
         }
           showScenario();
           await view.wait(0.35);

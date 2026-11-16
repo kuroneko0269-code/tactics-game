@@ -25,6 +25,7 @@ export const TEXT = {
     'stage-yard': '野外',
     'stage-home': 'トウマの家',
     'stage-tower': '暦の塔',
+    'stage-hearing': '話を聞く部屋',
     'stage-city': '都',
     'stage-weir': '谷の外れの堰',
     'stage-hill': 'アスタルの丘',
@@ -135,8 +136,8 @@ export const TEXT = {
     notes: 'ほか',
     /** 常に出す短い文の先頭 */
     summaryVictory: (text: string) => `勝利: ${text}`,
-    defeatAll: '敵の全滅',
-    defeatUnit: (name: string) => `${name}の撃破`,
+    defeatAll: '敵をすべて退ける',
+    defeatUnit: (name: string) => `${name}を退ける`,
     reachTile: '味方のだれかが光る輪のマスに到達',
     reachTileShort: '光る輪のマスに到達',
     surviveTurns: (n: number) => `${n}手番を耐える`,
@@ -151,10 +152,16 @@ export const TEXT = {
     tallyPop: (count: number, times: number) => `${Math.min(count, times)} / ${times}`,
     /** 対象物の情報の欄の札 */
     objectTag: '◆ 壊す物',
-    /** 倒れないユニットの情報の欄の札（序章に足りない仕組み） */
-    unbreakableTag: '◇ 倒れない（HP は一定より下がらない）',
-    allDefeated: '味方の全滅',
-    unitDefeated: (name: string) => `${name}が倒れる`,
+    /** HP の尽きないユニットの情報の欄の札（序章に足りない仕組み） */
+    unbreakableTag: '◇ HP が尽きない（一定より下がらない）',
+    /** 最後の1回を当てられるユニットが決まっている時（序章の丘の誓いの剣。PR の回答 4） */
+    finisherNote: (name: string) => `。最後の一撃は${name}だけが当てられる（剣を折るのは、${name}の務め）`,
+    finisherShort: (name: string) => `（最後は${name}）`,
+    /** ほかの仲間が最後の1回を当てた時に、頭上と画面の上に出す理由 */
+    finisherPop: (name: string) => `最後は${name}`,
+    finisherMessage: (name: string) => `剣を折る最後の一撃は、${name}の務め（ほかの仲間の攻撃では回数が進まない）`,
+    allDefeated: '味方が全員戦闘不能になる',
+    unitDefeated: (name: string) => `${name}が戦闘不能になる`,
     turnLimit: (n: number) => `${n}手番を過ぎる`,
     /** 手番数の条件の残り（今の手番を含む） */
     turnsLeft: (n: number) => `残り ${n} 手番`,
@@ -162,12 +169,14 @@ export const TEXT = {
     reinforcement: (count: number, after: number) =>
       after <= 0 ? `増援 ${count} 体: この手番の後に現れる（赤い枠のマス）` : `増援 ${count} 体: ${after} 手番後に現れる（赤い枠のマス）`,
     reinforcementShort: (after: number) => (after <= 0 ? '増援 まもなく' : `増援 あと ${after} 手番`),
-    /** 撃破の対象の敵の情報の欄に出す札 */
-    targetTag: '★ 撃破の対象',
+    /** 退ける対象の敵の情報の欄に出す札 */
+    targetTag: '★ 退ける対象',
     /** 頭上の札 */
     targetBadge: '★',
-    /** 敵の全滅は常に勝利、味方の全滅は常に敗北 */
-    alwaysNote: '敵が全滅しても勝利、味方が全滅すると敗北です',
+    /** 敵をすべて退ければ常に勝利、味方が全員戦闘不能なら常に敗北 */
+    alwaysNote: '敵をすべて退けても勝利、味方が全員戦闘不能になると敗北です',
+    /** 敵をすべて退けても勝ちにならない戦闘（序章の堰） */
+    alwaysNoteNoWipe: '敵をすべて退けても、勝利の条件を満たすまで続きます。味方が全員戦闘不能になると敗北です',
     /** 膠着（フェーズ2-6） */
     stalemate: (n: number) => `膠着まで残り ${n} 手番（ダメージ・回復・状態変化がないまま過ぎると、HP の割合が高い側の勝ち）`,
     stalemateShort: (n: number) => `膠着まで ${n} 手番`,
@@ -646,7 +655,7 @@ export const TEXT = {
     chooseAbility: (mp: number, maxMp: number) => (maxMp > 0 ? `使うものを選ぶ（残り MP ${mp} / ${maxMp}）` : '使うものを選ぶ'),
     chooseStrikeTarget: (name: string) => `「${name}」: 赤く光る敵をタップ`,
     chooseSpellTarget: '紫のマスから、狙う場所をタップ',
-    chooseReviveTarget: '射程の中の、倒れているユニットをタップ',
+    chooseReviveTarget: '射程の中の、戦闘不能のユニットをタップ',
     chooseAllyTarget: '射程の中の味方をタップ',
     chooseEnemyTarget: '射程の中の敵をタップ',
     chooseTargetKind: 'ユニットを追いかけて狙うか、そのマスに撃つかを選ぶ',
@@ -699,15 +708,20 @@ export const TEXT = {
   /** 戦闘不能（フェーズ2-5） */
   knockout: {
     /** 頭上の札（残りのカウント） */
-    badge: (count: number) => `倒 ${count}`,
+    badge: (count: number) => `退 ${count}`,
+    /** 退場しないユニットの頭上の札（戦闘で人は死なない決まり） */
+    badgeStay: '膝',
     badgeTitle: '戦闘不能（数字は退場までの残りのカウント）',
     /** 情報の欄 */
-    info: (count: number) => `戦闘不能: 残りカウント ${count}（0 で退場。それまでなら蘇生できる）`,
+    info: (count: number) => `戦闘不能: 残りカウント ${count}（0 で戦場から退く。それまでなら蘇生できる）`,
+    infoStay: '戦闘不能（この戦闘では退場しない。蘇生できる）',
     retiredInfo: '退場（この戦闘では蘇生できません）',
     /** 浮かぶ文言 */
     down: '戦闘不能',
     count: (count: number) => `カウント ${count}`,
     retired: '退場',
+    /** 種類ごとの、退場の時に浮かぶ文言（戦闘で人は死なない決まり） */
+    retiredByKind: { human: '退場', beast: '退いた', shade: '石に戻った' } as Readonly<Record<string, string>>,
     revived: '復帰！',
   },
   /** ジョブのマスター（フェーズ2-5） */
@@ -751,7 +765,7 @@ export const TEXT = {
   abilityBlocked: {
     weapon: (weapon: string) => `${weapon}が必要`,
     silence: '沈黙中',
-    noDowned: '倒れた味方なし',
+    noDowned: '戦闘不能の味方なし',
   },
 
   preview: {
@@ -773,7 +787,7 @@ export const TEXT = {
     knockbackTo: (fall: number) => (fall > 0 ? `光る先へ押し出す（落下 ${fall}）` : '光る先へ押し出す'),
     knockbackBlocked: (reason: string, damage: number) => `押し出せない（${reason}）。追加 ${damage}`,
     knockbackReasons: { edge: 'マップの端', unit: 'ユニットがいる', cliff: '高い段差' } as Readonly<Record<string, string>>,
-    /** 当たって倒れない時の合計 */
+    /** 当たって HP が尽きない時の合計 */
     total: (damage: number, hp: number) => `合計 ${damage}（HP → ${hp}）`,
     inflicts: (status: string) => `当たると${status}を付ける`,
     /** 相手の装備で状態変化を防がれる時 */
@@ -781,7 +795,7 @@ export const TEXT = {
     interrupts: '当たると詠唱を中断させる',
     counter: '反撃あり',
     counterDetail: (damage: number, hit: number) => `受ける見込み ${damage}（命中 ${hit}%）`,
-    counterNote: '当たって相手が倒れなければ',
+    counterNote: '当たって相手の HP が尽きなければ',
     /** 斬り分けで巻き込む敵（フェーズ2-6） */
     sweepLabel: '巻き込む',
     sweepTarget: (name: string, damage: number, hit: number) => `${name} ${damage}（命中 ${hit}%）`,

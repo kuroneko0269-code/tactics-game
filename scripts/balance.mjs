@@ -623,10 +623,47 @@ async function main() {
       const minutes = runs.map(minutesOf);
       const playerTurns = runs.map((r) => r.events.filter((e) => e.type === 'turnStarted' && r.state.units.find((u) => u.id === e.unitId)?.team === 'player').length);
       const ko = avg(runs.map((r) => r.state.units.filter((u) => u.team === 'player' && u.hp <= 0).length));
+      const enemyKo = avg(runs.map((r) => r.state.units.filter((u) => u.team === 'enemy' && u.hp <= 0).length));
+      const blocked = avg(runs.map((r) => r.events.filter((e) => e.type === 'tallyBlocked').length));
       console.log(
         `  ${site.id}: 勝率 ${pct(wins, runs.length)}、未決着 ${runs.filter((r) => !r.state.winner).length}、手番数 平均 ${avg(turns).toFixed(1)}（最大 ${Math.max(...turns)}）、` +
-          `味方の手番 平均 ${avg(playerTurns).toFixed(1)}、見込み時間 平均 ${avg(minutes).toFixed(1)}分（最大 ${Math.max(...minutes).toFixed(1)}分）、戦闘不能の味方 平均 ${ko.toFixed(2)}人`,
+          `味方の手番 平均 ${avg(playerTurns).toFixed(1)}、見込み時間 平均 ${avg(minutes).toFixed(1)}分（最大 ${Math.max(...minutes).toFixed(1)}分）、戦闘不能の味方 平均 ${ko.toFixed(2)}人、` +
+          `戦闘不能の敵 平均 ${enemyKo.toFixed(2)}人、最後の一撃をトウマ以外が当てた回数 平均 ${blocked.toFixed(2)}`,
       );
+      // 堰: 番兵を先にすべて退けてから堰を崩す遊び方（番兵は HP が尽きると膝をつき、退場しない。番兵をすべて退けても勝ちにはならない）
+      if (site.objectives?.defeatAllWins === false) {
+        const both = [];
+        for (let k = 0; k < BATTLES; k++) {
+          const setup = buildSortie(site, 'main', prologueParty, catalog);
+          const start = startBattle(setup, jobs, battleRules, FIRST_SEED + k, spells, strikes, passives).state;
+          // 前半: 番兵だけを狙う（勝利条件を外して AI を動かし、番兵がすべて戦闘不能になったら止める）
+          const real = start.scenario.objectives;
+          let cur = { ...start, scenario: { ...start.scenario, objectives: { victory: [], defeat: real.defeat, defeatAllWins: false } } };
+          const evs = [];
+          const guardsUp = (st) => st.units.some((u) => u.team === 'enemy' && u.hp > 0);
+          while (cur.turn && guardsUp(cur) && cur.turnNumber < 2000) {
+            const r = runAutoBattle(cur, cur.turnNumber, { player: aiConfig, enemy: aiConfig });
+            evs.push(...r.events);
+            cur = r.state;
+          }
+          if (!cur.turn) {
+            both.push({ state: cur, events: evs, guardsDown: false });
+            continue;
+          }
+          // 後半: 本来の勝利条件に戻して、堰を崩す
+          const rest = runAutoBattle({ ...cur, scenario: { ...cur.scenario, objectives: real } }, 2000, { player: aiConfig, enemy: aiConfig });
+          both.push({ state: rest.state, events: [...evs, ...rest.events], guardsDown: true });
+        }
+        const w = both.filter((r) => r.state.winner === 'player').length;
+        const t = both.map((r) => r.state.turnNumber);
+        const m = both.map(minutesOf);
+        const stay = both.every((r) => r.state.units.filter((u) => u.team === 'enemy').every((u) => !u.retired));
+        console.log(
+          `  ${site.id}（番兵を先にすべて退けてから堰を崩す）: 勝率 ${pct(w, both.length)}、番兵をすべて退けた ${both.filter((r) => r.guardsDown).length}/${both.length}、` +
+            `手番数 平均 ${avg(t).toFixed(1)}（最大 ${Math.max(...t)}）、見込み時間 平均 ${avg(m).toFixed(1)}分（最大 ${Math.max(...m).toFixed(1)}分）、` +
+            `戦闘不能の味方 平均 ${avg(both.map((r) => r.state.units.filter((u) => u.team === 'player' && u.hp <= 0).length)).toFixed(2)}人、番兵は最後までマスに残った ${stay ? 'はい' : 'いいえ'}`,
+        );
+      }
     }
   }
   if (PROLOGUE_ONLY) {

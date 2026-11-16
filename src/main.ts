@@ -887,6 +887,19 @@ function main(): void {
           if (id) await view.vanish(id);
           return;
         }
+        // 攻撃の動きと押し返し（序章の丘の始めの演出。見た目だけで、戦闘の状態は変えない）
+        case 'strike': {
+          const a = battleActorId(d.actor);
+          const b = battleActorId(d.target);
+          if (a && b) await view.strikeActor(a, b, d.outcome, () => sound.effect(d.outcome === 'hit' ? 'hit' : 'miss'));
+          return;
+        }
+        case 'pushBack': {
+          const id = battleActorId(d.actor);
+          const u = id ? battle?.controller?.state.units.find((x) => x.id === id) : undefined;
+          if (id && u) await view.pushBackActor(id, u);
+          return;
+        }
         case 'light': {
           const actor = d.actor ? battleActorId(d.actor) : undefined;
           const color = LIGHT_COLORS[d.color] ?? 0xffffff;
@@ -928,6 +941,9 @@ function main(): void {
       persist();
     }
   };
+
+  /** 今の会話の場面の会話用マップの id（自動テスト用） */
+  let currentStageId: string | null = null;
 
   /** 題名の画面 */
   const showTitle = () => {
@@ -988,6 +1004,7 @@ function main(): void {
       endScene();
       const stageDef = stages.find((st) => st.id === scene.stageId);
       if (!stageDef) throw new Error(`会話の場面のマップ ${scene.stageId} が見つかりません`);
+      currentStageId = stageDef.id;
       useMap(stageDef.map);
       setScreen('scene');
       rig.reset();
@@ -1222,6 +1239,15 @@ function main(): void {
       tileScreen: (x: number, z: number) => v().tileScreenPosition(x, z),
       tilePoints: (x: number, z: number) => v().tileScreenPoints(x, z),
       unitScreen: (id: string) => v().unitScreenPosition(id),
+      /** ユニットの見た目の様子（膝をついているか、見た目の上でいるマス。戦闘で人は死なない決まり） */
+      unitPose: (id: string) => battle?.view?.poseOf(id) ?? null,
+      /** マスの上面の中央の、3D の世界の位置 */
+      tileWorld: (x: number, z: number) => {
+        const p = mapView.tileTop(x, z);
+        return { x: p.x, z: p.z };
+      },
+      /** 今の会話の場面の会話用マップの id */
+      sceneStage: () => currentStageId,
       /** その点をタップした時の、選ぶマスの候補（優先する順。tapJudge.ts） */
       candidatesAt: (x: number, y: number) => candidatesAt(x, y),
       /** その点の下にある物のマス（手前から順。判定の規則を通す前） */

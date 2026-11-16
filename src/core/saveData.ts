@@ -24,6 +24,9 @@
  * - 版 6（物語の土台）: 物語の進み具合（story。本ごとの章と場面の番号）と、途中の戦闘の出どころ「物語の戦闘」を追加。
  *   マップ上のイベントの「短いメッセージ」を「会話」に置き換えたので、途中の戦闘の中のイベントも直す（文の id がそのまま台本の id）。
  *   版 5 のデータは「物語はまだ始めていない」として直す。
+ * - 版 7（戦闘で人は死なない決まり）: 途中の戦闘のユニットに種類（kind。人・影・獣・物）を足した。
+ *   序章の場面の並びを変えた（話を聞く部屋を別の場面に分けた）ので、本編の序章の場面の番号を付け替える。
+ *   途中の戦闘が物語の戦闘なら捨てる（堰の番兵の決まりが変わったため。その戦闘の始めからやり直す）。
  */
 import type { BattleState, EquipmentDefinition } from './battleTypes';
 import type { DungeonState } from './dungeon';
@@ -31,7 +34,7 @@ import type { Roster } from './progression';
 import type { StoryProgress } from './story';
 
 /** 今のセーブデータの版 */
-export const SAVE_VERSION = 6;
+export const SAVE_VERSION = 7;
 
 /** 途中の戦闘が、どこの戦闘か（訓練戦の段階か、ダンジョンの何戦目か） */
 export type BattleOrigin =
@@ -166,7 +169,43 @@ export const SAVE_MIGRATIONS: SaveMigrations = {
     }
     return { ...old, version: 6, battle, story: {} };
   },
+  /**
+   * 版 6 → 7: 途中の戦闘のユニットに種類を足す（対象物は物、ほかは人）。物語の途中の戦闘は捨てる。
+   * 本編の序章の場面の番号を、新しい並びに付け替える
+   */
+  6: (old) => {
+    let battle = old.battle as unknown;
+    if (typeof battle === 'object' && battle !== null) {
+      const b = JSON.parse(JSON.stringify(battle)) as { origin?: { kind?: string }; state?: { units?: unknown } };
+      if (b.origin?.kind === 'story') battle = null;
+      else {
+        if (b.state && Array.isArray(b.state.units)) {
+          b.state.units = b.state.units.map((raw: unknown) => {
+            const u = raw as Record<string, unknown>;
+            if (typeof u !== 'object' || u === null) return u;
+            return { ...u, kind: u.object ? 'object' : 'human' };
+          });
+        }
+        battle = b;
+      }
+    }
+    let story = old.story as unknown;
+    if (typeof story === 'object' && story !== null) {
+      const main = (story as Record<string, unknown>).main as Record<string, unknown> | undefined;
+      if (main && typeof main === 'object' && main.chapter === 0 && Number.isInteger(main.scene)) {
+        const scene = PROLOGUE_SCENES_V6_TO_V7[main.scene as number];
+        story = { ...(story as Record<string, unknown>), main: { ...main, scene: scene ?? 0 } };
+      }
+    }
+    return { ...old, version: 7, battle, story };
+  },
 };
+
+/**
+ * 版 6 の序章の場面の番号 → 版 7 の番号。版 6 は 12 の場面（冒頭・堰の会話・堰の戦闘・塔・家・都・門・丘の会話・丘の戦闘・帰還・道・物置）。
+ * 版 7 で、塔を「門の脇・話を聞く部屋・広間」に、帰還を「門の脇・話を聞く部屋」に分けた
+ */
+const PROLOGUE_SCENES_V6_TO_V7: readonly number[] = [0, 1, 2, 3, 6, 7, 8, 9, 10, 11, 13, 14];
 
 export function createSaveData(
   roster: Roster,

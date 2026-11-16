@@ -4,6 +4,7 @@
  */
 import { applyAction } from './battle';
 import type {
+  UnitKind,
   ActionResult,
   BattleAction,
   BattleRules,
@@ -424,6 +425,10 @@ export interface TestUnit {
   /** 最後に手番が始まった時の HP（省くと今の HP） */
   turnStartHp?: number;
   endureUsed?: boolean;
+  /** ユニットの種類（省くと人） */
+  kind?: UnitKind;
+  /** 退場しない */
+  noRetire?: true;
 }
 
 /** 平らなマップ（すべて高さ 0） */
@@ -489,6 +494,8 @@ export function makeState(options: {
       movedLastTurn: u.movedLastTurn ?? false,
       turnStartHp: u.turnStartHp ?? u.hp ?? job.stats.maxHp,
       endureUsed: u.endureUsed ?? false,
+      kind: u.kind ?? 'human',
+      ...(u.noRetire ? { noRetire: true as const } : {}),
     };
   });
   const active = units.find((u) => u.id === (options.activeId ?? units[0]?.id));

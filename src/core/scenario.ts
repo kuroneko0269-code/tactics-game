@@ -51,7 +51,7 @@ export function judgeOutcome(state: BattleState): Outcome | null {
     return u !== undefined && !isAlive(u);
   };
   // 勝利（敵の全滅は、書いていなくても勝利）
-  if (!alive('enemy')) return { winner: 'player', reason: 'defeatAll' };
+  if (state.scenario.objectives.defeatAllWins !== false && !alive('enemy')) return { winner: 'player', reason: 'defeatAll' };
   for (const c of victory) {
     if (c.kind === 'defeatUnit' && isDown(c.unitId)) return { winner: 'player', reason: c.kind };
     if (c.kind === 'destroyObjects' && c.unitIds.every((id) => isDown(id))) return { winner: 'player', reason: c.kind };
