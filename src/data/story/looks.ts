@@ -76,6 +76,20 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
   yelma: { body: 0xe4e4e8, accent: 0x8a8a96, hair: 0xc8c8d8, hairStyle: 'long', scale: 1.1, robe: true, legs: 0xc8c8d0 },
   /** ハルド: がっしり、刈り込んだ灰茶の髪、時守の濃紺に銀の留め具 */
   hald: { body: NAVY, accent: 0xc0c8d8, hair: 0x7a6a5a, hairStyle: 'cropped', width: 1.16, scale: 1.04, robe: true },
+  /** トウマ（ユナの灯を受け取った後）: 腰に真鍮の灯 */
+  toumaLamp: {
+    body: NAVY,
+    accent: 0x5fd0e0,
+    hair: 0x15151a,
+    hairStyle: 'short',
+    width: 0.92,
+    weapon: 'sword',
+    robe: true,
+    legs: 0x2a2a30,
+    items: [{ model: 'lampSmall', slot: 'waist' }],
+  },
+  /** ガレス（丘。誓いの剣を手に持つ。折れると「折れた剣」に持ち替える） */
+  garethOath: { body: 0xa8403a, accent: 0xc9a24a, hair: 0xc8a85a, hairStyle: 'short', hat: 'helm', scale: 1.12, width: 1.15, items: [{ model: 'sword', slot: 'hand' }] },
   /** ガレス（丘。二十歳過ぎ）: 長身で肩幅が広い、くすんだ金髪、色あせた緋。古い剣と兜 */
   gareth: { body: 0xa8403a, accent: 0xc9a24a, hair: 0xc8a85a, hairStyle: 'short', hat: 'helm', scale: 1.12, width: 1.15, weapon: 'sword' },
   /** 母（仮） */
@@ -92,6 +106,8 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
   vendor: { body: 0xc8a030, accent: 0xa02a2a, hair: 0x3a2a1a, hairStyle: 'short', hat: 'cap' },
   /** 堰の番兵（仮）。槍 */
   guard: { body: 0x6a6a5a, accent: 0x9a8a5a, hat: 'helm', weapon: 'spear' },
+  /** 堰の番兵（仮）。弓 */
+  guardBow: { body: 0x6a6a5a, accent: 0x9a8a5a, hat: 'hood', weapon: 'bow' },
   /** 丘の衛士（仮）。氏族の兵 */
   sentinel: { body: 0x7a4a3a, accent: 0xc8b890, hat: 'helm', weapon: 'spear' },
   /** 堰を積む男たち・氏族の人々・都の人（仮。色違い） */
@@ -101,7 +117,7 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
   clanC: { body: 0x6a4a6a, accent: 0xe0d0a0, hair: 0x1a1a1a, hairStyle: 'braid' },
   clanD: { body: 0x9a7a4a, accent: 0x5a3a2a, hair: 0x6a4a2a, hairStyle: 'cropped', width: 1.1 },
   townsman: { body: 0x7a6a5a, accent: 0xd8c8a8, hair: 0x3a3028, hairStyle: 'short' },
-  // ---- 試しの場面の人物 ----
+  // ---- 物語の土台の試しの場面の人物（今は使っていない） ----
   instructor: { body: 0x4a5a7a, accent: 0xf2c14e, hair: 0x8a8a8a, hairStyle: 'short' },
   apprentice: { body: 0x7a9a5a, accent: 0xe8d8b0, hair: 0x5a3a20, hairStyle: 'messy' },
 };

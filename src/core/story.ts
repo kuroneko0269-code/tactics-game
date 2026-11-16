@@ -32,7 +32,7 @@ export interface ChapterDefinition {
   readonly scenes: readonly SceneDefinition[];
 }
 
-/** 物語（本）。本編と、仕組みを確かめる試しの場面を、別の本として持つ */
+/** 物語（本）。今は本編の1つだけ（物語の土台では、仕組みを確かめる試しの場面も別の本として持っていた） */
 export interface BookDefinition {
   readonly id: string;
   readonly chapters: readonly ChapterDefinition[];

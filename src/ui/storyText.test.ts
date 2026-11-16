@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { MELODIES, SOUND_EFFECTS } from '../data/sounds';
-import { trialWeirBattle } from '../data/battles/trialWeir';
+import { prologueBattles } from '../data/battles/prologue';
 import { melodyNotes, noteFrequency } from './sound';
+import { parseScriptOrThrow } from '../core/script';
+import { scriptTexts } from '../data/story/scripts';
+import { scriptCatalog } from '../data/story/stageDefs';
 import { TEXT } from './text';
 
 /** 序章に足りない仕組み（PR A）: 旋律の読み方と、画面に出す文の対応 */
@@ -26,8 +29,27 @@ describe('音と手ほどきの文', () => {
   });
 
   it('手ほどきの段には、すべて文がある。画面にも出す効果音の印は、ある効果音', () => {
-    for (const site of [trialWeirBattle]) for (const step of site.tutorial ?? []) expect(TEXT.tutorial.steps[step.id], step.id).toBeDefined();
+    for (const site of prologueBattles) for (const step of site.tutorial ?? []) expect(TEXT.tutorial.steps[step.id], step.id).toBeDefined();
     const ids = new Set(Object.values(SOUND_EFFECTS));
     for (const id of Object.keys(TEXT.sound.effectMarks)) expect(ids.has(id as never), id).toBe(true);
+  });
+});
+
+describe('戦闘の台本の人物', () => {
+  it('戦闘中の会話と戦闘の後の台本の人物の名前は、戦場の cast か部隊の人物の名前で引ける', () => {
+    for (const site of prologueBattles) {
+      const ids = [...(site.events ?? []).flatMap((e) => e.effects.flatMap((x) => (x.kind === 'dialogue' ? [x.scriptId] : []))), ...(site.afterVictory ? [site.afterVictory] : [])];
+      const names = new Set([...Object.keys(site.cast ?? {}), ...Object.values(TEXT.unitNames)]);
+      for (const id of ids) {
+        const script = parseScriptOrThrow(id, scriptTexts[id]!, scriptCatalog);
+        for (const step of script.steps) {
+          for (const d of step.kind === 'line' ? step.directives : [step.directive]) {
+            const actor = 'actor' in d ? d.actor : undefined;
+            if (actor && d.kind !== 'light') expect(names.has(actor), `${id} ${step.line}行目 ${actor}`).toBe(true);
+            if (d.kind === 'light' && d.actor) expect(names.has(d.actor), `${id} ${step.line}行目 ${d.actor}`).toBe(true);
+          }
+        }
+      }
+    }
   });
 });

@@ -66,8 +66,23 @@ export const GESTURES: Readonly<Record<string, GestureDefinition>> = {
   // ---- 序章に足りない仕組みで足した仕草 ----
   深く会釈する: { seconds: 1.3, frames: [{ t: 0 }, { t: 0.35, bow: 0.85, head: 0.3 }, { t: 0.7, bow: 0.85, head: 0.3 }, { t: 1 }] },
   首をかしげる: { seconds: 1.1, frames: [{ t: 0 }, { t: 0.3, tilt: 0.38 }, { t: 0.75, tilt: 0.38 }, { t: 1 }] },
-  /** 作業台や灯の底を指で三度叩く（節の終わりの三つの音に合わせる。叩く間は 0.4 秒ほど） */
-  三度叩く: { seconds: 1.5, frames: repeat(3, { armR: 0.75, bow: 0.12, head: 0.25 }, { armR: 0.55 }, 0.1, 0.92) },
+  /**
+   * 作業台や灯の底を指で三度叩く（節の終わりの三つの音に合わせる）。今の姿勢から手を下ろして叩く。
+   * 叩く時刻は 0.05・0.47・0.89 秒（ユナの節の1拍 0.42 秒ごと）。「@節を待つ 3」の直後に書くと、終わりの三つの音と重なる
+   */
+  三度叩く: {
+    seconds: 1.3,
+    frames: [
+      { t: 0 },
+      { t: 0.04, armR: -0.3 },
+      { t: 0.18 },
+      { t: 0.36, armR: -0.3 },
+      { t: 0.5 },
+      { t: 0.68, armR: -0.3 },
+      { t: 0.82 },
+      { t: 1 },
+    ],
+  },
   /** 箸や指で人を指す */
   指さす: { seconds: 1.0, frames: [{ t: 0 }, { t: 0.25, armR: 1.55 }, { t: 0.75, armR: 1.55 }, { t: 1 }] },
   /** 隣の人の背をさする */
@@ -109,6 +124,8 @@ export const GESTURES: Readonly<Record<string, GestureDefinition>> = {
  */
 export const POSTURES: Readonly<Record<string, GesturePose>> = {
   座る: { drop: 0.2, armL: 0.6, armR: 0.6 },
+  /** 作業台に向かって手を動かしている（三度叩くは、この姿勢から叩く） */
+  作業する: { armR: 0.8, armL: 0.7, bow: 0.15, head: 0.35 },
   膝をついたまま: { drop: 0.22, bow: 0.3 },
   うつむいたまま: { head: 0.6, bow: 0.1 },
   背を丸める: { bow: 0.3, head: 0.2 },
@@ -124,6 +141,7 @@ export const PROP_KINDS: Readonly<Record<string, string>> = {
   箱: 'box',
   瓦礫: 'rubble',
   木箱: 'crate',
+  合わせ目: 'seam',
   // 持ち物（人物の手・腰・背に付ける小さな物）
   測り棒: 'measuringRod',
   小さな灯: 'lampSmall',
@@ -140,6 +158,42 @@ export const PROP_KINDS: Readonly<Record<string, string>> = {
   槍: 'spear',
   小刀: 'knife',
   箒: 'broom',
+  // 序章の物（序章の PR B）
+  食卓: 'diningTable',
+  腰掛け: 'stool',
+  作業台: 'workbench',
+  道具: 'tools',
+  小さな暦盤: 'calendarSmall',
+  壁の暦盤: 'calendarWall',
+  円卓: 'roundTable',
+  門の輪: 'gateRing',
+  書き物机: 'desk',
+  戸: 'door',
+  樽: 'barrel',
+  ほこり: 'dust',
+  箸立て: 'chopstickJar',
+  パン屋の店先: 'bakeryStall',
+  薬屋の棚: 'apothecaryShelf',
+  薬研: 'grinder',
+  露店: 'stoneStall',
+  家: 'house',
+  灯のともる家: 'houseLit',
+  積み石: 'stonePile',
+  旗: 'banner',
+  青い旗: 'banner2',
+  祭壇: 'altar',
+  木: 'tree',
+  卓の椀1: 'tableBowl1',
+  卓の椀2: 'tableBowl2',
+  卓の椀3: 'tableBowl3',
+  卓の椀4: 'tableBowl4',
+  卓の箸1: 'tableChopsticks1',
+  卓の箸2: 'tableChopsticks2',
+  卓の箸3: 'tableChopsticks3',
+  卓の箸4: 'tableChopsticks4',
+  台の道具: 'benchTools',
+  台の暦盤: 'benchCalendar',
+  台の灯: 'benchLamp',
 };
 
 /**
@@ -164,6 +218,22 @@ export const ACTOR_LOOKS: Readonly<Record<string, string>> = {
   老婆: 'apothecary',
   売り子: 'vendor',
   番兵: 'guard',
+  番兵A: 'guard',
+  番兵B: 'guardBow',
+  堰の男: 'worker',
+  堰の男B: 'clanD',
+  町の人: 'townsman',
+  町の人B: 'clanB',
+  町の人C: 'clanC',
+  見知らぬ男: 'worker',
+  氏族: 'clanA',
+  氏族B: 'clanB',
+  氏族C: 'clanC',
+  氏族D: 'clanD',
+  氏族E: 'clanB',
+  氏族F: 'clanA',
+  氏族G: 'clanD',
+  氏族H: 'clanC',
   教官: 'instructor',
   見習い: 'apprentice',
 };

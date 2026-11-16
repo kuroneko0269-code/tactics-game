@@ -10,9 +10,18 @@ export interface MelodyDefinition {
   readonly notes: readonly string[];
 }
 
+/**
+ * ユナの節（序章の PR B。仮の節）。ハ長調の五音（ド・レ・ミ・ソ・ラ）だけの、ゆっくりした短い節。
+ * 前半はソで宙に浮いたまま止まり、終わりの三つの音（ミ・レ・ド）で静かに落ち着く。物語を通して何度も使う。
+ */
+const YUNA_BODY = ['E4 1', 'G4 1', 'A4 2', 'G4 1', 'E4 1', 'D4 2', 'E4 1', 'G4 1', 'C5 1', 'A4 1', 'G4 3'];
+const LAST_THREE = ['E4 1', 'D4 1', 'C4 3'];
+
 export const MELODIES: Readonly<Record<string, MelodyDefinition>> = {
-  /** 試しの場面の節（仕組みを確かめるための短い節） */
-  試しの節: { beatSeconds: 0.3, notes: ['C4 1', 'E4 1', 'G4 2', 'E4 1', 'C4 2'] },
+  /** ユナの鼻歌（終わりの三つの音まで）。物置の石も、この節を鳴らす */
+  ユナの節: { beatSeconds: 0.42, notes: [...YUNA_BODY, ...LAST_THREE] },
+  /** 丘の氏族の歌（ユナの節と同じ節で、終わりの三つの音がない） */
+  氏族の歌: { beatSeconds: 0.42, notes: YUNA_BODY },
 };
 
 /** 音色（台本に書く名前 → 合成のしかたの id） */

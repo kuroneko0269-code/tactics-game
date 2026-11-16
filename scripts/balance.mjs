@@ -19,6 +19,7 @@
 //
 // 使い方: npm run balance -- --battles=40 --trained-level=30 --campaign=400
 //         npm run balance -- --dungeon-only     ダンジョンだけ（約1分）
+//         npm run balance -- --prologue         序章の2つの戦闘だけ（数秒）
 //         npm run balance -- --equipment-only   装備だけ（約3分）
 import { createServer } from 'vite';
 
@@ -39,6 +40,8 @@ const CAMPAIGN = Number(args.campaign ?? 400);
 const TIERS_ONLY = args['tiers-only'] === 'true';
 /** ダンジョンだけを見る */
 const DUNGEON_ONLY = args['dungeon-only'] === 'true';
+/** 序章の2つの戦闘だけ（序章の PR B） */
+const PROLOGUE_ONLY = args.prologue === 'true';
 /** 装備だけを見る */
 const EQUIPMENT_ONLY = args['equipment-only'] === 'true';
 /** 「レベル 5 前後の部隊」のレベルと、今のジョブに足す JP（「やさしい」を数回こなした程度） */
@@ -84,6 +87,8 @@ async function main() {
   const { aiConfig } = await load('/src/data/aiConfig.ts');
   const { progressionRules: rules } = await load('/src/data/progression.ts');
   const { initialRoster } = await load('/src/data/roster.ts');
+  const prologueModule = await load('/src/data/battles/prologue/index.ts');
+  const { prologueParty } = await load('/src/data/story/parties.ts');
   const EQ = await load('/src/core/equipment.ts');
   const SHOP = await load('/src/core/shop.ts');
   const catalog = { jobs, spells, strikes, passives, equipment: E.equipment };
@@ -601,6 +606,34 @@ async function main() {
     };
   }
 
+  /** 序章の2つの戦闘（序章の部隊。育てた部隊の強さに左右されない） */
+  function prologueReport() {
+    const { prologueBattles } = prologueModule;
+    console.log('');
+    console.log(`■ 序章の戦闘（序章の部隊。${BATTLES} 戦ずつ。味方も敵と同じ AI）`);
+    for (const site of prologueBattles) {
+      const runs = [];
+      for (let k = 0; k < BATTLES; k++) {
+        const setup = buildSortie(site, 'main', prologueParty, catalog);
+        const start = startBattle(setup, jobs, battleRules, FIRST_SEED + k, spells, strikes, passives).state;
+        runs.push(runAutoBattle(start, 2000, { player: aiConfig, enemy: aiConfig }));
+      }
+      const wins = runs.filter((r) => r.state.winner === 'player').length;
+      const turns = runs.map((r) => r.state.turnNumber);
+      const minutes = runs.map(minutesOf);
+      const playerTurns = runs.map((r) => r.events.filter((e) => e.type === 'turnStarted' && r.state.units.find((u) => u.id === e.unitId)?.team === 'player').length);
+      const ko = avg(runs.map((r) => r.state.units.filter((u) => u.team === 'player' && u.hp <= 0).length));
+      console.log(
+        `  ${site.id}: 勝率 ${pct(wins, runs.length)}、未決着 ${runs.filter((r) => !r.state.winner).length}、手番数 平均 ${avg(turns).toFixed(1)}（最大 ${Math.max(...turns)}）、` +
+          `味方の手番 平均 ${avg(playerTurns).toFixed(1)}、見込み時間 平均 ${avg(minutes).toFixed(1)}分（最大 ${Math.max(...minutes).toFixed(1)}分）、戦闘不能の味方 平均 ${ko.toFixed(2)}人`,
+      );
+    }
+  }
+  if (PROLOGUE_ONLY) {
+    prologueReport();
+    return server.close();
+  }
+
   if (EQUIPMENT_ONLY) {
     equipmentReport();
     return server.close();
@@ -654,6 +687,7 @@ async function main() {
   }
   if (TIERS_ONLY) return server.close();
   dungeonReport();
+  prologueReport();
   equipmentReport();
   jobsReport();
   unlocksReport();

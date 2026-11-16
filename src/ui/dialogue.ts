@@ -355,6 +355,8 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
           waiting = 'title';
           await chapterTitle(d.title, d.subtitle);
         } else if (d.kind === 'walkControl') {
+          // 歩かせる間は枠を隠す（横向きの低い画面で、枠が光るマスを覆わないように）
+          box.hidden = true;
           waiting = 'walk';
           await walkStep(d.actor, d.path);
           if (!skipped) port.sync(applyDirective(stage, d));
