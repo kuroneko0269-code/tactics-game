@@ -29,14 +29,16 @@ export type Directive =
   | { readonly kind: 'exit'; readonly actor: string }
   /** 人物をそのマスへ置き直す（動きなし） */
   | { readonly kind: 'place'; readonly actor: string; readonly x: number; readonly z: number }
-  /** 人物がそのマスへ歩く（縦、横の順に、まっすぐ） */
-  | { readonly kind: 'walk'; readonly actor: string; readonly x: number; readonly z: number }
-  /** 人物の向き（方角か、ほかの人物の方） */
+  /** 人物がそのマスへ歩く（縦、横の順に、まっすぐ）。speed は歩く速さの百分率（100 がふつう。省くと 100） */
+  | { readonly kind: 'walk'; readonly actor: string; readonly x: number; readonly z: number; readonly speed?: number }
+  /** 人物の向き（方角か、ほかの人物・物の方） */
   | { readonly kind: 'face'; readonly actor: string; readonly facing?: Direction; readonly toward?: string }
   /** 仕草（名前で呼び出す短い動き。src/data/story/stageDefs.ts） */
   | { readonly kind: 'gesture'; readonly actor: string; readonly gesture: string; readonly turnAway?: boolean }
-  /** カメラを、マスか人物に向ける */
-  | { readonly kind: 'camera'; readonly x?: number; readonly z?: number; readonly actor?: string; readonly zoom?: CameraZoom }
+  /**
+   * カメラを、マスか人物・物に向ける（actor は人物か物の名前）。ms があれば、その時間をかけてゆっくり動かす
+   */
+  | { readonly kind: 'camera'; readonly x?: number; readonly z?: number; readonly actor?: string; readonly zoom?: CameraZoom; readonly ms?: number }
   /** 暗転（画面を暗くする）と明転（戻す） */
   | { readonly kind: 'fadeOut'; readonly ms: number }
   | { readonly kind: 'fadeIn'; readonly ms: number }
@@ -44,7 +46,11 @@ export type Directive =
   | { readonly kind: 'wait'; readonly ms: number }
   /** 物を置く・消す・別の種類に変える（椀の数が変わる、灯がともる、など） */
   | { readonly kind: 'propPut'; readonly name: string; readonly prop: string; readonly x: number; readonly z: number }
-  | { readonly kind: 'propRemove'; readonly name: string }
+  /**
+   * 物を消す・片付ける。name の終わりが * なら、その前の文字で始まる名前の物をすべて（`椀*` で椀をすべて、`*` で全部）。
+   * actor があれば、その人物が物の方を向いて拾う仕草をしてから消える（片付ける）
+   */
+  | { readonly kind: 'propRemove'; readonly name: string; readonly actor?: string }
   | { readonly kind: 'propChange'; readonly name: string; readonly prop: string }
   /** 操作の場面: 押し続ける（steps 段まで進むと次へ。labelId は手の近くに出す文の id） */
   | { readonly kind: 'hold'; readonly steps: number; readonly label: string }
@@ -65,6 +71,12 @@ export type Directive =
   /** 人物に持ち物を持たせる（slot は 手・左手・腰・背）・外す */
   | { readonly kind: 'carry'; readonly actor: string; readonly item: string; readonly slot: ItemSlot }
   | { readonly kind: 'release'; readonly actor: string; readonly slot: ItemSlot }
+  /** 物を渡す: actor の右手の物を外し、to の slot に付ける（item は渡す物の種類） */
+  | { readonly kind: 'give'; readonly actor: string; readonly to: string; readonly item: string; readonly slot: ItemSlot }
+  /** 話者の名前の札に添える肩書き（「八の席」など）。空の文字で外す。この台本の終わりまで続く */
+  | { readonly kind: 'title'; readonly actor: string; readonly title: string }
+  /** 複数の動きを同時に起こす（すべて終わるまで待つ） */
+  | { readonly kind: 'together'; readonly directives: readonly Directive[] }
   /** 続く姿勢（座る・膝をついたまま、など）。「立つ」で元に戻す */
   | { readonly kind: 'posture'; readonly actor: string; readonly posture: string }
   /**
@@ -84,15 +96,23 @@ export const isInteractive = (d: Directive) => d.kind === 'hold' || d.kind === '
 /** 台詞の後ろには書けない指示か（操作の場面と章の題。1行に分けて書く） */
 const isStandalone = (d: Directive) => isInteractive(d) || d.kind === 'chapterTitle';
 
+/** 歩く速さの言葉（百分率） */
+export const WALK_SPEEDS_JA: Readonly<Record<string, number>> = { ゆっくり: 50, ふつう: 100, 速く: 170, 走る: 250 };
+
 /** 台本の手順 */
 export type ScriptStep =
-  /** 台詞（speaker あり）か語り（speaker が null）。directives は、出す前に行う指示 */
+  /**
+   * 台詞（speaker あり）か語り（speaker が null）。directives は、出す前に行う指示。
+   * portrait が false なら顔の枠を出さない（@顔なし）。highlight が false なら、マップ上の話者を強調しない（@強調なし）
+   */
   | {
       readonly kind: 'line';
       readonly line: number;
       readonly speaker: string | null;
       readonly text: readonly RubySegment[];
       readonly directives: readonly Directive[];
+      readonly portrait?: false;
+      readonly highlight?: false;
     }
   | { readonly kind: 'directive'; readonly line: number; readonly directive: Directive };
 
@@ -134,15 +154,16 @@ export const DIRECTIVE_USAGE: Readonly<Record<string, string>> = {
   登場: '@登場 名前 x,z 向き（向きは 北・東・南・西）',
   退場: '@退場 名前',
   位置: '@位置 名前 x,z',
-  歩く: '@歩く 名前 x,z',
-  向き: '@向き 名前 向き（北・東・南・西）か、相手の名前',
+  歩く: '@歩く 名前 x,z [ゆっくり・ふつう・速く・走る]',
+  向き: '@向き 名前 向き（北・東・南・西）か、相手の人物・物の名前',
   仕草: '@仕草 名前 仕草の名前',
-  カメラ: '@カメラ x,z [遠・中・近] か @カメラ 名前 [遠・中・近]',
+  カメラ: '@カメラ x,z [遠・中・近] [秒] か @カメラ 人物か物の名前 [遠・中・近] [秒]（秒を書くと、その時間をかけてゆっくり動く）',
   暗転: '@暗転 [秒]',
   明転: '@明転 [秒]',
   間: '@間 秒',
   置く: '@置く 物の名前 種類 x,z',
-  消す: '@消す 物の名前',
+  消す: '@消す 物の名前（椀* で椀で始まる物をすべて、* で全部）',
+  片付ける: '@片付ける 物の名前 [人物の名前]（人物が拾う仕草をして片付ける。椀* も使える）',
   変える: '@変える 物の名前 種類',
   押し続ける: '@押し続ける 段数 [手の近くに出す文]',
   歩かせる: '@歩かせる 名前 x,z x,z …（進める順。最後が行き先）',
@@ -155,6 +176,11 @@ export const DIRECTIVE_USAGE: Readonly<Record<string, string>> = {
   章題: '@章題 題 副題',
   持つ: '@持つ 名前 物の種類 [手・左手・腰・背]',
   離す: '@離す 名前 [手・左手・腰・背]',
+  渡す: '@渡す 名前 相手の名前 物の種類 [相手の持つ所: 手・左手・腰・背]',
+  肩書き: '@肩書き 名前 肩書き（なし で外す）',
+  同時: '@同時 @指示 … @指示 …（同じ行の指示を同時に起こす）',
+  顔なし: '台詞の後ろに @顔なし（この台詞では顔の枠を出さない）',
+  強調なし: '台詞の後ろに @強調なし（この台詞では、マップ上の話者に印を出さず、カメラも寄せない）',
   姿勢: '@姿勢 名前 姿勢の名前（立つ で元に戻す）',
   攻撃: '@攻撃 名前 相手の名前 [当たる・外れる・払う]（戦闘中の台本だけ。見た目だけ）',
   押し返す: '@押し返す 名前（戦闘中の台本だけ。戦闘の中の位置へ滑るように戻る）',
@@ -174,7 +200,25 @@ export function parseScript(id: string, text: string, catalog: ScriptCatalog): P
     const fail = (message: string) => errors.push({ line, message });
     // 指示だけの行
     if (isAt(trimmed[0]!)) {
-      for (const part of splitDirectives(trimmed)) {
+      const parts = splitDirectives(trimmed);
+      // @同時 @a … @b …: 同じ行の指示を同時に起こす
+      if (parts[0] === '同時') {
+        const inner: Directive[] = [];
+        for (const part of parts.slice(1)) {
+          const d = parseDirective(part, catalog);
+          if (typeof d === 'string') fail(d);
+          else if (isStandalone(d) || d.kind === 'together') fail('操作の場面・章題・同時は、@同時 の中に書けません');
+          else inner.push(d);
+        }
+        if (parts.length < 3) fail(`@同時 の後ろに、同時に起こす指示を2つ以上書きます（書き方: ${DIRECTIVE_USAGE['同時']}）`);
+        else if (inner.length === parts.length - 1) steps.push({ kind: 'directive', line, directive: { kind: 'together', directives: inner } });
+        return;
+      }
+      for (const part of parts) {
+        if (LINE_MODIFIERS.includes(part)) {
+          fail(`@${part} は台詞の後ろに書きます（書き方: ${DIRECTIVE_USAGE[part]}）`);
+          continue;
+        }
         const d = parseDirective(part, catalog);
         if (typeof d === 'string') fail(d);
         else steps.push({ kind: 'directive', line, directive: d });
@@ -184,10 +228,16 @@ export function parseScript(id: string, text: string, catalog: ScriptCatalog): P
     // 台詞か語り。後ろの指示を切り分ける（「 」の外にある最初の @ から後ろ）
     const { body, rest } = splitTrailing(trimmed);
     const directives: Directive[] = [];
+    const modifiers = new Set<string>();
     for (const part of rest) {
+      if (LINE_MODIFIERS.includes(part)) {
+        modifiers.add(part);
+        continue;
+      }
       const d = parseDirective(part, catalog);
       if (typeof d === 'string') fail(d);
       else if (isStandalone(d)) fail('操作の場面（押し続ける・歩かせる）と章題は、台詞の後ろではなく1行に分けて書いてください');
+      else if (d.kind === 'together') fail('@同時 は、台詞の後ろではなく1行に分けて書いてください');
       else directives.push(d);
     }
     const speech = /^([^\s「」@＠{}|]+)「(.*)」$/.exec(body);
@@ -199,7 +249,15 @@ export function parseScript(id: string, text: string, catalog: ScriptCatalog): P
     if (speaker === null && /^[^\s「」]+「[^」]*$/.test(body)) {
       return fail('台詞の 」 がありません（話者「台詞」 の形で、行の終わり（指示の前）を 」 にします）');
     }
-    steps.push({ kind: 'line', line, speaker, text: ruby, directives });
+    steps.push({
+      kind: 'line',
+      line,
+      speaker,
+      text: ruby,
+      directives,
+      ...(modifiers.has('顔なし') ? { portrait: false as const } : {}),
+      ...(modifiers.has('強調なし') ? { highlight: false as const } : {}),
+    });
   });
   return errors.length > 0 ? { ok: false, errors } : { ok: true, script: { id, steps } };
 }
@@ -212,6 +270,9 @@ export function parseScriptOrThrow(id: string, text: string, catalog: ScriptCata
 }
 
 const isAt = (c: string) => c === '@' || c === '＠';
+
+/** 台詞の後ろに書く、その台詞だけの見せ方の指定 */
+const LINE_MODIFIERS: readonly string[] = ['顔なし', '強調なし'];
 
 /** 「@a … @b …」を指示ごとに分ける */
 function splitDirectives(text: string): string[] {
@@ -293,7 +354,11 @@ function parseDirective(text: string, catalog: ScriptCatalog): Directive | strin
       if (e) return e;
       const c = coord(args[1]!);
       if (!c) return bad(`位置「${args[1]}」は x,z の形で書きます`);
-      return { kind: name === '位置' ? 'place' : 'walk', actor: args[0]!, ...c };
+      if (name === '位置') return { kind: 'place', actor: args[0]!, ...c };
+      if (args[2] === undefined) return { kind: 'walk', actor: args[0]!, ...c };
+      const speed = WALK_SPEEDS_JA[args[2]];
+      if (speed === undefined) return bad(`速さ「${args[2]}」は ${Object.keys(WALK_SPEEDS_JA).join('・')} のどれかです`);
+      return { kind: 'walk', actor: args[0]!, ...c, ...(speed !== 100 ? { speed } : {}) };
     }
     case '向き': {
       const e = need(2);
@@ -310,11 +375,25 @@ function parseDirective(text: string, catalog: ScriptCatalog): Directive | strin
     case 'カメラ': {
       const e = need(1);
       if (e) return e;
-      const zoomWord = args[1];
-      const zoom = zoomWord === undefined ? undefined : ZOOMS_JA[zoomWord];
-      if (zoomWord !== undefined && !zoom) return bad(`寄り「${zoomWord}」は 遠・中・近 のどれかです`);
+      let zoom: CameraZoom | undefined;
+      let ms: number | undefined;
+      for (const w of args.slice(1)) {
+        if (ZOOMS_JA[w]) {
+          if (zoom) return bad('寄りが2つ書かれています');
+          zoom = ZOOMS_JA[w];
+          continue;
+        }
+        if (/^[\d.]+秒?$/.test(w) && ms === undefined) {
+          const v = seconds(w, 0);
+          if (typeof v === 'string') return v;
+          ms = v;
+          continue;
+        }
+        return bad(`「${w}」は、寄り（遠・中・近）か秒（例: 2秒）で書きます`);
+      }
+      const extra = { ...(zoom ? { zoom } : {}), ...(ms ? { ms } : {}) };
       const c = coord(args[0]!);
-      return c ? { kind: 'camera', ...c, ...(zoom ? { zoom } : {}) } : { kind: 'camera', actor: args[0]!, ...(zoom ? { zoom } : {}) };
+      return c ? { kind: 'camera', ...c, ...extra } : { kind: 'camera', actor: args[0]!, ...extra };
     }
     case '暗転':
     case '明転':
@@ -337,6 +416,8 @@ function parseDirective(text: string, catalog: ScriptCatalog): Directive | strin
     }
     case '消す':
       return need(1) ?? { kind: 'propRemove', name: args[0]! };
+    case '片付ける':
+      return need(1) ?? { kind: 'propRemove', name: args[0]!, ...(args[1] ? { actor: args[1] } : {}) };
     case '変える': {
       const e = need(2);
       if (e) return e;
@@ -401,6 +482,20 @@ function parseDirective(text: string, catalog: ScriptCatalog): Directive | strin
       if (!slot) return bad(`持つ所「${args[1]}」は 手・左手・腰・背 のどれかです`);
       return { kind: 'release', actor: args[0]!, slot };
     }
+    case '渡す': {
+      const e = need(3);
+      if (e) return e;
+      if (!catalog.props.includes(args[2]!)) return bad(`物の種類「${args[2]}」はありません（使える種類: ${catalog.props.join('・')}）`);
+      const slot = ITEM_SLOTS_JA[args[3] ?? '手'];
+      if (!slot) return bad(`持つ所「${args[3]}」は 手・左手・腰・背 のどれかです`);
+      return { kind: 'give', actor: args[0]!, to: args[1]!, item: args[2]!, slot };
+    }
+    case '肩書き': {
+      const e = need(2);
+      if (e) return e;
+      const title = args.slice(1).join('　');
+      return { kind: 'title', actor: args[0]!, title: title === 'なし' ? '' : title };
+    }
     case '姿勢': {
       const e = need(2);
       if (e) return e;
@@ -418,6 +513,11 @@ function parseDirective(text: string, catalog: ScriptCatalog): Directive | strin
     }
     case '押し返す':
       return need(1) ?? { kind: 'pushBack', actor: args[0]! };
+    case '同時':
+      return bad('@同時 は行の始めに書き、同じ行に同時に起こす指示を続けます');
+    case '顔なし':
+    case '強調なし':
+      return bad(`@${name} は台詞の後ろに書きます`);
     case '歩かせる': {
       const e = need(2);
       if (e) return e;

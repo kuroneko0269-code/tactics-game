@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { createCameraRig, LANDSCAPE_ZOOM, PORTRAIT_ZOOM, ZOOM_MAX, ZOOM_MIN } from './cameraRig';
+import { createCameraRig, LANDSCAPE_ZOOM, NUDGE_MAX, PORTRAIT_ZOOM, ZOOM_MAX, ZOOM_MIN } from './cameraRig';
 
 function makeRig(width = 800, height = 600) {
   const rig = createCameraRig({
@@ -139,5 +139,52 @@ describe('カメラ', () => {
     const s = screenOf(rig, new THREE.Vector3(0, 0.8, 0));
     expect(s.x).toBeCloseTo(0);
     expect(s.y).toBeCloseTo(0);
+  });
+
+  it('話者の強調: もとの視点から話者の方へ少しだけ寄せ（上限あり・拡大率は変えない）、null で戻す', () => {
+    const rig = makeRig(390, 844);
+    const center = new THREE.Vector3(0, 0.8, 0);
+    void rig.lookAt(center, 1.2);
+    settle(rig);
+    const zoom = rig.zoom;
+    const before = screenOf(rig, center);
+    // 遠くの話者でも、寄せる量は上限まで
+    rig.nudge(new THREE.Vector3(4, 0.8, 0));
+    settle(rig);
+    expect(rig.zoom).toBe(zoom);
+    const moved = screenOf(rig, center);
+    expect(moved.x).toBeLessThan(before.x);
+    // 注視点の地面のずれは NUDGE_MAX 以下
+    const target = new THREE.Vector3();
+    rig.camera.getWorldDirection(target);
+    const nudged = rig.camera.position.clone();
+    rig.nudge(null);
+    settle(rig);
+    const back = screenOf(rig, center);
+    expect(back.x).toBeCloseTo(before.x, 3);
+    expect(back.y).toBeCloseTo(before.y, 3);
+    expect(nudged.distanceTo(rig.camera.position)).toBeLessThanOrEqual(NUDGE_MAX + 1e-6);
+    // 近くの話者には、距離の 1/4 だけ寄せる
+    rig.nudge(new THREE.Vector3(0.4, 0.8, 0));
+    settle(rig);
+    const small = rig.camera.position.clone();
+    rig.nudge(null);
+    settle(rig);
+    expect(small.distanceTo(rig.camera.position)).toBeCloseTo(0.1, 3);
+  });
+
+  it('秒を指定した lookAt は、その時間をかけて動き、途中は動いている扱い', () => {
+    const rig = makeRig(800, 600);
+    void rig.lookAt(new THREE.Vector3(3, 0.8, 3), 1.5, 2);
+    for (let i = 0; i < 60; i++) rig.update(1 / 60);
+    expect(rig.idle).toBe(false);
+    const half = screenOf(rig, new THREE.Vector3(3, 0.8, 3));
+    expect(Math.abs(half.x) + Math.abs(half.y)).toBeGreaterThan(0.01);
+    for (let i = 0; i < 70; i++) rig.update(1 / 60);
+    settle(rig);
+    expect(rig.idle).toBe(true);
+    const end = screenOf(rig, new THREE.Vector3(3, 0.8, 3));
+    expect(end.x).toBeCloseTo(0, 3);
+    expect(end.y).toBeCloseTo(0, 3);
   });
 });

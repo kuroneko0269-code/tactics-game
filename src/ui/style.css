@@ -2826,8 +2826,8 @@ body.in-dialogue #hud {
 
 .dialogue-box {
   width: min(100%, 760px);
-  max-height: 34vh;
-  background: rgba(14, 20, 31, 0.9);
+  max-height: 40vh;
+  background: rgba(14, 20, 31, 0.92);
   border: 2px solid rgba(255, 255, 255, 0.3);
   border-radius: 14px;
   padding: 6px 10px 10px;
@@ -2839,6 +2839,17 @@ body.in-dialogue #hud {
 }
 
 .dialogue-box[hidden] {
+  display: none;
+}
+
+/* 語りの間は、枠を消して道具のボタンだけを残す（語りは字幕として上に出す） */
+.dialogue-box.narration {
+  background: transparent;
+  border-color: transparent;
+  padding: 0;
+}
+
+.dialogue-box.narration .dialogue-body {
   display: none;
 }
 
@@ -2867,39 +2878,97 @@ body.in-dialogue #hud {
   font-weight: bold;
 }
 
+/* 台詞の枠の中: 左に顔の枠、右上に名前の札、右下に台詞 */
 .dialogue-body {
   position: relative;
-  min-height: 72px;
+  min-height: 84px;
   overflow: hidden;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    'face plate'
+    'face text';
+  column-gap: 10px;
+  row-gap: 4px;
+}
+
+.dialogue-body.no-face {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    'plate'
+    'text';
+}
+
+/* 顔の枠: 話者の人形を別のカメラで写した絵（胸から上） */
+.dialogue-face {
+  grid-area: face;
+  align-self: start;
+  width: 84px;
+  height: 84px;
+  border-radius: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  background: radial-gradient(circle at 50% 35%, #4a5a78, #1a2232 75%);
+  overflow: hidden;
+}
+
+.dialogue-face[hidden] {
+  display: none;
+}
+
+.portrait-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* 名前の札: 人物の服の主な色の地に、大きくはっきり。縁は帯の色（色は画面から付ける） */
+.dialogue-plate {
+  grid-area: plate;
+  justify-self: start;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  max-width: 100%;
+  padding: 2px 14px 3px;
+  border-radius: 8px;
+  border: 2px solid var(--accent);
+  border-left-width: 6px;
+  background: #2a3550;
+  color: #fff;
+  line-height: 1.35;
 }
 
 .dialogue-name {
   font-weight: bold;
-  color: var(--accent);
-  font-size: 15px;
-  margin-bottom: 2px;
+  font-size: 20px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
 }
 
-.dialogue-name[hidden] {
+/* 肩書き（「八の席」など）。名前より小さく */
+.dialogue-title {
+  font-size: 14px;
+  opacity: 0.9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dialogue-title[hidden] {
   display: none;
 }
 
 .dialogue-text {
+  grid-area: text;
   font-size: 17px;
-  line-height: 1.85;
+  line-height: 1.8;
   padding-right: 20px;
 }
 
-/* 地の文（語り）: 名前を出さず、明朝体のような書体と淡い色で見分ける */
-.dialogue-text.narration {
-  font-family: 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif;
-  color: #d9e4f2;
-  font-style: normal;
-  letter-spacing: 0.04em;
-}
-
 .dialogue-text rt,
-.backlog-text rt {
+.backlog-text rt,
+.dialogue-caption rt {
   font-size: 0.55em;
   color: #c8d4e6;
 }
@@ -2916,6 +2985,54 @@ body.in-dialogue #hud {
 @keyframes dialogue-blink {
   50% {
     opacity: 0.2;
+  }
+}
+
+/* 語りの字幕: 枠なしで、画面の上（暗転中は中央）に短く出す。時と場所を示す */
+.dialogue-caption {
+  position: absolute;
+  left: 50%;
+  top: calc(max(10px, env(safe-area-inset-top)) + 44px);
+  transform: translateX(-50%);
+  width: min(calc(100% - 32px), 640px);
+  padding: 10px 18px;
+  text-align: center;
+  font-family: 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif;
+  font-size: 19px;
+  line-height: 1.75;
+  letter-spacing: 0.06em;
+  color: #f4f1e8;
+  text-shadow:
+    0 0 6px rgba(0, 0, 0, 0.95),
+    0 1px 2px rgba(0, 0, 0, 0.95);
+  background: radial-gradient(ellipse at center, rgba(5, 8, 14, 0.55) 0%, rgba(5, 8, 14, 0) 72%);
+  cursor: pointer;
+  touch-action: manipulation;
+  animation: caption-in 0.5s ease-out;
+}
+
+.dialogue-caption[hidden] {
+  display: none;
+}
+
+.dialogue-caption.centered {
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.dialogue-caption-next {
+  font-family: system-ui, sans-serif;
+  font-size: 12px;
+  color: var(--accent);
+  animation: dialogue-blink 1s infinite;
+}
+
+@keyframes caption-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
   }
 }
 
@@ -2939,9 +3056,14 @@ body.in-dialogue #hud {
 }
 
 .backlog-name {
+  align-self: flex-start;
   font-weight: bold;
   color: var(--accent);
-  font-size: 13px;
+  font-size: 14px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  border-left-width: 4px;
 }
 
 .dialogue-control {
@@ -3002,19 +3124,55 @@ body.in-dialogue #hud {
   background: var(--accent);
 }
 
+/* 横長の画面: 道具のボタンを名前の札の右に並べ、枠の高さを抑える */
+@media (min-aspect-ratio: 4/3) {
+  .dialogue-box:not(.narration) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto;
+    align-items: start;
+    column-gap: 8px;
+  }
+
+  .dialogue-box:not(.narration) .dialogue-tools {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .dialogue-box:not(.narration) .dialogue-body {
+    grid-column: 1;
+    grid-row: 1;
+  }
+}
+
 @media (orientation: landscape) and (max-height: 500px) {
   .dialogue-box {
-    max-height: 44vh;
+    max-height: 48vh;
     padding: 4px 10px 6px;
   }
 
   .dialogue-body {
-    min-height: 56px;
+    min-height: 68px;
+  }
+
+  .dialogue-face {
+    width: 68px;
+    height: 68px;
+  }
+
+  .dialogue-name {
+    font-size: 18px;
   }
 
   .dialogue-text {
     font-size: 16px;
-    line-height: 1.7;
+    line-height: 1.65;
+  }
+
+  .dialogue-caption {
+    top: calc(max(6px, env(safe-area-inset-top)) + 36px);
+    font-size: 17px;
+    padding: 6px 14px;
   }
 
   .hold-button {

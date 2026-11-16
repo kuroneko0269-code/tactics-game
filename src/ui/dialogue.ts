@@ -2,10 +2,13 @@ import { advance, applyDirective, applyStep, backlog, isFinished, nextStop, skip
 import type { Coord, Direction } from '../core/geometry';
 import type { Directive, RubySegment, Script } from '../core/script';
 import { el, showSheet } from './dom';
+import { plateStyle } from './speakerStyle';
 import { TEXT } from './text';
 
 /**
- * 会話の枠と進行（物語の土台）。台本（core/script.ts）を1手順ずつ進め、画面の下の枠に名前と台詞を出す。
+ * 会話の枠と進行（物語の土台）。台本（core/script.ts）を1手順ずつ進め、画面の下の枠に顔の枠・名前の札・台詞を出す。
+ * 語り（地の文）は枠に入れず、時と場所の字幕として画面の上（暗転中は中央）に出す。
+ * 台詞の間は、マップ上の話者に印を出し、カメラを少しだけ寄せる（StagePort の highlight）。
  * 舞台（人形・物・カメラ）は StagePort を通して動かす（会話の場面では舞台の見た目、戦闘中は戦闘の見た目）。
  * - タップで次へ。早送り（台詞を待たずに進む。操作の場面では止まる）、スキップ（確認つき。操作の場面も飛ばす）、読み返し。
  * - 操作の場面: 押し続ける（ねじを巻く）、歩かせる（光るマスを押すと1マスずつ）。初めての時に短く操作のしかたを出す。
@@ -21,6 +24,14 @@ export interface StagePort {
   setWalkTargets?(tiles: readonly Coord[], goal?: Coord): void;
   /** 歩かせる: 1マス歩く */
   step?(actor: string, from: Coord, to: Coord): Promise<void>;
+  /** 話者の強調: マップ上のその人物の頭上に印を出し、カメラを少しだけ寄せる。null で印を消し、カメラを戻す */
+  highlight?(speaker: string | null): void;
+}
+
+/** 顔の枠（話者の人形を別のカメラで写した canvas と、写す人物の切り替え） */
+export interface PortraitPort {
+  readonly canvas: HTMLCanvasElement;
+  show(name: string | null): void;
 }
 
 export interface DialogueDeps {
@@ -37,6 +48,10 @@ export interface DialogueDeps {
   readonly autoAdvance?: () => boolean;
   /** 旋律と効果音（序章に足りない仕組み）。省くと鳴らさない */
   readonly sound?: DialogueSound;
+  /** 顔の枠。省くと出さない */
+  readonly portrait?: PortraitPort;
+  /** 人物の服の主な色と帯の色（名前の札の色）。省くと決まった色 */
+  readonly speakerColors?: (name: string) => { readonly body: number; readonly accent: number } | undefined;
 }
 
 /** 会話から使う音の口 */
@@ -60,6 +75,14 @@ export interface DialogueStatus {
   readonly holdSteps: number;
   /** 歩かせる時の次のマス */
   readonly walkNext?: Coord;
+  /** 顔の枠に写している人物（出していなければ null） */
+  readonly face: string | null;
+  /** マップ上で強調している話者（していなければ null） */
+  readonly highlighted: string | null;
+  /** 名前の札に添えた肩書き（なければ空） */
+  readonly title: string;
+  /** 語りを字幕として出しているか */
+  readonly caption: boolean;
 }
 
 export interface DialogueRun {
@@ -68,6 +91,10 @@ export interface DialogueRun {
   readonly status: () => DialogueStatus;
   /** 歩かせる時に、マップのマスがタップされた（候補を優先する順に） */
   onTap(candidates: readonly Coord[]): void;
+  /** 画面（マップ）がタップされた: 台詞・語りを読んでいる時は次へ進める。進めたら true */
+  advance(): boolean;
+  /** 今の舞台の様子（自動テスト用） */
+  stage(): StageState;
 }
 
 const FAST_LINE_MS = 280;
@@ -101,16 +128,28 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
   const logButton = toolButton(TEXT.dialogue.backlog, 'backlog');
   const skipButton = toolButton(TEXT.dialogue.skip, 'skip');
   tools.append(fastButton, logButton, skipButton);
-  const name = el('div', 'dialogue-name');
+  // 顔の枠（話者の人形を写す）・名前の札（名前と肩書き）・台詞
+  const face = el('div', 'dialogue-face');
+  face.hidden = true;
+  if (deps.portrait) face.append(deps.portrait.canvas);
+  const plate = el('div', 'dialogue-plate');
+  const name = el('span', 'dialogue-name');
+  const title = el('span', 'dialogue-title');
+  plate.append(name, title);
   const text = el('div', 'dialogue-text');
   const next = el('div', 'dialogue-next', '▼');
   const body = el('div', 'dialogue-body');
-  body.append(name, text, next);
+  body.append(face, plate, text, next);
   box.append(tools, body);
+  // 語りの字幕（枠なし。時と場所を短く）
+  const caption = el('div', 'dialogue-caption');
+  caption.hidden = true;
+  const captionText = el('div', 'dialogue-caption-text');
+  caption.append(captionText, el('div', 'dialogue-caption-next', '▼'));
   // 操作の場面の部品（押し続けるボタンと、手引きの文）
   const control = el('div', 'dialogue-control');
   control.hidden = true;
-  root.append(control, box);
+  root.append(caption, control, box);
 
   let index = 0;
   let stage: StageState = deps.initial ?? { actors: {}, props: {}, dark: false };
@@ -122,6 +161,9 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
   let holdProgress = 0;
   let holdSteps = 0;
   let walkNext: Coord | undefined;
+  let faceName: string | null = null;
+  let highlighted: string | null = null;
+  let shownTitle = '';
   /** 今待っているもの（タップ・操作）を解決する関数 */
   let release: (() => void) | undefined;
   let walkTap: ((c: readonly Coord[]) => void) | undefined;
@@ -161,13 +203,21 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
     if (sheetOpen) return;
     if (waiting === 'line') wake();
   });
+  caption.addEventListener('click', () => {
+    if (sheetOpen) return;
+    if (waiting === 'line') wake();
+  });
 
   const openBacklog = () => {
     sheetOpen = true;
     const list = el('div', 'scroll-area backlog-list');
     for (const entry of backlog(script, index)) {
       const row = el('div', `backlog-row${entry.speaker ? '' : ' narration'}`);
-      if (entry.speaker) row.append(el('span', 'backlog-name', entry.speaker));
+      if (entry.speaker) {
+        const n = el('span', 'backlog-name', entry.speaker);
+        paintPlate(n, entry.speaker);
+        row.append(n);
+      }
       const t = el('span', 'backlog-text');
       t.append(...rubyNodes(entry.text));
       row.append(t);
@@ -208,15 +258,61 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
     });
   };
 
-  const showLine = (who: string | null, segments: readonly RubySegment[]) => {
+  /** 名前の札の色（人物の服の主な色。縁は帯の色） */
+  const paintPlate = (node: HTMLElement, who: string) => {
+    const c = deps.speakerColors?.(who);
+    if (!c) {
+      node.removeAttribute('style');
+      return;
+    }
+    const st = plateStyle(c.body, c.accent);
+    node.style.background = st.background;
+    node.style.color = st.color;
+    node.style.borderColor = st.border;
+  };
+
+  /** 顔の枠と話者の強調を切り替える（null で消す） */
+  const setSpeakerView = (faceOf: string | null, highlight: string | null) => {
+    faceName = deps.portrait ? faceOf : null;
+    deps.portrait?.show(faceName);
+    face.hidden = faceName === null;
+    body.classList.toggle('no-face', faceName === null);
+    // 同じ話者でも毎回呼ぶ（間にカメラの指示があった時に、新しい視点から寄せ直すため。同じなら動かない）
+    if (highlight !== null || highlighted !== null) port.highlight?.(highlight);
+    highlighted = highlight;
+  };
+
+  const showLine = (step: Extract<Script['steps'][number], { kind: 'line' }>) => {
+    const who = step.speaker;
     speaker = who;
-    shown = plain(segments);
-    name.textContent = who ?? '';
-    name.hidden = who === null;
-    text.className = `dialogue-text${who === null ? ' narration' : ''}`;
-    text.replaceChildren(...rubyNodes(segments));
-    box.classList.toggle('narration', who === null);
+    shown = plain(step.text);
+    if (who === null) {
+      // 語り: 枠には入れず、字幕として出す（暗転中は画面の中央）
+      captionText.replaceChildren(...rubyNodes(step.text));
+      caption.classList.toggle('centered', stage.dark);
+      caption.hidden = false;
+      box.classList.add('narration');
+      shownTitle = '';
+      setSpeakerView(null, null);
+      box.hidden = false;
+      return;
+    }
+    caption.hidden = true;
+    box.classList.remove('narration');
+    name.textContent = who;
+    paintPlate(plate, who);
+    shownTitle = stage.titles?.[who] ?? '';
+    title.textContent = shownTitle;
+    title.hidden = shownTitle === '';
+    text.replaceChildren(...rubyNodes(step.text));
+    setSpeakerView(step.portrait === false ? null : who, step.highlight === false ? null : who);
     box.hidden = false;
+  };
+  /** 台詞・語りを隠す（操作の場面・章の題の間） */
+  const hideLine = () => {
+    box.hidden = true;
+    caption.hidden = true;
+    setSpeakerView(null, null);
   };
 
   /** 操作のしかたを初めての時だけ出す */
@@ -347,16 +443,16 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       if (step.kind === 'directive') {
         const d = step.directive;
         if (d.kind === 'hold') {
-          box.hidden = true;
+          hideLine();
           waiting = 'hold';
           await holdStep(d.steps, d.label);
         } else if (d.kind === 'chapterTitle') {
-          box.hidden = true;
+          hideLine();
           waiting = 'title';
           await chapterTitle(d.title, d.subtitle);
         } else if (d.kind === 'walkControl') {
           // 歩かせる間は枠を隠す（横向きの低い画面で、枠が光るマスを覆わないように）
-          box.hidden = true;
+          hideLine();
           waiting = 'walk';
           await walkStep(d.actor, d.path);
           if (!skipped) port.sync(applyDirective(stage, d));
@@ -374,7 +470,7 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
         if (skipped) break;
       }
       if (skipped) break;
-      showLine(step.speaker, step.text);
+      showLine(step);
       waiting = 'line';
       if (fast || deps.autoAdvance?.()) await wait(fast ? FAST_LINE_MS : 30);
       else await new Promise<void>((resolve) => (release = resolve));
@@ -388,6 +484,7 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       port.sync(stage);
       await deps.setDark(stage.dark, 0);
     }
+    setSpeakerView(null, null);
     waiting = 'none';
     root.innerHTML = '';
     root.hidden = true;
@@ -395,8 +492,19 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
     return { skipped };
   })();
 
-  /** 指示を見せる（暗転と間は、ここで扱う） */
-  async function runDirective(d: Directive): Promise<void> {
+  /** 指示を見せる（暗転と間は、ここで扱う）。before は指示の前の舞台（同時の指示の中では、それまでの指示を行った舞台） */
+  async function runDirective(d: Directive, before: StageState = stage): Promise<void> {
+    // 同時: 中の指示を一斉に始め、すべて終わるまで待つ
+    if (d.kind === 'together') {
+      let st = before;
+      const all: Promise<void>[] = [];
+      for (const x of d.directives) {
+        all.push(runDirective(x, st));
+        st = applyDirective(st, x);
+      }
+      await Promise.all(all);
+      return;
+    }
     if (d.kind === 'fadeOut' || d.kind === 'fadeIn') {
       await deps.setDark(d.kind === 'fadeOut', fast ? Math.min(d.ms, 150) : d.ms);
       return;
@@ -424,7 +532,7 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       });
       return;
     }
-    await port.run(d, stage, fast);
+    await port.run(d, before, fast);
   }
 
   return {
@@ -439,9 +547,19 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       holdProgress,
       holdSteps,
       ...(walkNext ? { walkNext } : {}),
+      face: faceName,
+      highlighted,
+      title: shownTitle,
+      caption: !caption.hidden,
     }),
     onTap(candidates) {
       walkTap?.(candidates);
+    },
+    stage: () => stage,
+    advance() {
+      if (sheetOpen || waiting !== 'line') return false;
+      wake();
+      return true;
     },
   };
 }

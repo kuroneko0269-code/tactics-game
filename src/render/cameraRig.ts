@@ -40,7 +40,12 @@ export interface CameraRig {
    * 指定した点を画面の中央にし、拡大率を zoomScale 倍（その画面の形の最初の拡大率を 1 として）にして、滑らかに寄せる（会話の場面のカメラ。物語の土台）。
    * カメラが止まったら解決する
    */
-  lookAt(point: THREE.Vector3, zoomScale?: number): Promise<void>;
+  lookAt(point: THREE.Vector3, zoomScale?: number, seconds?: number): Promise<void>;
+  /**
+   * 話者の強調（会話の場面）: 今の視点（もとの視点）から、点の方へ少しだけ寄せる（寄せる量は NUDGE_FRACTION、上限は NUDGE_MAX）。
+   * 拡大率は変えない。null でもとの視点に戻す。待たない
+   */
+  nudge(point: THREE.Vector3 | null): void;
   /** カメラが動いていないか */
   readonly idle: boolean;
   /** 毎フレーム呼ぶ。経過秒を渡す */
@@ -83,6 +88,9 @@ const DISTANCE = 40;
 const ROTATE_SECONDS = 0.35;
 /** 滑らかに寄せる速さ（大きいほど速い） */
 const SMOOTHING = 9;
+/** 話者の強調で、もとの視点から話者の方へ寄せる割合と、寄せる距離の上限（マスの一辺が 1）。台詞ごとに画面が大きく揺れないように控えめにする */
+export const NUDGE_FRACTION = 0.25;
+export const NUDGE_MAX = 0.45;
 /**
  * 「見やすい範囲」（NDC）。画面の上下にある情報欄やボタンに隠れにくい範囲。
  * この外にある時だけ、自動でカメラを寄せる。
@@ -116,6 +124,10 @@ export function createCameraRig(initial: CameraRigOptions): CameraRig {
   /** 注視点の、マップの中心からのずれ（x, z） */
   const pan = new THREE.Vector2();
   const goalPan = new THREE.Vector2();
+  /** もとの視点（話者の強調で寄せる前の注視点のずれ）。lookAt・focusOn・指の操作で入れ直す */
+  const basePan = new THREE.Vector2();
+  /** 時間をかけてゆっくり動かしている途中（@カメラ … 秒）。なければ滑らかに寄せる */
+  let glide: { from: THREE.Vector2; to: THREE.Vector2; zoomFrom: number; zoomTo: number; t: number; seconds: number } | undefined;
 
   let waiters: (() => void)[] = [];
 
@@ -159,11 +171,25 @@ export function createCameraRig(initial: CameraRigOptions): CameraRig {
 
   /** 指で直接動かした時は、滑らかに寄せる途中の動きをやめて、その場で止める */
   const settleGoals = () => {
+    glide = undefined;
     goalZoom = zoom;
     goalPan.copy(pan);
+    basePan.copy(pan);
+  };
+  /** 点の、注視点の高さの地面での位置（マップの中心からのずれ） */
+  const groundPan = (point: THREE.Vector3) => {
+    const forward = new THREE.Vector3(
+      -Math.cos(goalElevation) * Math.sin(toAzimuth),
+      -Math.sin(goalElevation),
+      -Math.cos(goalElevation) * Math.cos(toAzimuth),
+    );
+    const t = (options.target.y - point.y) / forward.y;
+    const onGround = point.clone().addScaledVector(forward, t);
+    return new THREE.Vector2(onGround.x - options.target.x, onGround.z - options.target.z);
   };
 
   const isIdle = () =>
+    glide === undefined &&
     rotateT >= 1 &&
     Math.abs(goalElevation - elevation) < 1e-4 &&
     Math.abs(goalZoom - zoom) < 1e-4 &&
@@ -228,16 +254,20 @@ export function createCameraRig(initial: CameraRigOptions): CameraRig {
       return heightLevel;
     },
     reset() {
+      glide = undefined;
       goalZoom = initialZoom();
       goalPan.set(0, 0);
+      basePan.set(0, 0);
     },
     setMap(next) {
       Object.assign(options, next);
       ground.constant = -options.target.y;
       // 新しいマップでは、前のマップの拡大率と位置から滑らかに動かさず、すぐに最初の状態にする
       zoom = goalZoom = initialZoom();
+      glide = undefined;
       pan.set(0, 0);
       goalPan.set(0, 0);
+      basePan.set(0, 0);
       place();
     },
     focusOn(points) {
@@ -253,27 +283,44 @@ export function createCameraRig(initial: CameraRigOptions): CameraRig {
         const onGround = center.addScaledVector(forward, t);
         clampPan(goalPan.set(onGround.x - options.target.x, onGround.z - options.target.z));
       }
+      basePan.copy(goalPan);
       return new Promise<void>((resolve) => {
         waiters.push(resolve);
         flushWaiters();
       });
     },
-    lookAt(point, zoomScale) {
-      const forward = new THREE.Vector3(
-        -Math.cos(goalElevation) * Math.sin(toAzimuth),
-        -Math.sin(goalElevation),
-        -Math.cos(goalElevation) * Math.cos(toAzimuth),
-      );
-      const t = (options.target.y - point.y) / forward.y;
-      const onGround = point.clone().addScaledVector(forward, t);
-      clampPan(goalPan.set(onGround.x - options.target.x, onGround.z - options.target.z));
+    lookAt(point, zoomScale, seconds) {
+      glide = undefined;
+      clampPan(goalPan.copy(groundPan(point)));
+      basePan.copy(goalPan);
       if (zoomScale !== undefined) goalZoom = clampZoom(initialZoom() * zoomScale);
+      // 秒の指定があれば、その時間をかけて、なめらかに加速・減速しながら動かす
+      if (seconds !== undefined && seconds > 0) {
+        glide = { from: pan.clone(), to: goalPan.clone(), zoomFrom: zoom, zoomTo: goalZoom, t: 0, seconds };
+      }
       return new Promise<void>((resolve) => {
         waiters.push(resolve);
         flushWaiters();
       });
+    },
+    nudge(point) {
+      if (glide) return;
+      if (!point) {
+        goalPan.copy(basePan);
+        return;
+      }
+      const offset = groundPan(point).sub(basePan).multiplyScalar(NUDGE_FRACTION);
+      if (offset.length() > NUDGE_MAX) offset.setLength(NUDGE_MAX);
+      clampPan(goalPan.copy(basePan).add(offset));
     },
     update(dt) {
+      if (glide) {
+        glide.t = Math.min(1, glide.t + dt / glide.seconds);
+        const e = glide.t < 0.5 ? 2 * glide.t * glide.t : 1 - Math.pow(-2 * glide.t + 2, 2) / 2;
+        pan.lerpVectors(glide.from, glide.to, e);
+        zoom = glide.zoomFrom + (glide.zoomTo - glide.zoomFrom) * e;
+        if (glide.t >= 1) glide = undefined;
+      }
       if (rotateT < 1) {
         rotateT = Math.min(1, rotateT + dt / ROTATE_SECONDS);
         const eased = 1 - Math.pow(1 - rotateT, 3);
@@ -282,8 +329,10 @@ export function createCameraRig(initial: CameraRigOptions): CameraRig {
       const k = 1 - Math.exp(-SMOOTHING * dt);
       const approach = (v: number, goal: number, eps: number) => (Math.abs(goal - v) < eps ? goal : v + (goal - v) * k);
       elevation = approach(elevation, goalElevation, 1e-3);
-      zoom = approach(zoom, goalZoom, 1e-3);
-      pan.set(approach(pan.x, goalPan.x, 2e-3), approach(pan.y, goalPan.y, 2e-3));
+      if (!glide) {
+        zoom = approach(zoom, goalZoom, 1e-3);
+        pan.set(approach(pan.x, goalPan.x, 2e-3), approach(pan.y, goalPan.y, 2e-3));
+      }
       place();
       flushWaiters();
     },

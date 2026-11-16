@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { applyStep, EMPTY_STAGE, type StageState } from '../../core/dialogue';
 import { createMap, getTile } from '../../core/map';
-import { parseScript } from '../../core/script';
+import { parseScript, type Directive } from '../../core/script';
+import { checkScriptRules, formatRuleWarning } from '../../core/scriptRules';
+import { ENFORCE_SCRIPT_RULES, SCRIPT_RULES } from './scriptRules';
 import { validateBook } from '../../core/story';
 import { startBattle } from '../../core/battle';
 import { buildSortie } from '../../core/sortie';
@@ -33,6 +35,23 @@ describe('物語の定義データ', () => {
     }
   });
 
+  it('台本の決まり（台詞の字数・同じ人物が続けて話す枠の数・語りの行数）を調べる。今は知らせるだけ（ENFORCE_SCRIPT_RULES）', () => {
+    const warnings = Object.entries(scriptTexts).flatMap(([id, text]) => {
+      const r = parseScript(id, text, scriptCatalog);
+      return r.ok ? checkScriptRules(r.script, SCRIPT_RULES) : [];
+    });
+    if (warnings.length > 0) {
+      const count = (k: string) => warnings.filter((w) => w.kind === k).length;
+      console.warn(
+        [
+          `台本の決まりに合わない所が ${warnings.length} か所あります（字数 ${count('length')}・続けて話す枠 ${count('sameSpeaker')}・語りの行数 ${count('narration')}）`,
+          ...warnings.map(formatRuleWarning),
+        ].join('\n'),
+      );
+    }
+    if (ENFORCE_SCRIPT_RULES) expect(warnings.map(formatRuleWarning)).toEqual([]);
+  });
+
   it('本の場面は、ある台本・会話のマップ・戦場を指している。本編の本に書き間違いはない', () => {
     expect(validateBook(mainBook)).toEqual([]);
     const sites = prologueBattles.map((b) => b.id);
@@ -59,7 +78,8 @@ describe('物語の定義データ', () => {
           if (!r.ok) throw new Error(s.scriptId);
           let stage: StageState = EMPTY_STAGE;
           for (const step of r.script.steps) {
-            const ds = step.kind === 'line' ? step.directives : [step.directive];
+            const flat = (d: Directive): Directive[] => (d.kind === 'together' ? d.directives.flatMap(flat) : [d]);
+            const ds = (step.kind === 'line' ? step.directives : [step.directive]).flatMap(flat);
             for (const d of ds) {
               if (d.kind === 'walkControl') {
                 const a = stage.actors[d.actor];

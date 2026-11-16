@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { headTop } from './speakerMark';
 import type { BattleEvent, BattleState, SpellElement, Team, TrapKind, UnitKind, UnitState } from '../core/battleTypes';
 import { DIRECTION_VECTORS, DIRECTIONS, type Coord, type Direction } from '../core/geometry';
 import type { MapView, OverlayTile, ReservedTile, TileCoord, TileMark } from './mapView';
@@ -36,6 +37,8 @@ export interface BattleView {
   animateSpell(event: Extract<BattleEvent, { type: 'spellResolved' }>, onImpact: () => void): Promise<void>;
   /** 手番のユニットの頭上に目印を出す */
   setActive(unitId: string | undefined): void;
+  /** 会話の間は手番の印を隠す（話者の印と見分けがつかないように） */
+  setActiveMarkerHidden(hidden: boolean): void;
   /** 選んでいる向きを、ユニットの足もとの矢印で示す（undefined で消す）。矢印はタップの対象ではない */
   showFacingArrows(unitId: string | undefined, selected?: Direction): void;
   /**
@@ -96,7 +99,9 @@ export interface BattleView {
   /** 向きを変える（背景の人も） */
   turnActor(id: string, facing: Direction): Promise<void>;
   /** 歩かせる（見た目だけ。道順は始めのマスを含む） */
-  walkActor(id: string, path: readonly Coord[]): Promise<void>;
+  walkActor(id: string, path: readonly Coord[], speed?: number): Promise<void>;
+  /** 人物の頭のてっぺんの位置（会話の話者の印を出す所） */
+  actorHead(id: string): THREE.Vector3 | undefined;
   /** 光にさらわれるように消える */
   vanish(id: string): Promise<void>;
   /**
@@ -290,6 +295,7 @@ export function createBattleView(options: {
     new THREE.MeshBasicMaterial({ color: 0xffe14d }),
   );
   activeMarker.visible = false;
+  let markerHidden = false;
   scene.add(activeMarker);
   let activeId: string | undefined;
 
@@ -522,7 +528,11 @@ export function createBattleView(options: {
     },
     setActive(unitId) {
       activeId = unitId;
-      activeMarker.visible = unitId !== undefined;
+      activeMarker.visible = unitId !== undefined && !markerHidden;
+    },
+    setActiveMarkerHidden(hidden) {
+      markerHidden = hidden;
+      activeMarker.visible = activeId !== undefined && !hidden;
     },
     showFacingArrows(unitId, selected) {
       arrowGroup.visible = unitId !== undefined;
@@ -795,16 +805,21 @@ export function createBattleView(options: {
       await tweens.play(0.2, (t) => a.puppet.setYaw(from + (to - from) * t));
       a.puppet.setFacing(facing);
     },
-    async walkActor(id, path) {
+    actorHead(id) {
+      const a = actorPuppet(id);
+      return a ? headTop(a.puppet.group) : undefined;
+    },
+    async walkActor(id, path, pace = 1) {
       const a = actorPuppet(id);
       if (!a) return;
+      const seconds = 0.28 / Math.max(0.2, pace);
       for (let i = 1; i < path.length; i++) {
         const from = mapView.tileTop(path[i - 1]!.x, path[i - 1]!.z);
         const to = mapView.tileTop(path[i]!.x, path[i]!.z);
         const dx = path[i]!.x - path[i - 1]!.x;
         const dz = path[i]!.z - path[i - 1]!.z;
         a.puppet.setFacing(dx > 0 ? 'east' : dx < 0 ? 'west' : dz > 0 ? 'south' : 'north');
-        await tweens.play(0.28, (t) => a.puppet.group.position.lerpVectors(from, to, t));
+        await tweens.play(seconds, (t) => a.puppet.group.position.lerpVectors(from, to, t));
         a.coord = { x: path[i]!.x, z: path[i]!.z };
       }
     },

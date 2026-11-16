@@ -2206,6 +2206,119 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
  * core だけで計算した結果と照合する。勝った後の台本（戦闘のマップの上）を通り、「第1章は準備中です」からタイトルへ。
  * 2回目: すべての会話をスキップし、戦闘は開発用の決着で勝ちにして通す（見た手ほどきは出ないこと）。
  */
+/**
+ * 会話の見せ方の確認に使う試しの台本（会話の見せ方の PR）。顔の枠・名前の札（人物の色）・肩書き・マップにいない人物の声・
+ * 顔なし・強調なし・話者の印とカメラの寄せ・語りの字幕と、動きで見せるための指示（同時・歩く速さ・渡す・片付ける・物の方を向く・
+ * カメラをゆっくり物へ）を通す。物語の進み具合は変えない（window.__tactics.playScene）
+ */
+const PRESENTATION_SCRIPT = `
+@登場 ユナ 1,3 東
+@登場 トウマ 3,3 西
+@持つ トウマ 紙包み
+@置く 椀1 椀 0,3
+@置く 椀2 椀 0,4
+@置く 灯 灯 4,4
+@肩書き トウマ 時守
+@カメラ ユナ 中
+ユナ「兄さん」
+トウマ「ああ」
+遠くの声「聞こえるか」
+ユナ「うん」 @顔なし
+ユナ「見ないで」 @強調なし
+@同時 @歩く ユナ 1,4 速く @歩く トウマ 3,4 ゆっくり
+@渡す トウマ ユナ 紙包み
+@片付ける 椀* ユナ
+@カメラ 灯 近 1秒
+@向き トウマ 灯
+夜。
+`;
+const PRESENTATION_STAGE = 'stage-hearing';
+
+/** 試しの台本の、台詞・語りの1つが出て、カメラが止まるまで待つ */
+const presentationLine = (page) =>
+  page.waitForFunction(
+    () => {
+      const d = window.__tactics.dialogue();
+      return !d || (d.waiting === 'line' && window.__tactics.camera().idle);
+    },
+    null,
+    { timeout: 60000, polling: 50 },
+  );
+
+/**
+ * 会話の見せ方を確かめる（序章の通しの前。短くした版でも）。台詞ごとに、顔の枠・名前の札・肩書き・話者の印・カメラの寄せ・
+ * 語りの字幕を確かめ、最後に舞台の様子（動きの指示の結果）を確かめる。マップを押しても台詞が進むことも確かめる
+ */
+async function presentationDrill(page, check, screenshot) {
+  const T = (fn, arg) => page.evaluate(fn, arg);
+  await T(([t, st]) => window.__tactics.playScene(t, st), [PRESENTATION_SCRIPT, PRESENTATION_STAGE]);
+  await page.waitForFunction(() => window.__tactics.screen() === 'scene' && window.__tactics.dialogue() !== null, null, { timeout: 30000 });
+  const seen = [];
+  const vw = await T(() => window.innerWidth);
+  for (let guard = 0; guard < 12; guard++) {
+    await presentationLine(page);
+    const d = await T(() => window.__tactics.dialogue());
+    if (!d) break;
+    const v = await T(() => {
+      const plate = document.querySelector('.dialogue-plate');
+      const faceEl = document.querySelector('.dialogue-face');
+      const rect = (e) => (e && e.offsetParent !== null ? e.getBoundingClientRect().toJSON() : null);
+      const canvas = document.querySelector('.portrait-canvas');
+      return {
+        view: window.__tactics.speakerView(),
+        plateBg: plate ? getComputedStyle(plate).backgroundColor : '',
+        nameSize: parseFloat(getComputedStyle(document.querySelector('.dialogue-name')).fontSize),
+        titleText: document.querySelector('.dialogue-title')?.hidden ? '' : (document.querySelector('.dialogue-title')?.textContent ?? ''),
+        faceRect: rect(faceEl),
+        plateRect: rect(plate),
+        captionRect: rect(document.querySelector('.dialogue-caption')),
+        bodyRect: rect(document.querySelector('.dialogue-body')),
+        drawn: canvas ? canvas.toDataURL().length : 0,
+        tile: window.__tactics.sceneTileScreen(2, 2),
+        stage: window.__tactics.dialogueStage(),
+        zoom: window.__tactics.camera().zoom,
+        vh: window.innerHeight,
+      };
+    });
+    seen.push({ ...d, ...v });
+    if (d.speaker === 'トウマ') await screenshot('presentation-title');
+    if (d.caption) await screenshot('presentation-caption');
+    if (d.speaker === 'ユナ' && seen.length === 1) await screenshot('presentation-line');
+    // 2つ目の台詞は、マップ（枠の上の空いた所）を押して進める
+    if (seen.length === 2) await page.mouse.click(Math.round(vw / 2), 70);
+    else if (d.caption) await page.locator('.dialogue-caption').click();
+    else await page.locator('.dialogue-body').click();
+    await page.waitForFunction((i) => window.__tactics.dialogue()?.index !== i, d.index, { timeout: 30000 });
+  }
+  const [yuna, touma, voice, noFace, noMark, caption] = seen;
+  check(seen.length === 6, `試しの台本の台詞と語りの数が違います（${seen.length}）`);
+  check(yuna.face === 'ユナ' && yuna.view.portrait === 'ユナ' && yuna.drawn > 1500 && yuna.view.mark, `顔の枠か話者の印が出ていません（${JSON.stringify(yuna.view)}・${yuna.drawn}）`);
+  check(yuna.plateBg === 'rgb(216, 204, 176)' && touma.plateBg === 'rgb(31, 42, 74)', `名前の札が人物の服の色になっていません（${yuna.plateBg} / ${touma.plateBg}）`);
+  check(yuna.nameSize >= 18, `名前の文字が小さい（${yuna.nameSize}px）`);
+  for (const x of [yuna, touma]) {
+    const inside = (r) => r && r.top >= -1 && r.left >= -1 && r.bottom <= x.vh + 1 && r.right <= vw + 1;
+    check(inside(x.faceRect) && inside(x.plateRect) && x.faceRect.width >= 56, `顔の枠か名前の札が画面に収まっていません（${JSON.stringify([x.faceRect, x.plateRect])}）`);
+  }
+  check(touma.title === '時守' && touma.titleText === '時守', `肩書きが名前の札に出ていません（${touma.titleText}）`);
+  check(touma.zoom === yuna.zoom, '話者が変わった時に、拡大率が変わっています');
+  const shift = Math.hypot(touma.tile.x - yuna.tile.x, touma.tile.y - yuna.tile.y);
+  check(shift > 2 && shift < vw * 0.15, `話者が変わった時のカメラの寄せが、ない か 大きすぎます（${Math.round(shift)}px）`);
+  check(voice.face === '遠くの声' && voice.view.portrait === '遠くの声' && !voice.view.mark, 'マップにいない人物の声で、顔の枠が出ていないか、印が出ています');
+  check(noFace.face === null && noFace.view.portrait === null && noFace.faceRect === null && noFace.view.mark, '@顔なし の台詞で顔の枠が出ています');
+  check(noMark.highlighted === null && !noMark.view.mark && noMark.view.portrait === 'ユナ', '@強調なし の台詞で、話者の印が出ています');
+  check(caption.caption && caption.captionRect !== null && caption.bodyRect === null && !caption.view.mark && caption.view.portrait === null, '語りが字幕として出ていません');
+  // 語りの時点の舞台（同時・歩く速さ・渡す・片付ける・物の方を向く の結果）
+  const st = caption.stage;
+  check(
+    st.actors['ユナ'].x === 1 && st.actors['ユナ'].z === 4 && st.actors['トウマ'].z === 4 && st.actors['トウマ'].facing === 'east',
+    `同時に歩く・物の方を向く の結果が違います（${JSON.stringify(st.actors)}）`,
+  );
+  check(st.actors['ユナ'].items.hand === '紙包み' && st.actors['トウマ'].items.hand === '', '渡す の結果が違います');
+  check(!st.props['椀1'] && !st.props['椀2'] && st.props['灯'] && st.titles['トウマ'] === '時守', '片付ける（椀*）か肩書きの結果が違います');
+  await page.waitForFunction(() => window.__tactics.screen() === 'title', null, { timeout: 30000 });
+  return seen;
+}
+
 async function storyRun(browser, baseUrl, name, core) {
   const options = VIEWPORT_OPTIONS[name];
   const { label, ...contextOptions } = options;
@@ -2263,7 +2376,7 @@ async function storyRun(browser, baseUrl, name, core) {
   const tapLine = async () => {
     const before = await status();
     await noteMelody();
-    await page.locator('.dialogue-body').click();
+    await page.locator(before.caption ? '.dialogue-caption' : '.dialogue-body').click();
     stats.lines++;
     await until((i) => {
       const d = window.__tactics.dialogue();
@@ -2389,7 +2502,7 @@ async function storyRun(browser, baseUrl, name, core) {
     let ruby = false;
     await drive(async (d) => {
       if (d.text.includes('堰だ')) {
-        const rts = await T(() => [...document.querySelectorAll('.dialogue-text rt')].map((r) => r.textContent));
+        const rts = await T(() => [...document.querySelectorAll('.dialogue-text rt, .dialogue-caption rt')].map((r) => r.textContent));
         ruby = rts.includes('せき');
       }
       return d.text.startsWith('ユナの発明で');
@@ -2478,8 +2591,14 @@ async function storyRun(browser, baseUrl, name, core) {
     return {};
   };
 
-  // ---- 1回目: タップで進める ----
+  // ---- 会話の見せ方（顔の枠・名前の札・肩書き・話者の強調・語りの字幕・動きの指示） ----
   await open();
+  const shown = await presentationDrill(page, check, screenshot);
+  const st = await T(() => window.__tactics.story());
+  check(!st.main, '試しの台本で、物語の進み具合が変わっています');
+  log(`会話の見せ方（顔の枠・名前の札の色・肩書き・声だけの人物・顔なし・強調なし・話者の印とカメラの寄せ・語りの字幕・同時・渡す・片付ける）✔（${shown.length}行）`);
+
+  // ---- 1回目: タップで進める ----
   check(!(await page.getByRole('button', { name: '試しの場面', exact: true }).count()), '題名の画面に「試しの場面」が残っています');
   await press(text.title.story);
   await until(() => window.__tactics.screen() === 'scene');
@@ -2493,7 +2612,10 @@ async function storyRun(browser, baseUrl, name, core) {
   let sawDark = false;
   await drive(async (d) => {
     if (d.index === 0 || d.text.startsWith('戸を開けると')) {
-      check(await T(() => document.querySelector('.dialogue-text.narration') !== null && document.querySelector('.dialogue-name').hidden), '語りが、名前なしの語りの書体で出ていません');
+      check(
+        await T(() => window.__tactics.dialogue().caption && document.querySelector('.dialogue-caption:not([hidden])') !== null && document.querySelector('.dialogue-body').offsetParent === null),
+        '語りが、枠なしの字幕として出ていません',
+      );
     }
     if (d.text === '一日前。') sawDark = await T(() => window.__tactics.dark());
     return false;
@@ -2505,7 +2627,7 @@ async function storyRun(browser, baseUrl, name, core) {
   let checkedRuby = false;
   await drive(async (d) => {
     if (!checkedRuby && d.text.includes('堰だ')) {
-      const rts = await T(() => [...document.querySelectorAll('.dialogue-text rt')].map((r) => r.textContent));
+      const rts = await T(() => [...document.querySelectorAll('.dialogue-text rt, .dialogue-caption rt')].map((r) => r.textContent));
       check(rts.includes('せき'), `ルビが出ていません（${rts.join(',')}）`);
       checkedRuby = true;
     }
@@ -2557,12 +2679,18 @@ async function storyRun(browser, baseUrl, name, core) {
       let named = false;
       await drive(async (d) => {
         if (d.text.startsWith('下流の村は')) {
-          named = await T(() => document.querySelector('.dialogue-name')?.textContent === 'ハルド' && window.__tactics.sceneStage?.() === 'stage-hearing');
+          named = await T(
+            () =>
+              document.querySelector('.dialogue-name')?.textContent === 'ハルド' &&
+              window.__tactics.sceneStage?.() === 'stage-hearing' &&
+              window.__tactics.dialogue().face === 'ハルド' &&
+              window.__tactics.speakerView().mark,
+          );
           await screenshot('prologue-hearing');
         }
         return false;
       });
-      check(named, '話を聞く部屋で、ハルドの台詞に話者の名前が出ていないか、場面が門の前のままです');
+      check(named, '話を聞く部屋で、ハルドの台詞に話者の名前・顔の枠・頭上の印が出ていないか、場面が門の前のままです');
       continue;
     }
     if (QUICK && (n === 3 || n === 8)) {
@@ -2840,8 +2968,23 @@ async function checkLayouts(browser, baseUrl, name, core) {
   check((await page.locator('.job-current[data-mastered="true"]').count()) === 1, '編成の画面で、マスターしたジョブに印がありません');
   await inspect('roster-job-mastered');
 
+  // ---- 会話の見せ方（顔の枠と名前の札・肩書き・語りの字幕）。短くした版でも確かめる ----
+  await page.goto(`${baseUrl}?seed=${SEED}&speed=${SPEED}`);
+  await screenIs('title');
+  await page.evaluate(([t, st]) => window.__tactics.playScene(t, st), [PRESENTATION_SCRIPT, PRESENTATION_STAGE]);
+  for (let guard = 0; guard < 12; guard++) {
+    await presentationLine(page);
+    const d = await page.evaluate(() => window.__tactics.dialogue());
+    if (!d) break;
+    if (d.speaker === 'トウマ') await inspect('dialogue-face-title');
+    if (d.caption) await inspect('dialogue-caption');
+    await page.locator(d.caption ? '.dialogue-caption' : '.dialogue-body').click();
+    await until((i) => window.__tactics.dialogue()?.index !== i, d.index);
+  }
+  await screenIs('title');
+
   // ---- 物語の土台: 題名・会話・読み返し・スキップの確認・操作の場面・対象物のある戦闘・「これまで」 ----
-  // 短くした版（CI）では確かめない（試しの場面の通しで同じ画面を通る。収まりは全体の自動プレイの4つの画面サイズで確かめる。CI の検査全体を5分以内に収めるため）
+  // 短くした版（CI）では確かめない（試しの場面の通しで同じ画面を通る。収まりは全体の自動プレイの4つの画面サイズで確かめる。CI の検査全体を6分以内に収めるため）
   if (QUICK) {
     await context.close();
     return { screens, seconds: Math.round((Date.now() - started) / 1000) };
@@ -2864,7 +3007,8 @@ async function checkLayouts(browser, baseUrl, name, core) {
     });
   const tapLine = async () => {
     const i = await page.evaluate(() => window.__tactics.dialogue().index);
-    await page.locator('.dialogue-body').click();
+    const cap = await page.evaluate(() => window.__tactics.dialogue().caption);
+    await page.locator(cap ? '.dialogue-caption' : '.dialogue-body').click();
     await until((i) => window.__tactics.dialogue()?.index !== i, i);
     await lineReady();
   };
@@ -2873,10 +3017,11 @@ async function checkLayouts(browser, baseUrl, name, core) {
   while ((await page.evaluate(() => window.__tactics.dialogue().waiting)) === 'line') await tapLine();
   await inspect('chapter-title');
   await page.waitForTimeout(750);
-  await page.locator('.chapter-title-card').click();
+  // 章の題は約4秒で自動で閉じる（画面写真と検査が遅い時は、押す前に閉じている）
+  if ((await page.evaluate(() => window.__tactics.dialogue()?.waiting)) === 'title') await page.locator('.chapter-title-card').click({ timeout: 5000 }).catch(() => {});
   // 「一日前。」を読んで、次の場面へ
   await until(() => window.__tactics.dialogue()?.waiting === 'line');
-  await page.locator('.dialogue-body').click();
+  await page.locator('.dialogue-caption').click();
   await until(() => window.__tactics.story().main?.scene === 1 && window.__tactics.dialogue() !== null);
   await lineReady();
   await press(text.dialogue.backlog);
