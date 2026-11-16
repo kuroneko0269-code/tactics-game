@@ -2369,7 +2369,7 @@ async function storyRun(browser, baseUrl, name, core) {
   /**
    * 短くした版（CI）の序章: 検査全体を5分以内に収めるため、要点だけを確かめ、残りの会話はスキップで進める。
    * 冒頭の石の節の印 → 堰の会話（ルビ・読み返し・読み込み直しと「これまで」・早送り）→ 堰の戦闘（手ほどき2段と飛ばす・倒れない番兵・
-   * 戦闘の途中での読み込み直しと再開・開発用の決着・勝った後の台本）→ 会話はスキップ → 丘の戦闘（始めの会話・読み込み直しと再開・決着・
+   * 戦闘の途中での読み込み直しと再開・開発用の決着・勝った後の台本）→ 会話はスキップ → 丘の戦闘（始めの会話・途中保存・決着・
    * 勝った後の台本はスキップ）→「第1章は準備中です」。全部の通し（台詞のタップ・歩かせる・2つの戦闘を最後まで戦って core と照合・
    * すべてスキップの2回目）は、全体（npm run autoplay）で確かめる
    */
@@ -2430,11 +2430,14 @@ async function storyRun(browser, baseUrl, name, core) {
       }
       await T(() => window.__tactics.setAutoPlayer(true));
       await until(() => (window.__tactics.state()?.turnNumber ?? 0) >= 3, undefined, 120000);
-      await reloadAndResume();
-      await until(() => window.__tactics.screen() === 'battle' && window.__tactics.state() !== null);
       const saved = await T(() => window.__tactics.suspended());
-      check(saved?.origin?.kind === 'story' && saved.state.turnNumber >= 3, `${siteName}: 戦闘の途中から再開していません`);
-      check((await T(() => window.__tactics.tutorial())) === null, `${siteName}: 再開した戦闘で、見た手ほどきがまた出ています`);
+      check(saved?.origin?.kind === 'story' && saved.state.turnNumber >= 3, `${siteName}: 物語の戦闘の途中保存がありません`);
+      // 戦闘の途中での読み込み直しと再開は、堰で確かめる（丘は全体で確かめる。短くした版の時間を抑えるため）
+      if (tutorial) {
+        await reloadAndResume();
+        await until(() => window.__tactics.screen() === 'battle' && window.__tactics.state() !== null);
+        check((await T(() => window.__tactics.tutorial())) === null, `${siteName}: 再開した戦闘で、見た手ほどきがまた出ています`);
+      }
       await until(() => ['main', 'busy', 'ended'].includes(window.__tactics.mode()));
       await T(() => window.__tactics.finishBattle('player'));
       await until(() => window.__tactics.dialogue()?.waiting === 'line');
@@ -2471,7 +2474,7 @@ async function storyRun(browser, baseUrl, name, core) {
     }
     await until(() => window.__tactics.screen() === 'story-end');
     check((await T(() => document.querySelector('.story-end-screen .screen-title')?.textContent)) === text.story.nextChapterSoon, '「第1章は準備中です」が出ていません');
-    log('残りの会話はスキップ・丘の戦闘（始めの会話・読み込み直しと再開・勝った後の台本）・「第1章は準備中です」✔');
+    log('残りの会話はスキップ・丘の戦闘（始めの会話・途中保存・勝った後の台本）・「第1章は準備中です」✔');
     return {};
   };
 
