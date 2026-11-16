@@ -31,7 +31,10 @@ export function createSpeakerMark(scene: THREE.Scene): SpeakerMark {
   return {
     setTarget(headOf) {
       target = headOf;
-      if (!headOf) group.visible = false;
+      // 付けた時点で見える状態にする（次の描画を待たない）
+      const p = headOf?.();
+      group.visible = p !== undefined;
+      if (p) group.position.set(p.x, p.y + 0.16, p.z);
     },
     get visible() {
       return group.visible;
