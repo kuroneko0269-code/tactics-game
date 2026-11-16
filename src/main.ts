@@ -795,11 +795,15 @@ function main(): void {
       ...(import.meta.env.DEV ? { autoAdvance: () => devAutoDialogue } : {}),
     });
     dialogueRun = run;
+    // 戦闘中の会話の間は、手番の印を隠す（話者の印と見分けがつかないように）
+    const battleView = port === battlePort ? battle?.view : undefined;
+    battleView?.setActiveMarkerHidden(true);
     try {
       return await run.done;
     } finally {
       if (dialogueRun === run) dialogueRun = undefined;
       speakerMark.setTarget(null);
+      battleView?.setActiveMarkerHidden(false);
       await setDark(false, 0);
       sound.stopMelody();
     }

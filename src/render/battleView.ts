@@ -37,6 +37,8 @@ export interface BattleView {
   animateSpell(event: Extract<BattleEvent, { type: 'spellResolved' }>, onImpact: () => void): Promise<void>;
   /** 手番のユニットの頭上に目印を出す */
   setActive(unitId: string | undefined): void;
+  /** 会話の間は手番の印を隠す（話者の印と見分けがつかないように） */
+  setActiveMarkerHidden(hidden: boolean): void;
   /** 選んでいる向きを、ユニットの足もとの矢印で示す（undefined で消す）。矢印はタップの対象ではない */
   showFacingArrows(unitId: string | undefined, selected?: Direction): void;
   /**
@@ -293,6 +295,7 @@ export function createBattleView(options: {
     new THREE.MeshBasicMaterial({ color: 0xffe14d }),
   );
   activeMarker.visible = false;
+  let markerHidden = false;
   scene.add(activeMarker);
   let activeId: string | undefined;
 
@@ -525,7 +528,11 @@ export function createBattleView(options: {
     },
     setActive(unitId) {
       activeId = unitId;
-      activeMarker.visible = unitId !== undefined;
+      activeMarker.visible = unitId !== undefined && !markerHidden;
+    },
+    setActiveMarkerHidden(hidden) {
+      markerHidden = hidden;
+      activeMarker.visible = activeId !== undefined && !hidden;
     },
     showFacingArrows(unitId, selected) {
       arrowGroup.visible = unitId !== undefined;
