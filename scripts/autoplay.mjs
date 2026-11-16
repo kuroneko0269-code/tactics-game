@@ -2803,6 +2803,9 @@ async function checkLayouts(browser, baseUrl, name, core) {
   await inspect('chapter-title');
   await page.waitForTimeout(750);
   await page.locator('.chapter-title-card').click();
+  // 「一日前。」を読んで、次の場面へ
+  await until(() => window.__tactics.dialogue()?.waiting === 'line');
+  await page.locator('.dialogue-body').click();
   await until(() => window.__tactics.story().main?.scene === 1 && window.__tactics.dialogue() !== null);
   await lineReady();
   await press(text.dialogue.backlog);
