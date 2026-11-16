@@ -3017,7 +3017,8 @@ async function checkLayouts(browser, baseUrl, name, core) {
   while ((await page.evaluate(() => window.__tactics.dialogue().waiting)) === 'line') await tapLine();
   await inspect('chapter-title');
   await page.waitForTimeout(750);
-  await page.locator('.chapter-title-card').click();
+  // 章の題は約4秒で自動で閉じる（画面写真と検査が遅い時は、押す前に閉じている）
+  if ((await page.evaluate(() => window.__tactics.dialogue()?.waiting)) === 'title') await page.locator('.chapter-title-card').click({ timeout: 5000 }).catch(() => {});
   // 「一日前。」を読んで、次の場面へ
   await until(() => window.__tactics.dialogue()?.waiting === 'line');
   await page.locator('.dialogue-caption').click();
