@@ -486,8 +486,13 @@ export interface StealRules {
  * そのユニットの手番が来るはずだった時（CT がしきい値に達した時）にカウントが 1 減る。0 になると退場する
  */
 export interface KnockoutRules {
-  /** 戦闘不能になった時のカウント */
+  /** 戦闘不能になった時のカウント（人） */
   readonly count: number;
+  /**
+   * 種類ごとのカウント（戦闘で人は死なない決まり）。0 なら、HP が尽きるとすぐに退場する（蘇生できない）。
+   * 省いた種類は count を使う
+   */
+  readonly kinds?: Partial<Record<Exclude<UnitKind, 'object'>, { readonly count: number }>>;
   /** カウントが減った後の CT */
   readonly ctAfterTick: number;
 }
@@ -540,6 +545,11 @@ export type VictoryCondition =
       readonly times: number;
       readonly sides?: readonly RelativeSide[];
       readonly labelId?: string;
+      /**
+       * 最後の1回（times 回目）を当てられるユニットの id（序章の丘: 誓いの剣を折るのはトウマ）。
+       * ほかのユニットが当てても、最後の1回は数えない（出来事 tallyBlocked）。省くとだれでも
+       */
+      readonly finisherId?: string;
     }
   | { readonly kind: 'defeatUnit'; readonly unitId: string }
   | { readonly kind: 'reachTile'; readonly tiles: readonly Coord[] }
@@ -560,6 +570,11 @@ export type DefeatCondition =
 export interface BattleObjectives {
   readonly victory: readonly VictoryCondition[];
   readonly defeat: readonly DefeatCondition[];
+  /**
+   * 敵がすべて戦闘不能になった時に勝利とするか。省くと true。
+   * false の戦闘（序章の堰）は、書いた勝利条件だけで勝つ（番兵をすべて退けても、堰を崩すまで続く）
+   */
+  readonly defeatAllWins?: boolean;
 }
 
 /**
@@ -703,10 +718,29 @@ export interface UnitPlacement {
   readonly progress?: PlacementProgress;
   /**
    * 倒れないユニット（序章に足りない仕組み）: HP はこの値より下がらず、戦闘不能にならない（1 以上の整数）。
-   * 物語で、討てずに終わる相手に使う。情報の欄に「倒れない」と出す
+   * 物語で、討てずに終わる相手に使う。情報の欄に「HP が尽きない」と出す
    */
   readonly minHp?: number;
+  /**
+   * ユニットの種類（戦闘で人は死なない決まり）。HP が尽きた時の動きが種類ごとに変わる（数値は rules.knockout.kinds）。
+   * 省くと人（human）
+   */
+  readonly kind?: UnitKind;
+  /**
+   * この戦闘では退場しない（戦闘で人は死なない決まり）: 戦闘不能になっても、カウントが減らず、膝をついたまま最後までマスに残る。
+   * 蘇生・通過・勝敗の判定は、ほかの戦闘不能のユニットと同じ
+   */
+  readonly noRetire?: boolean;
 }
+
+/**
+ * ユニットの種類（戦闘で人は死なない決まり）。
+ * - human 人: HP が尽きると膝をつき、カウントが 0 になると立ち上がって退く（退場）
+ * - shade 影: 石に戻って、すぐに消える（蘇生できない）
+ * - beast 獣: 退く
+ * - object 物: 対象物（壊れて消える）
+ */
+export type UnitKind = 'human' | 'shade' | 'beast' | 'object';
 
 /**
  * 戦わない背景の人々（序章に足りない仕組み）。マップに立つだけで、攻撃や魔法の対象にならず、行動順にも入らない。
@@ -878,8 +912,12 @@ export interface UnitState {
   readonly endureUsed: boolean;
   /** 対象物なら、その種類（見た目と名前の id）。ユニットなら省く（物語の土台） */
   readonly object?: { readonly kind: string };
-  /** 倒れないユニットの HP の下限（UnitPlacement の minHp）。省くと倒れる */
+  /** HP の尽きないユニットの HP の下限（UnitPlacement の minHp）。省くと尽きる */
   readonly minHp?: number;
+  /** ユニットの種類（人・影・獣・物）。HP が尽きた時の動きが変わる */
+  readonly kind: UnitKind;
+  /** この戦闘では退場しない（戦闘不能のカウントが減らない）。省くと退場する */
+  readonly noRetire?: true;
 }
 
 /** いま手番を持っているユニットの進み具合 */
@@ -1112,6 +1150,8 @@ export type BattleEvent =
   | { readonly type: 'objectBroken'; readonly unitId: string }
   /** 数えた回数が増えた（hitUnit の勝利条件。count は今の回数、times は必要な回数） */
   | { readonly type: 'tallied'; readonly id: string; readonly count: number; readonly times: number }
+  /** 最後の1回を当てられるのは finisherId だけなので、attackerId の攻撃では数えなかった（hitUnit の finisherId） */
+  | { readonly type: 'tallyBlocked'; readonly id: string; readonly attackerId: string; readonly finisherId: string }
   | {
       /** 増援の予告。appearAfterTurn 回の手番が終わった時点で、tiles に現れる */
       readonly type: 'reinforcementWarned';

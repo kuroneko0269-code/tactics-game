@@ -70,7 +70,7 @@ export const homeStage: StageDefinition = {
 };
 
 /**
- * 暦の塔（9×7）。奥の壁に暦盤、中ほどに円卓と十三の椅子、右奥に時の門の輪、左手前にハルドの机（話を聞く部屋）
+ * 暦の塔（9×7）。奥の壁に暦盤、中ほどに円卓と十三の椅子、右奥に時の門の輪（話を聞く部屋は別の会話用マップ stage-hearing）
  */
 export const towerStage: StageDefinition = {
   id: 'stage-tower',
@@ -87,7 +87,21 @@ export const towerStage: StageDefinition = {
     { id: '暦盤', kind: '壁の暦盤', x: 4, z: 1 },
     { id: '円卓', kind: '円卓', x: 4, z: 3 },
     { id: '門の輪', kind: '門の輪', x: 7, z: 1 },
-    { id: '机', kind: '書き物机', x: 1, z: 5 },
+  ],
+};
+
+/**
+ * 帰ってきた時守の話を聞く部屋（5×5。PR の回答 2 で、門の前の広間と分けた）。奥の壁、ハルドの机と腰掛け、記録の箱
+ */
+export const hearingStage: StageDefinition = {
+  id: 'stage-hearing',
+  map: stageMap('stage-hearing', ['4s 4s 4s 4s 4s', '0b 0b 0b 0b 0b', '0b 0b 0b 0b 0b', '0b 0b 0b 0b 0b', '0b 0b 0b 0b 0b']),
+  props: [
+    { id: '机', kind: '書き物机', x: 2, z: 2 },
+    { id: '腰掛け', kind: '腰掛け', x: 2, z: 1 },
+    { id: '箱1', kind: '箱', x: 0, z: 1 },
+    { id: '箱2', kind: '箱', x: 4, z: 1 },
+    { id: '箱3', kind: '箱', x: 4, z: 2 },
   ],
 };
 
@@ -139,4 +153,4 @@ export const hillStage: StageDefinition = {
   ],
 };
 
-export const stages: readonly StageDefinition[] = [roomStage, yardStage, homeStage, towerStage, cityStage, weirStage, hillStage];
+export const stages: readonly StageDefinition[] = [roomStage, yardStage, homeStage, towerStage, hearingStage, cityStage, weirStage, hillStage];

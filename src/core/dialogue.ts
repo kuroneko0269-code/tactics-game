@@ -138,6 +138,8 @@ export function applyDirective(stage: StageState, d: Directive): StageState {
     case 'melodyStop':
     case 'sound':
     case 'chapterTitle':
+    case 'strike':
+    case 'pushBack':
       return stage;
   }
 }

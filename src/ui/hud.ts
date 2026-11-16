@@ -42,7 +42,7 @@ export interface BattleHud {
 
 /** 勝敗条件の表示 */
 export interface ObjectivesView {
-  /** 常に出す短い文（例: 「勝利: ボスの撃破」「勝利: 奥の扉に到達 ・ 増援 あと 3 手番」） */
+  /** 常に出す短い文（例: 「勝利: ボスを退ける」「勝利: 奥の扉に到達 ・ 増援 あと 3 手番」） */
   readonly summary: string;
   readonly victory: readonly string[];
   readonly defeat: readonly string[];
@@ -382,12 +382,12 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
       ].join(' ・ ');
       info.append(name, job, hp, ...(growthLine ? [growthLine] : []), stats);
       if (infoState.targets.includes(unit.id)) info.append(Object.assign(el('div', 'info-target'), { textContent: TEXT.objectives.targetTag }));
-      // 倒れないユニット（序章に足りない仕組み）
+      // HP の尽きないユニット（序章に足りない仕組み）
       if (unit.minHp) info.append(Object.assign(el('div', 'info-target info-unbreakable'), { textContent: TEXT.objectives.unbreakableTag }));
       // 戦闘不能（フェーズ2-5）: 残りのカウント
       if (unit.hp <= 0) {
         const line = el('div', `info-knockout${unit.retired ? ' retired' : ''}`);
-        line.textContent = unit.retired ? TEXT.knockout.retiredInfo : TEXT.knockout.info(unit.knockoutCount);
+        line.textContent = unit.retired ? TEXT.knockout.retiredInfo : unit.noRetire ? TEXT.knockout.infoStay : TEXT.knockout.info(unit.knockoutCount);
         info.append(line);
       }
       if (unit.charging) {

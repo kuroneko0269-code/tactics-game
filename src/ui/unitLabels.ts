@@ -30,7 +30,8 @@ export interface UnitLabels {
    * 戦闘不能の残りのカウントを頭上に出す（フェーズ2-5）。null で消す（立ち上がった）。
    * 退場したユニットは、頭上の表示ごと隠す（retired）
    */
-  setKnockout(id: string, count: number | null, retired?: boolean): void;
+  /** 戦闘不能の札。stays は退場しないユニット（数字の代わりに「膝」を出す。戦闘で人は死なない決まり） */
+  setKnockout(id: string, count: number | null, retired?: boolean, stays?: boolean): void;
 }
 
 export interface LabelUnit {
@@ -122,14 +123,14 @@ export function createUnitLabels(root: HTMLElement, units: readonly LabelUnit[])
       }
     },
     addUnit,
-    setKnockout(id, count, retired = false) {
+    setKnockout(id, count, retired = false, stays = false) {
       const l = labels.get(id);
       if (!l) return;
       l.retired = retired;
       l.box.classList.toggle('down', count !== null && !retired);
       l.knockout.hidden = count === null || retired;
-      l.knockout.textContent = count === null ? '' : TEXT.knockout.badge(count);
-      l.knockout.dataset.count = count === null ? '' : String(count);
+      l.knockout.textContent = count === null ? '' : stays ? TEXT.knockout.badgeStay : TEXT.knockout.badge(count);
+      l.knockout.dataset.count = count === null || stays ? '' : String(count);
       if (retired) l.box.classList.add('hidden');
     },
     setTargets(ids) {

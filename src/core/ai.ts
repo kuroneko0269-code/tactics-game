@@ -697,6 +697,8 @@ export function chooseCleanse(state: BattleState, unit: UnitState): SpellPlan | 
  * （同じ時点なら、魔法の発動が先）
  */
 function reviveInTime(state: BattleState, caster: UnitState, spell: UnitState['spells'][number], target: UnitState): boolean {
+  // 退場しないユニットは、いつでも間に合う
+  if (target.noRetire) return true;
   const thr = state.rules.ctThreshold;
   const cast = Math.ceil(thr / Math.max(1, castSpeedOf(caster, spell)));
   const speed = Math.max(1, target.stats.speed);

@@ -66,7 +66,14 @@ export type Directive =
   | { readonly kind: 'carry'; readonly actor: string; readonly item: string; readonly slot: ItemSlot }
   | { readonly kind: 'release'; readonly actor: string; readonly slot: ItemSlot }
   /** 続く姿勢（座る・膝をついたまま、など）。「立つ」で元に戻す */
-  | { readonly kind: 'posture'; readonly actor: string; readonly posture: string };
+  | { readonly kind: 'posture'; readonly actor: string; readonly posture: string }
+  /**
+   * 戦闘中の台本で、攻撃の動きを見せる（見た目だけ。戦闘の結果は変えない。序章の丘の始めの演出）。
+   * outcome は 当たる（hit）・外れる（miss）・払う（parry: 受ける側が武器で払う）。会話の場面では何もしない
+   */
+  | { readonly kind: 'strike'; readonly actor: string; readonly target: string; readonly outcome: 'hit' | 'miss' | 'parry' }
+  /** 戦闘中の台本で、人物を押し返す（見た目だけ。滑るように下がって、戦闘の状態の位置へ戻る）。会話の場面では何もしない */
+  | { readonly kind: 'pushBack'; readonly actor: string };
 
 /** 持ち物を付ける所（右手・左手・腰・背） */
 export type ItemSlot = 'hand' | 'handL' | 'waist' | 'back';
@@ -149,7 +156,11 @@ export const DIRECTIVE_USAGE: Readonly<Record<string, string>> = {
   持つ: '@持つ 名前 物の種類 [手・左手・腰・背]',
   離す: '@離す 名前 [手・左手・腰・背]',
   姿勢: '@姿勢 名前 姿勢の名前（立つ で元に戻す）',
+  攻撃: '@攻撃 名前 相手の名前 [当たる・外れる・払う]（戦闘中の台本だけ。見た目だけ）',
+  押し返す: '@押し返す 名前（戦闘中の台本だけ。戦闘の中の位置へ滑るように戻る）',
 };
+
+const STRIKE_OUTCOMES: Readonly<Record<string, 'hit' | 'miss' | 'parry'>> = { 当たる: 'hit', 外れる: 'miss', 払う: 'parry' };
 
 /** 台本のテキストを読む。id は台本の名前（エラーの知らせと、場面からの参照に使う） */
 export function parseScript(id: string, text: string, catalog: ScriptCatalog): ParseResult {
@@ -398,6 +409,15 @@ function parseDirective(text: string, catalog: ScriptCatalog): Directive | strin
       }
       return { kind: 'posture', actor: args[0]!, posture: args[1]! };
     }
+    case '攻撃': {
+      const e = need(2);
+      if (e) return e;
+      const outcome = STRIKE_OUTCOMES[args[2] ?? '当たる'];
+      if (!outcome) return bad(`結果「${args[2]}」は 当たる・外れる・払う のどれかです`);
+      return { kind: 'strike', actor: args[0]!, target: args[1]!, outcome };
+    }
+    case '押し返す':
+      return need(1) ?? { kind: 'pushBack', actor: args[0]! };
     case '歩かせる': {
       const e = need(2);
       if (e) return e;

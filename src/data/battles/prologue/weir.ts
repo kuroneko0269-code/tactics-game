@@ -5,7 +5,9 @@ import { enemyUnit, kit } from '../enemyUnits';
 
 /**
  * 序章の戦闘1「谷の外れの堰」（設計書「4. 章の表」の序章: 合わせ目3か所を壊す。短い手ほどき）。
- * 北の堰（高さ 3）に積み石の合わせ目が3つ。番兵3人が守る。番兵は倒れない（HP は 1 より下がらない。勝った後、崩れる堰を呆然と見る）。
+ * 北の堰（高さ 3）に積み石の合わせ目が3つ。番兵3人が守る。番兵は HP が尽きると膝をつき、この戦闘では退場しない
+ * （膝をついたまま最後まで残り、勝った後、崩れる堰を呆然と見る。戦闘で人は死なない決まり）。
+ * 番兵をすべて退けても勝ちにはならない（堰を崩すまで続く）。
  * 東の崖の上（高さ 3〜4）から弓で撃ち下ろせる（札の「高い所から撃つ矢は、遠くまで届く」）。
  * 合わせ目を3つ壊すと勝利。3つ目を壊すと、西の涸れた谷に水が流れはじめる（水が別の谷へ）。
  * 初めて遊ぶ人が、説明を読まなくても勝てる強さにする（番兵は弱い。味方が倒れることはまずない）。
@@ -40,9 +42,9 @@ export const weirBattle: BattleSite = {
     {
       id: 'main',
       units: [
-        { ...enemyUnit({ id: 'weir-guard-1', job: warrior, x: 3, z: 3, level: 1, statBonus: { maxHp: -16, attack: -2 }, equipment: kit(warrior, 1) }), minHp: 1 },
-        { ...enemyUnit({ id: 'weir-guard-2', job: warrior, x: 5, z: 3, level: 1, statBonus: { maxHp: -16, attack: -2 }, equipment: kit(warrior, 1) }), minHp: 1 },
-        { ...enemyUnit({ id: 'weir-guard-3', job: archer, x: 7, z: 3, level: 1, statBonus: { maxHp: -12, attack: -2 }, equipment: kit(archer, 1) }), minHp: 1 },
+        { ...enemyUnit({ id: 'weir-guard-1', job: warrior, x: 3, z: 3, level: 1, statBonus: { maxHp: -16, attack: -2 }, equipment: kit(warrior, 1) }), noRetire: true },
+        { ...enemyUnit({ id: 'weir-guard-2', job: warrior, x: 5, z: 3, level: 1, statBonus: { maxHp: -16, attack: -2 }, equipment: kit(warrior, 1) }), noRetire: true },
+        { ...enemyUnit({ id: 'weir-guard-3', job: archer, x: 7, z: 3, level: 1, statBonus: { maxHp: -12, attack: -2 }, equipment: kit(archer, 1) }), noRetire: true },
       ],
     },
   ],
@@ -51,7 +53,7 @@ export const weirBattle: BattleSite = {
     { id: 'weir-seam-2', kind: 'seam', x: 4, z: 2, hp: 22 },
     { id: 'weir-seam-3', kind: 'seam', x: 6, z: 2, hp: 22 },
   ],
-  objectives: { victory: [{ kind: 'destroyObjects', unitIds: seams }], defeat: [{ kind: 'allDefeated' }] },
+  objectives: { victory: [{ kind: 'destroyObjects', unitIds: seams }], defeat: [{ kind: 'allDefeated' }], defeatAllWins: false },
   events: [
     { id: 'weir-last-seam', trigger: { kind: 'objectsBroken', unitIds: seams, count: 3 }, effects: [{ kind: 'terrain', tiles: westValley }] },
   ],

@@ -1827,6 +1827,11 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
     }, id);
   check((await badgeOf(ko.downId)) === text.knockout.badge(2), `戦闘不能の味方の頭上にカウントが出ていません（${await badgeOf(ko.downId)}）`);
   check((await badgeOf(ko.enemyId)) === text.knockout.badge(1), `戦闘不能の敵の頭上にカウントが出ていません（${await badgeOf(ko.enemyId)}）`);
+  // 戦闘で人は死なない決まり: 戦闘不能の人は、その場に膝をついた姿で残る
+  for (const id of [ko.downId, ko.enemyId]) {
+    const pose = await T((id) => window.__tactics.unitPose(id), id);
+    check(pose?.visible && pose.down && pose.kneel === 1, `戦闘不能のユニットが膝をついた姿になっていません（${id}: ${JSON.stringify(pose)}）`);
+  }
   await tapUnit(ko.enemyId);
   await waitFor('戦闘不能の敵の情報', (t) => document.querySelector('.info-knockout')?.textContent === t, text.knockout.info(1));
   await screenshot('knockout-info');
@@ -1855,8 +1860,26 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
     .waitForFunction((t) => [...document.querySelectorAll('.popup')].some((p) => p.textContent === t), text.knockout.revived, { timeout: 30000, polling: 20 })
     .then(() => true)
     .catch(() => false);
+  // 退場: 膝をついた敵が立ち上がり（膝の度合いが 0 に戻る）、マスの外へ歩いて退く（体の位置がマスの中央から離れる）
+  const sawRetireWalk = page
+    .waitForFunction(
+      (id) => {
+        const p = window.__tactics.unitPose(id);
+        const st = window.__tactics.state();
+        const u = st?.units.find((x) => x.id === id);
+        if (!p || !u || !p.visible || p.kneel > 0.05) return false;
+        const c = window.__tactics.tileWorld?.(p.coord.x, p.coord.z) ?? null;
+        return c ? Math.hypot(p.world.x - c.x, p.world.z - c.z) > 0.3 : true;
+      },
+      ko.enemyId,
+      { timeout: 30000, polling: 20 },
+    )
+    .then(() => true)
+    .catch(() => false);
   await pressButton('確定');
   check(await sawRevive, `復帰の表示（${text.knockout.revived}）が出ませんでした`);
+  check(await sawRetireWalk, '退場の時に、立ち上がって戦場から退く動きが見えませんでした');
+  check((await T((id) => window.__tactics.unitPose(id)?.visible, ko.enemyId)) === false, '退場した敵が、まだ見えています');
   await waitFor('蘇生の後の手番', (id) => window.__tactics.mode() === 'main' && window.__tactics.state().turn?.unitId === id, ko.unitId);
   await waitForInput();
   const koAfter = await getState();
@@ -2198,6 +2221,11 @@ async function storyRun(browser, baseUrl, name, core) {
   const started = Date.now();
   const { text } = core.data;
   const log = (msg) => console.log(`[序章・${label}] ${msg}（${Math.round((Date.now() - started) / 1000)}秒）`);
+  const screenshot = async (tag) => {
+    if (!SCREENSHOT_DIR) return;
+    fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
+    await page.screenshot({ path: path.join(SCREENSHOT_DIR, `story-${name}-${tag}.png`) });
+  };
   const until = (fn, arg, timeout = 90000) => page.waitForFunction(fn, arg, { timeout, polling: 50 });
   const press = async (n) => page.getByRole('button', { name: n, exact: true }).click();
   const T = (fn, arg) => page.evaluate(fn, arg);
@@ -2354,7 +2382,7 @@ async function storyRun(browser, baseUrl, name, core) {
       }
       return false;
     });
-    check(stats.melodies.has('ユナの節/石'), `冒頭の石の節の印が出ていません（${[...stats.melodies]}）`);
+    check(stats.melodies.has('ユナの鼻歌/石'), `冒頭の石の節の印が出ていません（${[...stats.melodies]}）`);
     await skip();
     // 場面2: ルビ・読み返し・読み込み直し・早送り
     await waitScene(1);
@@ -2408,7 +2436,10 @@ async function storyRun(browser, baseUrl, name, core) {
       return saved.state;
     };
     const weir = await quickBattle('堰', 2, true);
-    check(weir.units.filter((u) => u.minHp).length === 3, '堰の番兵が倒れない敵になっていません');
+    check(
+      weir.units.filter((u) => u.id.startsWith('weir-guard') && u.noRetire && !u.minHp && u.kind === 'human').length === 3,
+      '堰の番兵が「退場しない人」になっていません（HP が尽きれば膝をつく）',
+    );
     // 勝った後の台本（戦闘のマップの上）を読む
     for (let guard = 0; guard < 30 && (await sceneNow()) === 2; guard++) {
       const d = await status();
@@ -2419,16 +2450,16 @@ async function storyRun(browser, baseUrl, name, core) {
     }
     check(stats.afterLines >= 4, `堰の勝った後の台本が流れていません（${stats.afterLines}行）`);
     check((await T(() => window.__tactics.sound().recent)).includes('gate'), '勝った後の効果音（門）が鳴っていません');
-    log('冒頭の石の節・堰の会話（ルビ・読み返し・読み込み直しと「これまで」・早送り）・堰の戦闘（手ほどき・倒れない番兵・読み込み直しと再開・勝った後の台本）✔');
-    // 場面4〜8 はスキップ。丘の戦闘
-    for (const n of [3, 4, 5, 6, 7]) {
+    log('冒頭の石の節・堰の会話（ルビ・読み返し・読み込み直しと「これまで」・早送り）・堰の戦闘（手ほどき・退場しない番兵・読み込み直しと再開・勝った後の台本）✔');
+    // 場面4〜10 はスキップ。丘の戦闘
+    for (const n of [3, 4, 5, 6, 7, 8, 9]) {
       await waitScene(n);
       await until(() => window.__tactics.screen() === 'scene' && window.__tactics.dialogue() !== null);
       await skip();
     }
-    await quickBattle('丘', 8, false);
+    await quickBattle('丘', 10, false);
     await skip();
-    for (const n of [9, 10, 11]) {
+    for (const n of [11, 12, 13, 14]) {
       await waitScene(n);
       await until(() => window.__tactics.screen() === 'scene' && window.__tactics.dialogue() !== null);
       await skip();
@@ -2460,7 +2491,7 @@ async function storyRun(browser, baseUrl, name, core) {
     return false;
   });
   check(sawDark, '「一日前。」が暗転の中に出ていません');
-  check(stats.titles === 1 && stats.melodies.has('ユナの節/石'), `冒頭: 章の題か、石の節の印を確かめられませんでした（${[...stats.melodies]}）`);
+  check(stats.titles === 1 && stats.melodies.has('ユナの鼻歌/石'), `冒頭: 章の題か、石の節の印を確かめられませんでした（${[...stats.melodies]}）`);
   await waitScene(1);
   // 場面2: 堰（戦闘の前）。ルビ・読み返しを確かめ、途中で読み込み直す。再開した後は早送りで進める
   let checkedRuby = false;
@@ -2495,43 +2526,75 @@ async function storyRun(browser, baseUrl, name, core) {
   await page.mouse.click(at.x, at.y);
   await until(() => window.__tactics.tutorial()?.step === 'weir-attack', undefined, 30000);
   check(await T(() => !document.querySelector('.tutorial-pointer').hidden), '手ほどきの「攻撃」の段で、指し示す印が出ていません');
-  check((await T(() => window.__tactics.state().units.filter((u) => u.minHp).length)) === 3, '堰の番兵が倒れない敵になっていません');
+  check(
+    (await T(() => window.__tactics.state().units.filter((u) => u.id.startsWith('weir-guard') && u.noRetire && !u.minHp).length)) === 3,
+    '堰の番兵が「退場しない人」になっていません',
+  );
   await press(text.tutorial.skip);
   check((await T(() => window.__tactics.settings().seenTutorials)).includes('prologue-weir'), '手ほどきを見たことが設定に残っていません');
   await press(text.buttons.wait).catch(() => {});
   const weir = await autoBattle('堰', 8, 3);
   check(weir.units.filter((u) => u.team === 'neutral').every((u) => u.retired), '堰の合わせ目が壊れていません');
-  check(weir.units.filter((u) => u.id.startsWith('weir-guard')).every((u) => u.hp >= 1), '倒れないはずの番兵が倒れています');
+  check(weir.units.filter((u) => u.id.startsWith('weir-guard')).every((u) => !u.retired), '退場しないはずの番兵が退場しています');
   check(weir.map.tiles.filter((t) => t.terrain === 'water' && t.x === 0).length > 0, '西の谷に水が流れていません');
   check(stats.afterLines >= 4, `堰の勝った後の台本が流れていません（${stats.afterLines}行）`);
   const recent = await T(() => window.__tactics.sound().recent);
   check(recent.includes('water') && recent.includes('gate'), `堰の勝った後の効果音（水・門）が鳴っていません（${recent}）`);
-  log(`堰の戦闘（手ほどき・倒れない番兵・合わせ目3つ・水が別の谷へ・戦闘の途中での読み込み直しと core との一致・勝った後の台本 ${stats.afterLines}行）✔`);
-  // 場面4〜8: 塔・家（鼻歌）・都（歩かせる）・門・丘（歌声）。
-  // 短くした版（CI）では、検査全体を5分以内に収めるため、塔と門の会話はスキップで進める（台詞のタップは全体で確かめる）
-  for (const n of [3, 4, 5, 6, 7]) {
+  log(`堰の戦闘（手ほどき・退場しない番兵・合わせ目3つ・水が別の谷へ・戦闘の途中での読み込み直しと core との一致・勝った後の台本 ${stats.afterLines}行）✔`);
+  // 場面4〜10: 塔の門の脇・話を聞く部屋・広間・家（鼻歌）・都（歩かせる）・門・丘（歌声）。
+  // 話を聞く部屋は、門の前の広間とは別の会話用マップで、ハルドの最初の台詞の時点で話者の名前が出ていること
+  for (const n of [3, 4, 5, 6, 7, 8, 9]) {
     await waitScene(n);
-    if (QUICK && (n === 3 || n === 6)) {
+    if (n === 4) {
+      let named = false;
+      await drive(async (d) => {
+        if (d.text.startsWith('下流の村は')) {
+          named = await T(() => document.querySelector('.dialogue-name')?.textContent === 'ハルド' && window.__tactics.sceneStage?.() === 'stage-hearing');
+          await screenshot('prologue-hearing');
+        }
+        return false;
+      });
+      check(named, '話を聞く部屋で、ハルドの台詞に話者の名前が出ていないか、場面が門の前のままです');
+      continue;
+    }
+    if (QUICK && (n === 3 || n === 8)) {
       await until(() => window.__tactics.screen() === 'scene' && window.__tactics.dialogue() !== null);
       await skip();
     } else await drive();
   }
-  check(stats.melodies.has('ユナの節/鼻歌') && stats.melodies.has('氏族の歌/歌声'), `鼻歌と氏族の歌の印を確かめられませんでした（${[...stats.melodies]}）`);
+  check(stats.melodies.has('ユナの鼻歌/鼻歌') && stats.melodies.has('月を呼ぶ節/歌声'), `鼻歌と月を呼ぶ節（丘の歌）の印を確かめられませんでした（${[...stats.melodies]}）`);
   check(stats.walks >= 5, `都で歩かせる操作が足りません（${stats.walks}歩）`);
   log(`塔・家（鼻歌と三度叩く）・都（歩かせる ${stats.walks}歩）・門・丘の会話 ✔${QUICK ? '（塔と門はスキップ）' : ''}`);
-  // 場面9: 丘の戦闘
-  await waitScene(8);
+  // 場面11: 丘の戦闘。始めの演出（ゴードが斬りかかって押し返され、キリの矢が2本払われる）の後に、始めの台詞が出る
+  await waitScene(10);
+  const missesBefore = await T(() => window.__tactics.sound().recent.filter((x) => x === 'miss').length);
   await deployAndStart();
+  for (let guard = 0; guard < 10; guard++) {
+    await until(() => window.__tactics.dialogue()?.waiting === 'line', undefined, 120000);
+    if ((await status()).text.startsWith('ゴードが剣ごと')) break;
+    await tapLine();
+    stats.battleLines++;
+  }
+  const hillStart = await T(() => {
+    const st = window.__tactics.state();
+    const g = st.units.find((u) => u.id === 'gord');
+    const pose = window.__tactics.unitPose('gord');
+    return { text: window.__tactics.dialogue()?.text ?? '', misses: window.__tactics.sound().recent.filter((x) => x === 'miss').length, back: pose && pose.coord.x === g.x && pose.coord.z === g.z, mode: window.__tactics.mode() };
+  });
+  check(hillStart.text.startsWith('ゴードが剣ごと'), `丘の始めの演出の後の台詞が出ていません（${hillStart.text}）`);
+  check(hillStart.misses - missesBefore >= 3, `丘の始めの演出で、払われる攻撃が3回見えていません（${hillStart.misses - missesBefore}回）`);
+  check(hillStart.back, '丘の始めの演出の後、ゴードが元の位置へ押し返されていません');
+  await screenshot('prologue-hill-start');
   const afterBefore = stats.afterLines;
-  const hill = await autoBattle('丘', 5, 9);
+  const hill = await autoBattle('丘', 5, 11);
   check((hill.scenario.tallies?.['oath-sword'] ?? 0) >= 4, '誓いの剣に4回当てていません');
-  check(hill.units.find((u) => u.id === 'hill-gareth').hp >= 1, '倒れないはずのガレスが倒れています');
+  check(hill.units.find((u) => u.id === 'hill-gareth').hp >= 1, 'HP が尽きないはずのガレスの HP が尽きています');
   check(stats.afterLines - afterBefore >= 6, `丘の勝った後の台本が流れていません（${stats.afterLines - afterBefore}行）`);
-  log('丘の戦闘（誓いの剣に4回・倒れないガレス・戦闘の途中での読み込み直しと core との一致・勝った後の台本）✔');
-  // 場面10〜12: 塔・家までの道（歩かせる）・物置
-  for (const n of [9, 10, 11]) {
+  log('丘の戦闘（始めの演出・誓いの剣に4回・HP の尽きないガレス・戦闘の途中での読み込み直しと core との一致・勝った後の台本）✔');
+  // 場面12〜15: 塔の門の脇・話を聞く部屋・家までの道（歩かせる）・物置
+  for (const n of [11, 12, 13, 14]) {
     await waitScene(n);
-    if (QUICK && n === 9) {
+    if (QUICK && n === 11) {
       await until(() => window.__tactics.screen() === 'scene' && window.__tactics.dialogue() !== null);
       await skip();
     } else await drive();

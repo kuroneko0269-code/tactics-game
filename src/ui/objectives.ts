@@ -25,7 +25,8 @@ export function victoryText(
     }
     case 'hitUnit': {
       const label = c.labelId ? (TEXT.objectNames[c.labelId] ?? c.labelId) : TEXT.objectives.hitUnitDefaultLabel;
-      return TEXT.objectives.hitUnit(label, nameOf(c.unitId), state ? tallyOf(state, c.id) : 0, c.times);
+      const text = TEXT.objectives.hitUnit(label, nameOf(c.unitId), state ? tallyOf(state, c.id) : 0, c.times);
+      return c.finisherId ? `${text}${TEXT.objectives.finisherNote(nameOf(c.finisherId))}` : text;
     }
     case 'defeatAll':
       return TEXT.objectives.defeatAll;
@@ -47,7 +48,10 @@ function victoryShort(state: BattleState, c: VictoryCondition): string {
   }
   if (c.kind === 'hitUnit') {
     const label = c.labelId ? (TEXT.objectNames[c.labelId] ?? c.labelId) : TEXT.objectives.hitUnitDefaultLabel;
-    return TEXT.objectives.hitUnitShort(label, tallyOf(state, c.id), c.times);
+    const count = tallyOf(state, c.id);
+    const text = TEXT.objectives.hitUnitShort(label, count, c.times);
+    // 最後の1回を当てられるのが決まっている時（序章の丘）は、最後の1回の手前で、だれが当てるかを添える
+    return c.finisherId && count === c.times - 1 ? `${text}${TEXT.objectives.finisherShort(namer(state)(c.finisherId))}` : text;
   }
   return victoryText(c, namer(state), state);
 }
@@ -83,7 +87,7 @@ export function objectivesView(state: BattleState): ObjectivesView {
   const next = [...state.scenario.reinforcements].sort((a, b) => a.appearAfterTurn - b.appearAfterTurn);
   for (const r of next) notes.push(TEXT.objectives.reinforcement(r.units.length, r.appearAfterTurn - state.turnNumber));
   if (next[0]) short.push(TEXT.objectives.reinforcementShort(next[0].appearAfterTurn - state.turnNumber));
-  notes.push(TEXT.objectives.alwaysNote);
+  notes.push(state.scenario.objectives.defeatAllWins === false ? TEXT.objectives.alwaysNoteNoWipe : TEXT.objectives.alwaysNote);
   return {
     summary: short.join(' ・ '),
     victory: victory.map((c) => victoryText(c, namer(state), state)),

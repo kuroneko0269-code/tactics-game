@@ -52,7 +52,7 @@ describe('セーブの出入口', () => {
     const dungeon = { run: { dungeonId: 'ruins', battle: 2 }, clears: { ruins: 1 } };
     const records = { trainingWins: { easy: 3, normal: 1 } };
     store.save({ roster: { ...roster, gold: 1234 }, dungeon, records, battle: null });
-    expect(JSON.parse(backend.text!).version).toBe(6);
+    expect(JSON.parse(backend.text!).version).toBe(7);
     expect(store.load()).toEqual({ roster: { ...roster, gold: 1234 }, dungeon, records, battle: null, story: {} });
     store.clear();
     expect(store.load()).toBeUndefined();
@@ -125,7 +125,7 @@ describe('セーブの出入口', () => {
     let u = learnAbility(hero, 'warrior', 'counter', catalog, progressionRules);
     u = setPassive(u, 'reaction', 'counter', catalog);
     store.save({ roster: replaceUnit(loaded.roster, u), dungeon: loaded.dungeon, records: loaded.records, battle: null });
-    expect(JSON.parse(backend.text!).version).toBe(6);
+    expect(JSON.parse(backend.text!).version).toBe(7);
     expect(findUnit(store.load()!.roster, 'touma').slots).toEqual({ secondary: 'warrior', reaction: 'counter', support: null, movement: null });
   });
 
