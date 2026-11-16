@@ -2419,9 +2419,14 @@ async function storyRun(browser, baseUrl, name, core) {
       }
       // 戦闘の始めの会話（丘）
       if (!tutorial) await until(() => window.__tactics.dialogue()?.waiting === 'line', undefined, 60000);
-      while ((await status())?.waiting === 'line') {
-        await tapLine();
-        stats.battleLines++;
+      // 会話が閉じるまで読む（丘は、1行目の後に始めの演出が入るので、行の待ちが途切れる）
+      for (let guard = 0; guard < 200; guard++) {
+        const d = await status();
+        if (!d) break;
+        if (d.waiting === 'line') {
+          await tapLine();
+          stats.battleLines++;
+        } else await page.waitForTimeout(100);
       }
       await T(() => window.__tactics.setAutoPlayer(true));
       await until(() => (window.__tactics.state()?.turnNumber ?? 0) >= 3, undefined, 120000);

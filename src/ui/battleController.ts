@@ -859,7 +859,8 @@ export function createBattleController(start: ActionResult, deps: BattleControll
           break;
         }
         case 'knockoutCounted':
-          labels.setKnockout(ev.unitId, ev.count);
+          // 0 になった時は、すぐ後の退場で札ごと消す（退く動きの間に「退 0」を出さない）
+          if (ev.count > 0) labels.setKnockout(ev.unitId, ev.count);
           if (ev.count > 0) {
             labels.popText(ev.unitId, TEXT.knockout.count(ev.count));
             await view.wait(0.3);
