@@ -1,5 +1,6 @@
 import type { TutorialStep } from '../core/sortie';
 import type { Coord } from '../core/geometry';
+import type { TutorialModeInfo } from './battleController';
 import { el } from './dom';
 import { TEXT } from './text';
 
@@ -7,12 +8,14 @@ import { TEXT } from './text';
  * 戦闘の手ほどき（序章に足りない仕組み）。戦場の定義の tutorial（段の列）を順に出す。
  * - 味方の手番で、操作の段階（移動を選ぶ・攻撃の相手を選ぶ・確定・向き など）が段の mode になったら、
  *   指し示す印（マス・ユニット・ボタン）と短い説明を出し、その操作が済む（段階が変わる）と次の段へ進む。
+ * - 人物を決めた段（unitId）・高さを決めた段（minHeight）・回数を決めた段（tally）は、その条件が合う時に出す。条件の合わない段は飛ばして、
+ *   先の段を出してよい（人物ごとの手番の順は戦闘ごとに違うため）。人物を決めていない段は、順に出す。
  * - 「手ほどきを飛ばす」で、残りをすべて出さない。最後まで進むか飛ばすと onFinished を呼ぶ（見たことを設定に残す）。
  * - 印と説明はタップを横取りしない（飛ばすボタンだけ押せる）。
  */
 export interface TutorialScreen {
   /** 操作の段階が変わった時に呼ぶ。modeKey は TutorialStep の mode と同じ名前か 'busy' など。reachable は移動できるマス */
-  onMode(modeKey: string, info: { readonly playerTurn: number; readonly reachable: readonly Coord[] }): void;
+  onMode(modeKey: string, info: TutorialModeInfo): void;
   /** 毎フレーム呼ぶ（印を、カメラの動きに合わせて置き直す） */
   update(): void;
   /** 今出している段（自動テスト用） */
@@ -44,7 +47,10 @@ export function createTutorial(root: HTMLElement, steps: readonly TutorialStep[]
   root.append(layer);
 
   let index = 0;
+  /** 出し終えた段 */
+  const shown = new Set<number>();
   let showing: TutorialStep | undefined;
+  let showingIndex = -1;
   let target: (() => { x: number; y: number } | undefined) | undefined;
   let done = false;
 
@@ -114,13 +120,28 @@ export function createTutorial(root: HTMLElement, steps: readonly TutorialStep[]
       // 出している段の操作が済んだ（段階が変わった）: 次の段へ
       if (showing && showing.mode !== modeKey) {
         showing = undefined;
-        index++;
+        shown.add(showingIndex);
+        index = shown.size;
         layer.hidden = true;
-        if (index >= steps.length) return finish();
+        if (shown.size >= steps.length) return finish();
       }
       if (showing) return;
-      const next = steps[index];
-      if (next && next.mode === modeKey && info.playerTurn >= (next.turn ?? 1)) show(next, info.reachable);
+      const matches = (st: TutorialStep) =>
+        st.mode === modeKey &&
+        info.playerTurn >= (st.turn ?? 1) &&
+        (st.unitId === undefined || st.unitId === info.unitId) &&
+        (st.minHeight === undefined || (info.height ?? 0) >= st.minHeight) &&
+        (st.tally === undefined || (info.tallies?.[st.tally.id] ?? 0) >= st.tally.atLeast);
+      for (let i = 0; i < steps.length; i++) {
+        if (shown.has(i)) continue;
+        const st = steps[i]!;
+        if (matches(st)) {
+          showingIndex = i;
+          return show(st, info.reachable);
+        }
+        // 条件を決めていない段は順に出す（その段が出るまで、後の段は待つ）
+        if (st.unitId === undefined && st.tally === undefined) return;
+      }
     },
     update() {
       if (showing) place();

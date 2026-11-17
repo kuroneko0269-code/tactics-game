@@ -1,4 +1,5 @@
 import { MELODIES, TIMBRES, type MelodyDefinition, type SoundEffectId } from '../data/sounds';
+import { listenPhase, type ListenTimeline } from '../core/listen';
 
 /**
  * 音（序章に足りない仕組み）。音声のファイルは使わず、ブラウザの Web Audio で合成する。
@@ -28,6 +29,22 @@ export interface SoundSystem {
   onMelodyChange(listener: () => void): void;
   /** 鳴らした効果音の記録（自動テスト用。新しい順に最大 20） */
   readonly recent: () => readonly SoundEffectId[];
+  /**
+   * 遠くで繰り返し鳴らす旋律（戦闘中の丘の歌）。level は 0〜100。stopAmbient で止める。
+   * playMelody・stopMelody とは別に鳴る（会話の旋律と重ねられる）
+   */
+  playAmbient(melody: string, timbre: string, level: number): void;
+  stopAmbient(): void;
+  /** 遠くの旋律が鳴っているか（自動テスト用） */
+  readonly ambient: () => string | null;
+  /** 効果音ごとの、鳴らした回数（自動テスト用） */
+  readonly counts: () => Readonly<Partial<Record<SoundEffectId, number>>>;
+  /**
+   * 耳に当てて聞く操作: 押していた時間の合計 elapsedMs の所から、貝殻の音と旋律を鳴らす（core/listen.ts の表のとおり）。
+   * listenPause で止める（finished なら、鳴っている音の余韻は切らない）
+   */
+  listenFrom(melody: string, timbre: string, timeline: ListenTimeline, elapsedMs: number, shellMark: string): void;
+  listenPause(finished: boolean): void;
 }
 
 const NOTE_INDEX: Readonly<Record<string, number>> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
@@ -60,6 +77,7 @@ export function createSoundSystem(): SoundSystem {
   let muted = false;
   const listeners: (() => void)[] = [];
   const recentEffects: SoundEffectId[] = [];
+  const effectCounts: Partial<Record<SoundEffectId, number>> = {};
 
   /** 鳴っている旋律（音が出ていなくても、時計で進み具合を数える） */
   let current:
@@ -75,6 +93,10 @@ export function createSoundSystem(): SoundSystem {
       }
     | undefined;
 
+  /** 遠くで繰り返す旋律 */
+  let ambientState: { melody: string; timers: number[]; voices: { stop: (at: number) => void }[] } | undefined;
+  /** 耳に当てて聞く操作の音（貝殻の音と、旋律の音） */
+  let listenState: { timers: number[]; voices: { stop: (at: number) => void }[] } | undefined;
   const gainValue = () => (muted ? 0 : (volume / 100) * 0.8);
   const notify = () => listeners.forEach((l) => l());
 
@@ -242,6 +264,41 @@ export function createSoundSystem(): SoundSystem {
       case 'water':
         filteredNoise(ac, out, t, 1.6, 'lowpass', 700, 0.25, 0.4);
         return;
+      case 'waterSoft':
+        filteredNoise(ac, out, t, 1.2, 'lowpass', 500, 0.08, 0.3);
+        return;
+      case 'waterMid':
+        filteredNoise(ac, out, t, 1.4, 'lowpass', 600, 0.15, 0.35);
+        return;
+      case 'crack':
+        filteredNoise(ac, out, t, 0.18, 'bandpass', 900, 0.4);
+        blip(ac, out, 140, 60, t, 0.2, 'triangle', 0.3);
+        filteredNoise(ac, out, t + 0.08, 0.3, 'highpass', 2500, 0.12);
+        return;
+      case 'collapse':
+        filteredNoise(ac, out, t, 1.4, 'lowpass', 300, 0.5, 0.05);
+        blip(ac, out, 90, 35, t, 1.0, 'sine', 0.45);
+        [0.15, 0.35, 0.6].forEach((d) => filteredNoise(ac, out, t + d, 0.2, 'bandpass', 700, 0.25));
+        return;
+      case 'bell':
+        [880, 1318, 2217].forEach((f, i) => stone(ac, out, f, t, 1.4 - i * 0.3, 0.16 - i * 0.04));
+        return;
+      case 'windUp':
+        for (let i = 0; i < 6; i++) blip(ac, out, 2600, 2400, t + i * 0.09, 0.02, 'square', 0.04);
+        return;
+      // 言葉にしない声（文字にしない）
+      case 'voiceShout':
+        filteredNoise(ac, out, t, 0.35, 'bandpass', 900, 0.25, 0.02);
+        hum(ac, out, 260, t, 0.32, 0, 0.12);
+        hum(ac, out, 220, t + 0.12, 0.25, 0, 0.1);
+        return;
+      case 'voiceCall':
+        [392, 440, 392].forEach((f, i) => hum(ac, out, f, t + i * 0.22, 0.2, 0, 0.1));
+        return;
+      case 'voiceLaugh':
+        [330, 311, 294, 277].forEach((f, i) => hum(ac, out, f, t + i * 0.14, 0.1, 0, 0.09));
+        [196, 185, 175].forEach((f, i) => hum(ac, out, f, t + 0.05 + i * 0.16, 0.12, 0, 0.07));
+        return;
     }
   };
 
@@ -341,6 +398,7 @@ export function createSoundSystem(): SoundSystem {
     },
     effect(id) {
       recentEffects.unshift(id);
+      effectCounts[id] = (effectCounts[id] ?? 0) + 1;
       recentEffects.length = Math.min(recentEffects.length, 20);
       const ac = ctx && ctx.state === 'running' ? ctx : undefined;
       if (!ac || !master || muted || volume === 0) return;
@@ -352,5 +410,137 @@ export function createSoundSystem(): SoundSystem {
       listeners.push(listener);
     },
     recent: () => recentEffects.slice(),
+    playAmbient(name, timbreName, level) {
+      this.stopAmbient();
+      const def = MELODIES[name];
+      if (!def) return;
+      const notes = melodyNotes(def);
+      const last = notes[notes.length - 1];
+      // 終わりの後に、少し間を置いて頭から繰り返す（丘の歌は、終わりの三つの音の所が空く）
+      const loopSeconds = (last ? last.start + last.length : 1) + 2.1;
+      const state: NonNullable<typeof ambientState> = { melody: name, timers: [], voices: [] };
+      ambientState = state;
+      const timbre = TIMBRES[timbreName] ?? 'hum';
+      const round = () => {
+        if (ambientState !== state) return;
+        const ac = ctx && ctx.state === 'running' ? ctx : undefined;
+        if (ac && master) {
+          const g = ac.createGain();
+          g.gain.value = Math.max(0, Math.min(100, level)) / 100;
+          g.connect(master);
+          const base = ac.currentTime + 0.05;
+          state.voices = [];
+          for (const n of notes) {
+            if (n.frequency === null) continue;
+            if (timbre === 'choir') for (const d of [-7, 6]) state.voices.push(hum(ac, g, n.frequency, base + n.start, n.length, d, 0.08));
+            else if (timbre === 'stone') state.voices.push(stone(ac, g, n.frequency, base + n.start, n.length));
+            else state.voices.push(hum(ac, g, n.frequency, base + n.start, n.length));
+          }
+        }
+        state.timers.push(window.setTimeout(round, Math.round(loopSeconds * 1000)));
+      };
+      round();
+    },
+    stopAmbient() {
+      if (!ambientState) return;
+      for (const timer of ambientState.timers) window.clearTimeout(timer);
+      const now = ctx?.currentTime ?? 0;
+      for (const v of ambientState.voices) {
+        try {
+          v.stop(now + 0.05);
+        } catch {
+          // すでに止まっていれば何もしない
+        }
+      }
+      ambientState = undefined;
+    },
+    ambient: () => ambientState?.melody ?? null,
+    counts: () => ({ ...effectCounts }),
+    listenFrom(name, timbreName, timeline, elapsedMs, shellMark) {
+      this.listenPause(false);
+      clearMelody();
+      const def = MELODIES[name];
+      if (!def) return;
+      const notes = melodyNotes(def);
+      const timbre = TIMBRES[timbreName] ?? 'stone';
+      const state: NonNullable<typeof listenState> = { timers: [], voices: [] };
+      listenState = state;
+      const startPhase = listenPhase(timeline, elapsedMs);
+      // 鳴っている旋律として知らせる（画面の印と、自動テストの進み具合）。旋律が始まるまでは「かすかな音」の印
+      const playing: NonNullable<typeof current> = {
+        melody: name,
+        timbre: timbreName,
+        ...(startPhase.notesStarted === 0 ? { mark: shellMark } : {}),
+        index: startPhase.notesStarted,
+        total: notes.length,
+        timers: state.timers,
+        voices: state.voices,
+        waiters: [],
+      };
+      current = playing;
+      notify();
+      const ac = ctx && ctx.state === 'running' ? ctx : undefined;
+      const base = ac ? ac.currentTime + 0.03 : 0;
+      // 貝殻の音: 低く唸るような雑音を、表のとおりの大きさで（旋律が始まると小さくなって消える）
+      const shellEnd = timeline.shellMs + timeline.swellMs;
+      if (ac && master && elapsedMs < shellEnd) {
+        const seconds = (shellEnd - elapsedMs) / 1000;
+        const src = noise(ac, seconds + 0.1);
+        const filter = ac.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.value = 650;
+        filter.Q.value = 1.4;
+        const g = ac.createGain();
+        const level = (ms: number) => Math.max(0.0001, (listenPhase(timeline, ms).shellLevel / 100) * 0.09);
+        g.gain.setValueAtTime(level(elapsedMs), base);
+        for (let ms = elapsedMs + 250; ms <= shellEnd; ms += 250) g.gain.linearRampToValueAtTime(level(ms), base + (ms - elapsedMs) / 1000);
+        src.connect(filter);
+        filter.connect(g);
+        g.connect(master);
+        src.start(base);
+        src.stop(base + seconds + 0.1);
+        state.voices.push({ stop: (at) => src.stop(at) });
+      }
+      // 旋律: まだ鳴りはじめていない音を、表の時刻に鳴らす（音量は少しずつ大きく）
+      notes.forEach((n, i) => {
+        const startMs = timeline.shellMs + (timeline.noteStarts[i] ?? 0);
+        if (startMs < elapsedMs) return;
+        const delay = startMs - elapsedMs;
+        state.timers.push(
+          window.setTimeout(() => {
+            if (current !== playing) return;
+            playing.index = i + 1;
+            if (playing.mark !== undefined) {
+              delete playing.mark;
+              notify();
+            }
+          }, delay),
+        );
+        if (ac && master && n.frequency !== null) {
+          const lv = listenPhase(timeline, startMs).melodyLevel / 100;
+          if (timbre === 'stone') state.voices.push(stone(ac, master, n.frequency, base + delay / 1000, n.length, 0.22 * lv));
+          else state.voices.push(hum(ac, master, n.frequency, base + delay / 1000, n.length, 0, 0.2 * lv));
+        }
+      });
+    },
+    listenPause(finished) {
+      if (!listenState) return;
+      for (const timer of listenState.timers) window.clearTimeout(timer);
+      if (!finished) {
+        const now = ctx?.currentTime ?? 0;
+        for (const v of listenState.voices) {
+          try {
+            v.stop(now + 0.05);
+          } catch {
+            // すでに止まっていれば何もしない
+          }
+        }
+      }
+      listenState = undefined;
+      if (current) {
+        current = undefined;
+        notify();
+      }
+    },
   };
 }

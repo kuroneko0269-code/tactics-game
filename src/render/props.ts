@@ -29,7 +29,7 @@ function geometryOf(p: ShapePart): THREE.BufferGeometry {
 }
 
 /** 物の形のデータから、3D の部品の組を作る（材質の一覧も返す。光らせたり透かしたりするため） */
-export function buildModel(kind: string, parent: THREE.Object3D): THREE.MeshLambertMaterial[] {
+export function buildModel(kind: string, parent: THREE.Object3D, swaying?: { mesh: THREE.Mesh; x: number; amount: number }[]): THREE.MeshLambertMaterial[] {
   const parts = MODELS[kind] ?? MODELS.box!;
   const materials: THREE.MeshLambertMaterial[] = [];
   for (const p of parts) {
@@ -40,6 +40,7 @@ export function buildModel(kind: string, parent: THREE.Object3D): THREE.MeshLamb
     mesh.position.set(p.at[0], p.at[1], p.at[2]);
     if (p.rot) mesh.rotation.set(p.rot[0], p.rot[1], p.rot[2]);
     mesh.castShadow = true;
+    if (p.sway) swaying?.push({ mesh, x: p.at[0], amount: p.sway });
     parent.add(mesh);
   }
   return materials;
@@ -55,7 +56,8 @@ export function createPropModel(kind: string): Puppet {
   const group = new THREE.Group();
   const body = new THREE.Group();
   group.add(body);
-  const materials = buildModel(kind, body);
+  const swaying: { mesh: THREE.Mesh; x: number; amount: number }[] = [];
+  const materials = buildModel(kind, body, swaying);
   const base = materials.map((m) => m.emissive.clone());
   const baseOpacity = materials.map((m) => m.opacity);
   let yaw = 0;
@@ -84,6 +86,9 @@ export function createPropModel(kind: string): Puppet {
         amount > 0 ? m.emissive.setRGB(color.r * amount * 0.8, color.g * amount * 0.8, color.b * amount * 0.8) : m.emissive.copy(base[i]!),
       );
     },
-    update() {},
+    update(elapsed) {
+      // 揺れる部品（軒の灯など）
+      swaying.forEach((s, i) => (s.mesh.position.x = s.x + Math.sin(elapsed * 2.4 + i * 1.3) * s.amount));
+    },
   };
 }

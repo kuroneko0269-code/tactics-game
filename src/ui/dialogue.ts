@@ -1,5 +1,6 @@
 import { advance, applyDirective, applyStep, backlog, isFinished, nextStop, skipToEnd, walkPath, type StageState } from '../core/dialogue';
 import type { Coord, Direction } from '../core/geometry';
+import { listenPhase, listenTotal, type ListenTimeline } from '../core/listen';
 import type { Directive, RubySegment, Script } from '../core/script';
 import { el, showSheet } from './dom';
 import { plateStyle } from './speakerStyle';
@@ -26,6 +27,8 @@ export interface StagePort {
   step?(actor: string, from: Coord, to: Coord): Promise<void>;
   /** 話者の強調: マップ上のその人物の頭上に印を出し、カメラを少しだけ寄せる。null で印を消し、カメラを戻す */
   highlight?(speaker: string | null): void;
+  /** 物をタップする操作: その物を光らせる（null で消す）。物のあるマス */
+  setTapTarget?(name: string | null): Coord | undefined;
 }
 
 /** 顔の枠（話者の人形を別のカメラで写した canvas と、写す人物の切り替え） */
@@ -61,12 +64,23 @@ export interface DialogueSound {
   waitMelody(remaining: number): Promise<void>;
   /** 台本の効果音（台本に書く名前） */
   effect(name: string): void;
+  /** 戦闘中に遠くで鳴らしている旋律も含めて、すべての旋律を止める（台本の @節を止める） */
+  stopAll?(): void;
+  /**
+   * 耳に当てて聞く操作: 押していた時間の合計 elapsedMs の所から鳴らしはじめる（貝殻の音と旋律）。listenPause で止める。
+   * timeline は鳴らす時刻の表（src/core/listen.ts）
+   */
+  listenFrom?(melody: string, timbre: string, timeline: ListenTimeline, elapsedMs: number): void;
+  /** 聞く操作を止める（finished なら、鳴っている音の余韻は切らない） */
+  listenPause?(finished: boolean): void;
+  /** 旋律の各音の始まりの時刻（聞く操作の表を作るため） */
+  listenTimeline?(melody: string): ListenTimeline | undefined;
 }
 
 /** 自動プレイが読む、今の会話の様子 */
 export interface DialogueStatus {
   readonly active: boolean;
-  readonly waiting: 'line' | 'hold' | 'walk' | 'title' | 'busy' | 'none';
+  readonly waiting: 'line' | 'hold' | 'walk' | 'tap' | 'listen' | 'title' | 'busy' | 'none';
   readonly index: number;
   readonly speaker: string | null;
   readonly text: string;
@@ -83,6 +97,14 @@ export interface DialogueStatus {
   readonly title: string;
   /** 語りを字幕として出しているか */
   readonly caption: boolean;
+  /** 物の文字を出しているか */
+  readonly inscription: boolean;
+  /** 物をタップする操作の、物のあるマス */
+  readonly tapTarget?: Coord;
+  /** 耳に当てて聞く操作: 押していた時間の合計・全体の長さ・今押しているか */
+  readonly listenMs: number;
+  readonly listenTotal: number;
+  readonly listening: boolean;
 }
 
 export interface DialogueRun {
@@ -101,14 +123,16 @@ const FAST_LINE_MS = 280;
 
 /** ルビつきの文を、ruby 要素で組み立てる */
 export function rubyNodes(segments: readonly RubySegment[]): Node[] {
-  return segments.map((s) => {
-    if (!s.ruby) return document.createTextNode(s.text);
+  return segments.flatMap((s): Node[] => {
+    // 字幕の改行（台本の ／）
+    if (!s.ruby && s.text.includes('\n')) return s.text.split('\n').flatMap((t, i) => (i === 0 ? [document.createTextNode(t)] : [document.createElement('br'), document.createTextNode(t)]));
+    if (!s.ruby) return [document.createTextNode(s.text)];
     const r = document.createElement('ruby');
     r.append(s.text);
     const rt = document.createElement('rt');
     rt.textContent = s.ruby;
     r.append(rt);
-    return r;
+    return [r];
   });
 }
 
@@ -141,15 +165,23 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
   const body = el('div', 'dialogue-body');
   body.append(face, plate, text, next);
   box.append(tools, body);
+  // 最初の台詞が出るまで（動きだけの間）は、台詞の枠を出さず、道具のボタンだけを出す
+  box.classList.add('tools-only');
   // 語りの字幕（枠なし。時と場所を短く）
   const caption = el('div', 'dialogue-caption');
   caption.hidden = true;
   const captionText = el('div', 'dialogue-caption-text');
   caption.append(captionText, el('div', 'dialogue-caption-next', '▼'));
+  // 物に書かれた文字（測り棒の札・封蝋の印）。物を大きく映した上に、読める大きさで出す
+  const inscription = el('div', 'dialogue-inscription');
+  inscription.hidden = true;
+  const inscriptionLabel = el('div', 'dialogue-inscription-label');
+  const inscriptionText = el('div', 'dialogue-inscription-text');
+  inscription.append(inscriptionLabel, inscriptionText, el('div', 'dialogue-caption-next', '▼'));
   // 操作の場面の部品（押し続けるボタンと、手引きの文）
   const control = el('div', 'dialogue-control');
   control.hidden = true;
-  root.append(caption, control, box);
+  root.append(caption, inscription, control, box);
 
   let index = 0;
   let stage: StageState = deps.initial ?? { actors: {}, props: {}, dark: false };
@@ -164,6 +196,12 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
   let faceName: string | null = null;
   let highlighted: string | null = null;
   let shownTitle = '';
+  let tapTarget: Coord | undefined;
+  let listenMs = 0;
+  let listenAll = 0;
+  let listening = false;
+  /** 聞く操作で、押していた時間の合計（押している間も進む） */
+  let listenNow = () => listenMs;
   /** 今待っているもの（タップ・操作）を解決する関数 */
   let release: (() => void) | undefined;
   let walkTap: ((c: readonly Coord[]) => void) | undefined;
@@ -204,6 +242,10 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
     if (waiting === 'line') wake();
   });
   caption.addEventListener('click', () => {
+    if (sheetOpen) return;
+    if (waiting === 'line') wake();
+  });
+  inscription.addEventListener('click', () => {
     if (sheetOpen) return;
     if (waiting === 'line') wake();
   });
@@ -286,19 +328,34 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
     const who = step.speaker;
     speaker = who;
     shown = plain(step.text);
+    inscription.hidden = true;
+    if (step.inscription && who !== null) {
+      // 物の文字: 台詞の枠と字幕を隠し、画面の中ほどに大きく出す（顔の枠と話者の強調はしない。道具のボタンは残す）
+      caption.hidden = true;
+      box.hidden = false;
+      box.classList.add('tools-only');
+      box.classList.remove('narration');
+      inscriptionLabel.textContent = who;
+      inscriptionText.replaceChildren(...rubyNodes(step.text));
+      inscription.hidden = false;
+      shownTitle = '';
+      setSpeakerView(null, null);
+      return;
+    }
     if (who === null) {
       // 語り: 枠には入れず、字幕として出す（暗転中は画面の中央）
       captionText.replaceChildren(...rubyNodes(step.text));
       caption.classList.toggle('centered', stage.dark);
       caption.hidden = false;
       box.classList.add('narration');
+      box.classList.remove('tools-only');
       shownTitle = '';
       setSpeakerView(null, null);
       box.hidden = false;
       return;
     }
     caption.hidden = true;
-    box.classList.remove('narration');
+    box.classList.remove('narration', 'tools-only');
     name.textContent = who;
     paintPlate(plate, who);
     shownTitle = stage.titles?.[who] ?? '';
@@ -308,10 +365,15 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
     setSpeakerView(step.portrait === false ? null : who, step.highlight === false ? null : who);
     box.hidden = false;
   };
-  /** 台詞・語りを隠す（操作の場面・章の題の間） */
-  const hideLine = () => {
-    box.hidden = true;
+  /**
+   * 台詞・語りを隠す（操作の場面・章の題の間）。操作の場面では、早送り・読み返し・スキップのボタンだけを残す
+   * （操作の場面もスキップで飛ばせるように。台詞の枠は隠して、光るマスや物を覆わない）
+   */
+  const hideLine = (keepTools = false) => {
+    box.hidden = !keepTools;
+    box.classList.toggle('tools-only', keepTools);
     caption.hidden = true;
+    inscription.hidden = true;
     setSpeakerView(null, null);
   };
 
@@ -396,6 +458,106 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       release = close;
     });
 
+  /** 物をタップする操作（戸を開ける・石を拾う）。物を光らせ、そのマスか物を押すと次へ。手もとのボタンでも進める */
+  const tapStep = (target: string, label: string) =>
+    new Promise<void>((resolve) => {
+      control.hidden = false;
+      control.innerHTML = '';
+      hint('tap', TEXT.dialogue.tapHint);
+      tapTarget = port.setTapTarget?.(target) ?? (stage.props[target] ? { x: stage.props[target]!.x, z: stage.props[target]!.z } : undefined);
+      const button = el('button', 'screen-button tap-button', label || TEXT.dialogue.tapHint);
+      button.type = 'button';
+      button.setAttribute('aria-label', label || TEXT.dialogue.tapHint);
+      control.append(button);
+      const finish = () => {
+        walkTap = undefined;
+        tapTarget = undefined;
+        port.setTapTarget?.(null);
+        control.hidden = true;
+        control.innerHTML = '';
+        release = undefined;
+        resolve();
+      };
+      button.addEventListener('click', (e) => {
+        e.stopPropagation();
+        finish();
+      });
+      walkTap = (candidates) => {
+        const t = tapTarget;
+        if (t && candidates.some((c) => c.x === t.x && c.z === t.z)) finish();
+      };
+      release = finish;
+    });
+
+  /**
+   * 耳に当てて聞く操作。押している間だけ時間が進み、貝殻の音から旋律へ移る。離すと止まり、押し直すと続きから。
+   * 旋律を鳴りきると次へ（余韻は切らない）
+   */
+  const listenStep = (melody: string, timbre: string, label: string) =>
+    new Promise<void>((resolve) => {
+      const timeline = deps.sound?.listenTimeline?.(melody);
+      listenMs = 0;
+      listenAll = timeline ? listenTotal(timeline) : 0;
+      control.hidden = false;
+      control.innerHTML = '';
+      hint('listen', TEXT.dialogue.listenHint);
+      const button = el('button', 'hold-button listen-button');
+      button.type = 'button';
+      button.setAttribute('aria-label', label || TEXT.dialogue.listenDefault);
+      const meter = el('span', 'hold-meter');
+      const fill = el('span', 'hold-fill');
+      meter.append(fill);
+      button.append(el('span', 'label', label || TEXT.dialogue.listenDefault), meter);
+      control.append(button);
+      let since: number | undefined;
+      let timer: number | undefined;
+      const elapsed = () => listenMs + (since === undefined ? 0 : performance.now() - since);
+      listenNow = elapsed;
+      const finish = (completed: boolean) => {
+        if (timer !== undefined) window.clearInterval(timer);
+        timer = undefined;
+        since = undefined;
+        listening = false;
+        deps.sound?.listenPause?.(completed);
+        control.hidden = true;
+        control.innerHTML = '';
+        release = undefined;
+        resolve();
+      };
+      const tick = () => {
+        const e = elapsed();
+        fill.style.width = `${listenAll ? Math.min(100, Math.floor((e * 100) / listenAll)) : 100}%`;
+        if (!timeline || listenPhase(timeline, e).done) {
+          listenMs = listenAll;
+          finish(true);
+        }
+      };
+      const down = (e: Event) => {
+        e.preventDefault();
+        if (since !== undefined) return;
+        since = performance.now();
+        listening = true;
+        button.classList.add('holding');
+        if (timeline) deps.sound?.listenFrom?.(melody, timbre, timeline, Math.floor(listenMs));
+        timer = window.setInterval(tick, 50);
+        tick();
+      };
+      const up = () => {
+        if (since === undefined) return;
+        listenMs = Math.floor(elapsed());
+        since = undefined;
+        listening = false;
+        button.classList.remove('holding');
+        if (timer !== undefined) window.clearInterval(timer);
+        timer = undefined;
+        deps.sound?.listenPause?.(false);
+      };
+      button.addEventListener('pointerdown', down);
+      for (const ev of ['pointerup', 'pointerleave', 'pointercancel'] as const) button.addEventListener(ev, up);
+      // スキップされた時
+      release = () => finish(false);
+    });
+
   const walkStep = (actor: string, path: readonly Coord[]) =>
     new Promise<void>((resolve) => {
       let at = 0;
@@ -443,16 +605,24 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       if (step.kind === 'directive') {
         const d = step.directive;
         if (d.kind === 'hold') {
-          hideLine();
+          hideLine(true);
           waiting = 'hold';
           await holdStep(d.steps, d.label);
         } else if (d.kind === 'chapterTitle') {
           hideLine();
           waiting = 'title';
           await chapterTitle(d.title, d.subtitle);
+        } else if (d.kind === 'tapControl') {
+          hideLine(true);
+          waiting = 'tap';
+          await tapStep(d.target, d.label);
+        } else if (d.kind === 'listen') {
+          hideLine(true);
+          waiting = 'listen';
+          await listenStep(d.melody, d.timbre, d.label);
         } else if (d.kind === 'walkControl') {
-          // 歩かせる間は枠を隠す（横向きの低い画面で、枠が光るマスを覆わないように）
-          hideLine();
+          // 歩かせる間は台詞の枠を隠す（横向きの低い画面で、枠が光るマスを覆わないように）。スキップのボタンは残す
+          hideLine(true);
           waiting = 'walk';
           await walkStep(d.actor, d.path);
           if (!skipped) port.sync(applyDirective(stage, d));
@@ -515,7 +685,7 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
     }
     // 旋律と効果音（序章に足りない仕組み）。旋律は待たずに次へ進む（待つ時は 節を待つ）
     if (d.kind === 'melody') return deps.sound?.playMelody(d.melody, d.timbre, d.mark);
-    if (d.kind === 'melodyStop') return deps.sound?.stopMelody();
+    if (d.kind === 'melodyStop') return deps.sound?.stopAll ? deps.sound.stopAll() : deps.sound?.stopMelody();
     if (d.kind === 'sound') return deps.sound?.effect(d.sound);
     if (d.kind === 'melodyWait') {
       // 早送りの時は待たない（節はそのまま鳴り続ける）
@@ -551,6 +721,11 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       highlighted,
       title: shownTitle,
       caption: !caption.hidden,
+      inscription: !inscription.hidden,
+      ...(tapTarget ? { tapTarget } : {}),
+      listenMs: Math.floor(listenNow()),
+      listenTotal: listenAll,
+      listening,
     }),
     onTap(candidates) {
       walkTap?.(candidates);

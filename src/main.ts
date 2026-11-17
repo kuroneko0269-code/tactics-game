@@ -62,14 +62,15 @@ import { applyDirective, pointOf, propNamesMatching, walkPath, type StageState }
 import { parseScriptOrThrow, type Directive, type Script } from './core/script';
 import { createPortraitRenderer } from './render/portrait';
 import { createSpeakerMark } from './render/speakerMark';
+import { createVoiceMarks, type VoiceKind } from './render/voiceMark';
 import { advanceScene, currentScene, normalizeProgress, recapFor, STORY_START, type BookDefinition, type StoryProgress } from './core/story';
 import { books } from './data/story/books';
 import { scriptTexts } from './data/story/scripts';
-import { ACTOR_LOOKS as ACTOR_LOOK_IDS, GESTURES, LIGHT_COLORS, POSTURES, PROP_KINDS, scriptCatalog } from './data/story/stageDefs';
+import { ACTOR_LOOKS as ACTOR_LOOK_IDS, GESTURES, LIGHT_COLORS, POSTURES, PROP_KINDS, scriptCatalog, VOICES } from './data/story/stageDefs';
 import { stages } from './data/story/stages';
 import { parties } from './data/story/parties';
 import { DEFAULT_LOOK, LOOKS } from './data/story/looks';
-import { SOUND_EFFECTS } from './data/sounds';
+import { LISTEN, melodyTimes, SOUND_EFFECTS } from './data/sounds';
 import { prologueBattles } from './data/battles/prologue';
 import { createSceneView, type SceneView } from './render/sceneView';
 import { facingToward, runDialogue, type DialogueRun, type DialogueSound, type StagePort } from './ui/dialogue';
@@ -178,6 +179,16 @@ function main(): void {
     playMelody: (melody, timbre, mark) => sound.playMelody(melody, timbre, mark),
     stopMelody: () => sound.stopMelody(),
     waitMelody: (remaining) => sound.waitMelody(remaining),
+    stopAll: () => {
+      sound.stopMelody();
+      sound.stopAmbient();
+    },
+    listenFrom: (melody, timbre, timeline, elapsed) => sound.listenFrom(melody, timbre, timeline, elapsed, TEXT.sound.shellMark),
+    listenPause: (finished) => sound.listenPause(finished),
+    listenTimeline: (melody) => {
+      const t = melodyTimes(melody);
+      return t.noteStarts.length > 0 ? { shellMs: LISTEN.shellMs, swellMs: LISTEN.swellMs, noteStarts: t.noteStarts, melodyMs: t.totalMs } : undefined;
+    },
     effect: (name) => {
       const id = SOUND_EFFECTS[name];
       if (!id) return;
@@ -214,6 +225,7 @@ function main(): void {
   };
   let mapView = createMapView(createMap(site.map));
   let mapId = site.map.id;
+  let mapDef: MapDefinition = site.map;
   stage.scene.add(mapView.group);
   const rig = createCameraRig(rigOptions(mapView, site.map));
   /** 戦場のマップに切り替える（同じマップなら何もしない） */
@@ -223,6 +235,7 @@ function main(): void {
     mapView.dispose();
     mapView = createMapView(createMap(def));
     mapId = def.id;
+    mapDef = def;
     stage.scene.add(mapView.group);
     rig.setMap(rigOptions(mapView, def));
   };
@@ -258,6 +271,7 @@ function main(): void {
   };
 
   const endBattle = () => {
+    sound.stopAmbient();
     if (!battle) return;
     battle.tutorial?.dispose();
     battle.controller?.dispose();
@@ -628,8 +642,12 @@ function main(): void {
         return id ? LOOKS[id] : undefined;
       },
       bystanderLook: (look) => LOOKS[look] ?? DEFAULT_LOOK,
+      decor: (currentSite?.decor ?? []).map((d) => ({ id: d.id, model: PROP_KINDS[d.kind] ?? 'box', x: d.x, z: d.z })),
     });
     view.sync(start.state);
+    // 戦闘の間、遠くで続く旋律（丘の歌）。勝った後は台本の @節を止める で止まる
+    const ambient = currentSite?.ambient;
+    if (ambient && !start.state.winner) sound.playAmbient(ambient.melody, ambient.timbre, ambient.level);
     const hud = createHud(
       hudEl,
       start.state.map.id,
@@ -750,11 +768,65 @@ function main(): void {
   /** 顔の枠（話者の人形を別のカメラで写す）と、マップ上の話者の印 */
   const portrait = createPortraitRenderer(speakerLook);
   const speakerMark = createSpeakerMark(stage.scene);
+  /** 言葉にしない声の、頭上の小さな印 */
+  const voiceMarks = createVoiceMarks(stage.scene);
+  const VOICE_KINDS: Readonly<Record<string, VoiceKind>> = { voiceShout: 'shout', voiceCall: 'call', voiceLaugh: 'laugh' };
+  /** 言葉にしない声: 短い合成音と、頭上の小さな印（文字にはしない） */
+  const playVoice = (voice: string, headOf: () => THREE.Vector3 | undefined) => {
+    const id = VOICES[voice];
+    if (!id) return;
+    sound.effect(id);
+    voiceMarks.show(headOf, VOICE_KINDS[id] ?? 'call', 1.5);
+  };
+  /** 遠景のカット（@遠景）で見せている舞台（カットの間だけある） */
+  let cutView: SceneView | undefined;
+  /**
+   * 離れた場所を映す短いカット: 今の舞台を隠し、会話用の小さなマップを ms の間だけ見せて、元に戻す（暗転でつなぐ）
+   */
+  const showCut = async (stageId: string, ms: number, fast: boolean) => {
+    const def = stages.find((st) => st.id === stageId);
+    if (!def) return;
+    const fade = fast ? 80 : 300;
+    await setDark(true, fade);
+    const hidden = stage.scene.children.filter((o) => o.visible && !(o instanceof THREE.Light));
+    for (const o of hidden) o.visible = false;
+    const hudWas = hudEl.hidden;
+    const labelsWas = labelsEl.hidden;
+    hudEl.hidden = true;
+    labelsEl.hidden = true;
+    const cutMap = createMapView(createMap(def.map));
+    stage.scene.add(cutMap.group);
+    const view = createSceneView({ ...sceneViewOptions(), mapView: cutMap });
+    view.sync({ actors: {}, props: Object.fromEntries((def.props ?? []).map((p) => [p.id, { prop: p.kind, x: p.x, z: p.z }])), dark: false });
+    cutView = view;
+    const background = stage.scene.background;
+    if (def.sky !== undefined) stage.scene.background = new THREE.Color(def.sky);
+    rig.setMap(rigOptions(cutMap, def.map));
+    rig.reset();
+    const v = def.view;
+    if (v) void rig.lookAt(cutMap.tileTop(v.x, v.z).add(new THREE.Vector3(0, 0.5, 0)), SCENE_ZOOM[v.zoom], 0.01);
+    await setDark(false, fade);
+    await new Promise<void>((resolve) => window.setTimeout(resolve, fast ? Math.min(ms, 300) : ms));
+    await setDark(true, fade);
+    view.dispose();
+    cutView = undefined;
+    stage.scene.remove(cutMap.group);
+    cutMap.dispose();
+    stage.scene.background = background;
+    for (const o of hidden) o.visible = true;
+    hudEl.hidden = hudWas;
+    labelsEl.hidden = labelsWas;
+    rig.setMap(rigOptions(mapView, mapDef));
+    rig.reset();
+    await setDark(false, fade);
+  };
   /** 話者の強調: 頭上に印を出し、カメラを少しだけ寄せる（null で印を消し、カメラを戻す） */
   const highlightSpeaker = (headOf: (() => THREE.Vector3 | undefined) | null) => {
     speakerMark.setTarget(headOf);
     rig.nudge(headOf?.() ?? null);
   };
+  /** 昼の空の色（夜空のマップから戻す時に使う） */
+  const defaultSkyColor = (stage.scene.background as THREE.Color | null)?.clone();
   /** 会話の場面の舞台（会話の場面の間だけある） */
   let sceneView: SceneView | undefined;
   /** 進めている会話（会話の間だけある） */
@@ -762,6 +834,7 @@ function main(): void {
   function endScene() {
     sceneView?.dispose();
     sceneView = undefined;
+    if (stage.scene.background instanceof THREE.Color && defaultSkyColor) stage.scene.background.copy(defaultSkyColor);
   }
   /** 暗転（画面を暗くする）と明転 */
   const setDark = (dark: boolean, ms: number) =>
@@ -810,12 +883,32 @@ function main(): void {
   };
 
   /** 会話の場面の舞台を動かす口 */
-  const scenePort = (view: SceneView): StagePort => ({
-    sync: (st) => view.sync(st),
+  const scenePort = (first: SceneView): StagePort => {
+    let view = first;
+    /** 舞台の場所（@場所）を、会話用のマップに合わせる。違えば、マップと舞台を作り直す */
+    const ensureLocation = (st: StageState) => {
+      const want = st.location ?? sceneBaseStageId;
+      if (!want || want === currentStageId) return;
+      view = switchLocation(want);
+    };
+    return {
+    sync: (st) => {
+      ensureLocation(st);
+      view.sync(st);
+    },
     async run(d, before, fast) {
       view.setSpeed(fast ? 4 : 1);
       const after: StageState = applyDirective(before, d);
       switch (d.kind) {
+        case 'location':
+          ensureLocation(after);
+          return view.sync(after);
+        case 'cut':
+          return showCut(d.stageId, d.ms, fast);
+        case 'voice':
+          return playVoice(d.voice, () => view.actorHead(d.actor));
+        case 'propMove':
+          return view.moveProp(d.name, d, d.ms / 1000);
         case 'enter':
           return view.enter(d.actor, after.actors[d.actor]!);
         case 'exit':
@@ -890,7 +983,14 @@ function main(): void {
       await view.walk(actor, [from, to]);
     },
     highlight: (speaker) => highlightSpeaker(speaker && view.actorHead(speaker) ? () => view.actorHead(speaker) : null),
-  });
+    setTapTarget: (name) => {
+      const c = view.setTapTarget(name);
+      // タップする物が見えるように、カメラを寄せる
+      if (c) void rig.focusOn([mapView.tileTop(c.x, c.z), mapView.tileTop(c.x, c.z).add(new THREE.Vector3(0, 1, 0))]);
+      return c;
+    },
+    };
+  };
 
   /**
    * 戦闘中の会話と戦闘の後の台本の舞台（序章に足りない仕組み）。人形は戦闘のユニットと背景の人。
@@ -970,6 +1070,20 @@ function main(): void {
         case 'lightOff':
           await view.setLight(d.name, undefined);
           return;
+        case 'cut':
+          return showCut(d.stageId, d.ms, fast);
+        case 'voice': {
+          const id = battleActorId(d.actor);
+          if (id) playVoice(d.voice, () => battle?.view.actorHead(id));
+          return;
+        }
+        case 'propMove':
+          return view.moveProp(d.name, d, (fast ? Math.min(d.ms, 300) : d.ms) / 1000);
+        case 'posture': {
+          const id = battleActorId(d.actor);
+          if (id) await view.setActorPose(id, d.posture === '立つ' ? {} : (POSTURES[d.posture] ?? {}));
+          return;
+        }
         // 物を置く・消す（戦闘の後の台本。見た目だけ）
         case 'propPut':
           return view.putProp(d.name, PROP_KINDS[d.prop] ?? 'box', d);
@@ -1014,6 +1128,10 @@ function main(): void {
 
   /** 今の会話の場面の会話用マップの id（自動テスト用） */
   let currentStageId: string | null = null;
+  /** 今の会話の場面の、始めの会話用マップの id（@場所 で移る前） */
+  let sceneBaseStageId: string | null = null;
+  /** 今の会話の場面の印（場所を移しても同じ。場面が終わった時に、まだ同じ場面かを確かめる） */
+  let sceneToken: object = {};
 
   /** 題名の画面 */
   const showTitle = () => {
@@ -1071,8 +1189,9 @@ function main(): void {
     const scene = now.scene;
     if (scene.kind === 'dialogue' || scene.kind === 'interactive') {
       const { view, initial } = openScene(scene.stageId);
+      const token = sceneToken;
       void playScript(scene.scriptId, scenePort(view), initial).then(() => {
-        if (sceneView === view) completeScene(bookId);
+        if (sceneToken === token && sceneView) completeScene(bookId);
       });
       return;
     }
@@ -1091,25 +1210,49 @@ function main(): void {
   };
 
   /** 会話の場面の舞台を用意する（会話用マップ・人形と物の舞台・最初の様子） */
+  function sceneViewOptions() {
+    return {
+      scene: stage.scene,
+      mapView,
+      camera: () => rig.camera,
+      canvas: stage.renderer.domElement,
+      lookOf: (name: string) => LOOKS[ACTOR_LOOK_IDS[name] ?? ''] ?? DEFAULT_LOOK,
+      propModelOf: (kind: string) => PROP_KINDS[kind] ?? 'box',
+      postureOf: (name: string) => POSTURES[name],
+      lightColorOf: (name: string) => LIGHT_COLORS[name] ?? 0xffffff,
+    };
+  }
+  /** 会話用マップの空の色（夜空など）。省いたマップは昼の空 */
+  const defaultSky = (stage.scene.background as THREE.Color | null)?.clone() ?? new THREE.Color(0x9fc6e8);
+  const applySky = (def: { sky?: number }) => {
+    stage.scene.background = def.sky !== undefined ? new THREE.Color(def.sky) : defaultSky.clone();
+  };
+  /** 会話の場面の途中で場所を移す（@場所）: 会話用マップと舞台を作り直す（今の会話は続ける） */
+  function switchLocation(stageId: string): SceneView {
+    const stageDef = stages.find((st) => st.id === stageId);
+    if (!stageDef) throw new Error(`会話の場面のマップ ${stageId} が見つかりません`);
+    sceneView?.dispose();
+    currentStageId = stageDef.id;
+    useMap(stageDef.map);
+    applySky(stageDef);
+    rig.reset();
+    const view = createSceneView(sceneViewOptions());
+    sceneView = view;
+    return view;
+  }
   function openScene(stageId: string): { view: SceneView; initial: StageState } {
     endBattle();
     endScene();
     const stageDef = stages.find((st) => st.id === stageId);
     if (!stageDef) throw new Error(`会話の場面のマップ ${stageId} が見つかりません`);
     currentStageId = stageDef.id;
+    sceneBaseStageId = stageDef.id;
+    sceneToken = {};
     useMap(stageDef.map);
+    applySky(stageDef);
     setScreen('scene');
     rig.reset();
-    const view = createSceneView({
-      scene: stage.scene,
-      mapView,
-      camera: () => rig.camera,
-      canvas: stage.renderer.domElement,
-      lookOf: (name) => LOOKS[ACTOR_LOOK_IDS[name] ?? ''] ?? DEFAULT_LOOK,
-      propModelOf: (kind) => PROP_KINDS[kind] ?? 'box',
-      postureOf: (name) => POSTURES[name],
-      lightColorOf: (name) => LIGHT_COLORS[name] ?? 0xffffff,
-    });
+    const view = createSceneView(sceneViewOptions());
     sceneView = view;
     // 会話のマップに置いておく物（家具など）を、舞台の最初の様子にする
     const initial: StageState = {
@@ -1283,14 +1426,18 @@ function main(): void {
       playScene: (text: string, stageId: string) => {
         const script = parseScriptOrThrow('test', text, scriptCatalog);
         const { view, initial } = openScene(stageId);
+        const token = sceneToken;
         void playScript(script, scenePort(view), initial).then(() => {
-          if (sceneView !== view) return;
+          if (sceneToken !== token || !sceneView) return;
           endScene();
           showTitle();
         });
       },
       /** 鳴っている旋律と、最近の効果音（序章に足りない仕組み） */
-      sound: () => ({ melody: sound.melody(), recent: sound.recent() }),
+      sound: () => ({ melody: sound.melody(), recent: sound.recent(), ambient: sound.ambient(), counts: sound.counts() }),
+      /** 言葉にしない声の印の数・遠景のカットを見せているか */
+      voiceMarks: () => voiceMarks.count,
+      inCut: () => cutView !== undefined,
       /** 手ほどきの様子（なければ null） */
       tutorial: () => battle?.tutorial?.status() ?? null,
       /** 設定 */
@@ -1383,7 +1530,9 @@ function main(): void {
     mapView.update(elapsed);
     if (battle) battle.view.update(dt, elapsed);
     sceneView?.update(dt, elapsed);
+    cutView?.update(dt, elapsed);
     speakerMark.update(elapsed);
+    voiceMarks.update(dt, elapsed);
     stage.renderer.render(stage.scene, rig.camera);
     if (battle) {
       battle.labels.setPositions(battle.view.unitAnchors());

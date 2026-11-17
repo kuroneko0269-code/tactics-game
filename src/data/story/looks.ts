@@ -116,6 +116,8 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
   clanB: { body: 0x4a6a5a, accent: 0xc8a8a0, hair: 0x4a3a2a, hairStyle: 'long', robe: true },
   clanC: { body: 0x6a4a6a, accent: 0xe0d0a0, hair: 0x1a1a1a, hairStyle: 'braid' },
   clanD: { body: 0x9a7a4a, accent: 0x5a3a2a, hair: 0x6a4a2a, hairStyle: 'cropped', width: 1.1 },
+  /** 家までの道の見知らぬ男（店を持てた礼を言う。仮） */
+  stranger: { body: 0x7a5a4a, accent: 0xe8c070, hair: 0x2a2018, hairStyle: 'short', width: 1.04, legs: 0x4a3a2a },
   townsman: { body: 0x7a6a5a, accent: 0xd8c8a8, hair: 0x3a3028, hairStyle: 'short' },
   // ---- 物語の土台の試しの場面の人物（今は使っていない） ----
   instructor: { body: 0x4a5a7a, accent: 0xf2c14e, hair: 0x8a8a8a, hairStyle: 'short' },

@@ -3027,6 +3027,66 @@ body.in-dialogue #hud {
   animation: dialogue-blink 1s infinite;
 }
 
+/* 操作の場面の間は、台詞の枠を隠し、早送り・読み返し・スキップのボタンだけを残す */
+#dialogue > .dialogue-box.tools-only {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  pointer-events: none;
+}
+
+.dialogue-box.tools-only .dialogue-body {
+  display: none;
+}
+
+.dialogue-box.tools-only .dialogue-tools {
+  pointer-events: auto;
+}
+
+/* 物に書かれた文字（測り棒の札・封蝋の印）: 物を大きく映した上に、紙の札のように読める大きさで出す。
+   物は画面の中ほどに映すので、札は画面の上に出す（物を覆わないように） */
+.dialogue-inscription {
+  position: absolute;
+  left: 50%;
+  top: calc(max(10px, env(safe-area-inset-top)) + 40px);
+  transform: translateX(-50%);
+  width: min(calc(100% - 32px), 560px);
+  padding: 14px 20px 10px;
+  text-align: center;
+  background: #efe6cf;
+  color: #2a2016;
+  border: 2px solid #8a6a3a;
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
+  cursor: pointer;
+  touch-action: manipulation;
+  animation: caption-in 0.4s ease-out;
+}
+
+.dialogue-inscription[hidden] {
+  display: none;
+}
+
+.dialogue-inscription-label {
+  font-size: 13px;
+  color: #6a5034;
+  letter-spacing: 0.08em;
+  margin-bottom: 4px;
+}
+
+.dialogue-inscription-text {
+  font-family: 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif;
+  font-size: 22px;
+  line-height: 1.7;
+  letter-spacing: 0.04em;
+}
+
+/* 物をタップする操作の、手もとのボタン（物を押す代わりにも使える） */
+.tap-button {
+  min-height: 52px;
+  min-width: 200px;
+}
+
 @keyframes caption-in {
   from {
     opacity: 0;
@@ -3177,6 +3237,16 @@ body.in-dialogue #hud {
 
   .hold-button {
     min-height: 60px;
+  }
+
+  .dialogue-inscription {
+    top: calc(max(6px, env(safe-area-inset-top)) + 8px);
+    padding: 8px 16px 6px;
+  }
+
+  .dialogue-inscription-text {
+    font-size: 19px;
+    line-height: 1.55;
   }
 }
 

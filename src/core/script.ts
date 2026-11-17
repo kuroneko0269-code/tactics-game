@@ -85,16 +85,44 @@ export type Directive =
    */
   | { readonly kind: 'strike'; readonly actor: string; readonly target: string; readonly outcome: 'hit' | 'miss' | 'parry' }
   /** 戦闘中の台本で、人物を押し返す（見た目だけ。滑るように下がって、戦闘の状態の位置へ戻る）。会話の場面では何もしない */
-  | { readonly kind: 'pushBack'; readonly actor: string };
+  | { readonly kind: 'pushBack'; readonly actor: string }
+  /**
+   * 脚本の行の印（ゲーム脚本の「場面-行」。例 2-5）。舞台は変えない。次の印までの手順が、その行を作る。
+   * ref が「外」なら、脚本の行ではなく、ゲームとして足した演出（発注者の指定・章の題）
+   */
+  | { readonly kind: 'cue'; readonly ref: string }
+  /** 言葉にしない声（叫び・呼び込み・笑い）。短い合成音と、人物の頭上の小さな印で表す（文字にはしない） */
+  | { readonly kind: 'voice'; readonly actor: string; readonly voice: string }
+  /** 離れた場所を映す短いカット（会話用の小さなマップを ms の間だけ見せて、元の場所へ戻る）。舞台は変えない */
+  | { readonly kind: 'cut'; readonly stageId: string; readonly ms: number }
+  /** 場所を移す（会話用のマップを切り替える）。人物は全員いなくなり、物は新しいマップに置いておく物になる */
+  | { readonly kind: 'location'; readonly stageId: string; readonly props: readonly LocationProp[] }
+  /** 物を、そのマスへ ms の時間をかけて動かす（遠くの人々が後ずさる・丘を下りる） */
+  | { readonly kind: 'propMove'; readonly name: string; readonly x: number; readonly z: number; readonly ms: number }
+  /** 操作の場面: 物をタップする（戸を開ける・石を拾う）。label は物の近くに出す短い案内 */
+  | { readonly kind: 'tapControl'; readonly target: string; readonly label: string }
+  /**
+   * 操作の場面: 押し続けて聞く（石を耳に当てる）。押している間だけ鳴り、離すと止まり、押し直すと続きから鳴る。
+   * 初めは貝殻のようなかすかな音で、やがて旋律になる。旋律を鳴りきると次へ
+   */
+  | { readonly kind: 'listen'; readonly melody: string; readonly timbre: string; readonly label: string };
+
+/** 場所を移した時に、新しいマップに置いておく物 */
+export interface LocationProp {
+  readonly name: string;
+  readonly prop: string;
+  readonly x: number;
+  readonly z: number;
+}
 
 /** 持ち物を付ける所（右手・左手・腰・背） */
 export type ItemSlot = 'hand' | 'handL' | 'waist' | 'back';
 export const ITEM_SLOTS_JA: Readonly<Record<string, ItemSlot>> = { 手: 'hand', 右手: 'hand', 左手: 'handL', 腰: 'waist', 背: 'back' };
 
 /** 操作の場面の指示か（プレイヤーの操作を待つ） */
-export const isInteractive = (d: Directive) => d.kind === 'hold' || d.kind === 'walkControl';
+export const isInteractive = (d: Directive) => d.kind === 'hold' || d.kind === 'walkControl' || d.kind === 'tapControl' || d.kind === 'listen';
 /** 台詞の後ろには書けない指示か（操作の場面と章の題。1行に分けて書く） */
-const isStandalone = (d: Directive) => isInteractive(d) || d.kind === 'chapterTitle';
+const isStandalone = (d: Directive) => isInteractive(d) || d.kind === 'chapterTitle' || d.kind === 'cut' || d.kind === 'location';
 
 /** 歩く速さの言葉（百分率） */
 export const WALK_SPEEDS_JA: Readonly<Record<string, number>> = { ゆっくり: 50, ふつう: 100, 速く: 170, 走る: 250 };
@@ -113,6 +141,8 @@ export type ScriptStep =
       readonly directives: readonly Directive[];
       readonly portrait?: false;
       readonly highlight?: false;
+      /** 物に書かれた文字（@文字）。speaker は物の呼び名（測り棒の札など）。物を大きく映した上に、読める大きさで出す */
+      readonly inscription?: true;
     }
   | { readonly kind: 'directive'; readonly line: number; readonly directive: Directive };
 
@@ -142,6 +172,10 @@ export interface ScriptCatalog {
   readonly lightColors?: readonly string[];
   /** 続く姿勢の名前（「立つ」は元の姿勢） */
   readonly postures?: readonly string[];
+  /** 言葉にしない声の種類の名前（叫び・呼び込み・笑い） */
+  readonly voices?: readonly string[];
+  /** 会話用のマップの id → 置いておく物（@場所・@遠景 で使える場所） */
+  readonly locations?: Readonly<Record<string, readonly LocationProp[]>>;
 }
 
 export type ParseResult = { readonly ok: true; readonly script: Script } | { readonly ok: false; readonly errors: readonly ScriptError[] };
@@ -184,6 +218,14 @@ export const DIRECTIVE_USAGE: Readonly<Record<string, string>> = {
   姿勢: '@姿勢 名前 姿勢の名前（立つ で元に戻す）',
   攻撃: '@攻撃 名前 相手の名前 [当たる・外れる・払う]（戦闘中の台本だけ。見た目だけ）',
   押し返す: '@押し返す 名前（戦闘中の台本だけ。戦闘の中の位置へ滑るように戻る）',
+  脚本: '@脚本 場面-行（ゲーム脚本の行の印。例 @脚本 2-5。ゲームとして足した演出は @脚本 外）',
+  文字: '台詞の形で 物の呼び名「書かれた文」 @文字（物に書かれた文字を、読める大きさで出す）',
+  声: '@声 名前 声の種類（叫び・呼び込み・笑い。言葉にしない声）',
+  遠景: '@遠景 会話のマップの id 秒（離れた場所を短く映して戻る）',
+  場所: '@場所 会話のマップの id（場所を移す。人物はいなくなる）',
+  動かす: '@動かす 物の名前 x,z [秒]（物をそのマスへ動かす）',
+  タップ: '@タップ 物の名前 [案内の文]（操作の場面: 物をタップする）',
+  聞く: '@聞く 旋律の名前 音色 [案内の文]（操作の場面: 押している間だけ鳴る）',
 };
 
 const STRIKE_OUTCOMES: Readonly<Record<string, 'hit' | 'miss' | 'parry'>> = { 当たる: 'hit', 外れる: 'miss', 払う: 'parry' };
@@ -207,7 +249,7 @@ export function parseScript(id: string, text: string, catalog: ScriptCatalog): P
         for (const part of parts.slice(1)) {
           const d = parseDirective(part, catalog);
           if (typeof d === 'string') fail(d);
-          else if (isStandalone(d) || d.kind === 'together') fail('操作の場面・章題・同時は、@同時 の中に書けません');
+          else if (isStandalone(d) || d.kind === 'together') fail('操作の場面・章題・遠景・場所・同時は、@同時 の中に書けません');
           else inner.push(d);
         }
         if (parts.length < 3) fail(`@同時 の後ろに、同時に起こす指示を2つ以上書きます（書き方: ${DIRECTIVE_USAGE['同時']}）`);
@@ -236,7 +278,7 @@ export function parseScript(id: string, text: string, catalog: ScriptCatalog): P
       }
       const d = parseDirective(part, catalog);
       if (typeof d === 'string') fail(d);
-      else if (isStandalone(d)) fail('操作の場面（押し続ける・歩かせる）と章題は、台詞の後ろではなく1行に分けて書いてください');
+      else if (isStandalone(d)) fail('操作の場面（押し続ける・歩かせる・タップ・聞く）と章題・遠景・場所は、台詞の後ろではなく1行に分けて書いてください');
       else if (d.kind === 'together') fail('@同時 は、台詞の後ろではなく1行に分けて書いてください');
       else directives.push(d);
     }
@@ -249,6 +291,7 @@ export function parseScript(id: string, text: string, catalog: ScriptCatalog): P
     if (speaker === null && /^[^\s「」]+「[^」]*$/.test(body)) {
       return fail('台詞の 」 がありません（話者「台詞」 の形で、行の終わり（指示の前）を 」 にします）');
     }
+    if (speaker === null && modifiers.has('文字')) return fail(`@文字 は 物の呼び名「書かれた文」 の形の行に書きます（書き方: ${DIRECTIVE_USAGE['文字']}）`);
     steps.push({
       kind: 'line',
       line,
@@ -257,6 +300,7 @@ export function parseScript(id: string, text: string, catalog: ScriptCatalog): P
       directives,
       ...(modifiers.has('顔なし') ? { portrait: false as const } : {}),
       ...(modifiers.has('強調なし') ? { highlight: false as const } : {}),
+      ...(modifiers.has('文字') ? { inscription: true as const } : {}),
     });
   });
   return errors.length > 0 ? { ok: false, errors } : { ok: true, script: { id, steps } };
@@ -272,7 +316,7 @@ export function parseScriptOrThrow(id: string, text: string, catalog: ScriptCata
 const isAt = (c: string) => c === '@' || c === '＠';
 
 /** 台詞の後ろに書く、その台詞だけの見せ方の指定 */
-const LINE_MODIFIERS: readonly string[] = ['顔なし', '強調なし'];
+const LINE_MODIFIERS: readonly string[] = ['顔なし', '強調なし', '文字'];
 
 /** 「@a … @b …」を指示ごとに分ける */
 function splitDirectives(text: string): string[] {
@@ -302,7 +346,8 @@ export function parseRuby(text: string): RubySegment[] | string {
     const c = text[i]!;
     if (c !== '{') {
       if (c === '}') return 'ルビの } に対応する { がありません';
-      plain += c;
+      // ／ は改行（2行の字幕）
+      plain += c === '／' ? '\n' : c;
       continue;
     }
     const end = text.indexOf('}', i);
@@ -513,6 +558,49 @@ function parseDirective(text: string, catalog: ScriptCatalog): Directive | strin
     }
     case '押し返す':
       return need(1) ?? { kind: 'pushBack', actor: args[0]! };
+    case '脚本': {
+      const e = need(1);
+      if (e) return e;
+      if (args[0] !== '外' && !/^\d+-\d+$/.test(args[0]!)) return bad(`印「${args[0]}」は 場面-行（例 2-5）か 外 で書きます`);
+      return { kind: 'cue', ref: args[0]! };
+    }
+    case '声': {
+      const e = need(2);
+      if (e) return e;
+      if (!(catalog.voices ?? []).includes(args[1]!)) return bad(`声の種類「${args[1]}」はありません（使える種類: ${(catalog.voices ?? []).join('・')}）`);
+      return { kind: 'voice', actor: args[0]!, voice: args[1]! };
+    }
+    case '遠景':
+    case '場所': {
+      const e = need(name === '遠景' ? 2 : 1);
+      if (e) return e;
+      const props = catalog.locations?.[args[0]!];
+      if (!props) return bad(`会話のマップ「${args[0]}」はありません（使えるマップ: ${Object.keys(catalog.locations ?? {}).join('・')}）`);
+      if (name === '場所') return { kind: 'location', stageId: args[0]!, props };
+      const ms = seconds(args[1], 0);
+      if (typeof ms === 'string') return ms;
+      return { kind: 'cut', stageId: args[0]!, ms };
+    }
+    case '動かす': {
+      const e = need(2);
+      if (e) return e;
+      const c = coord(args[1]!);
+      if (!c) return bad(`位置「${args[1]}」は x,z の形で書きます`);
+      const ms = seconds(args[2], 1000);
+      if (typeof ms === 'string') return ms;
+      return { kind: 'propMove', name: args[0]!, ...c, ms };
+    }
+    case 'タップ':
+      return need(1) ?? { kind: 'tapControl', target: args[0]!, label: args.slice(1).join(' ') };
+    case '聞く': {
+      const e = need(2);
+      if (e) return e;
+      if (!(catalog.melodies ?? []).includes(args[0]!)) return bad(`旋律「${args[0]}」はありません（使える旋律: ${(catalog.melodies ?? []).join('・')}）`);
+      if (!(catalog.timbres ?? []).includes(args[1]!)) return bad(`音色「${args[1]}」はありません（使える音色: ${(catalog.timbres ?? []).join('・')}）`);
+      return { kind: 'listen', melody: args[0]!, timbre: args[1]!, label: args.slice(2).join(' ') };
+    }
+    case '文字':
+      return bad('@文字 は台詞の形の行の後ろに書きます');
     case '同時':
       return bad('@同時 は行の始めに書き、同じ行に同時に起こす指示を続けます');
     case '顔なし':
@@ -538,6 +626,6 @@ function parseDirective(text: string, catalog: ScriptCatalog): Directive | strin
 /** x,z（全角の数字と読点も使える）を読む */
 function coord(word: string): Coord | undefined {
   const normalized = word.replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xfee0)).replace(/[，、]/g, ',');
-  const m = /^(\d+),(\d+)$/.exec(normalized);
+  const m = /^(-?\d+),(-?\d+)$/.exec(normalized.replace(/－/g, '-'));
   return m ? { x: Number(m[1]), z: Number(m[2]) } : undefined;
 }

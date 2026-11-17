@@ -11,11 +11,17 @@ export const SCRIPT_RULES: ScriptRules = {
   maxSameSpeakerRun: 3,
   /** 1つの場面の語りは 2 行まで（3 行以上あったら知らせる） */
   maxNarrationLines: 2,
+  /** 字幕の画面の1行は、台詞と同じ 40 字以内を目安にする */
+  maxCaptionLineChars: 40,
+  /**
+   * 40 字を超えてよい字幕の行（ゲーム脚本の字幕を優先した例外の記録）。今の序章には、40 字を超える字幕の行はない。
+   * 足す時は、ルビを除いた1行の文をそのまま書き、どの場面かを書き添える
+   */
+  captionExceptions: [],
 };
 
 /**
  * 決まりに合わない所があった時に、テスト（npm test）を失敗にするか。
- * 今の序章の台本は決まりに合っていないので、台本を「ゲーム脚本」に差し替えるまでは知らせるだけにする（false）。
- * 差し替えた後に true にする。
+ * 序章の台本を「ゲーム脚本」に差し替えたので、失敗として扱う（true）。
  */
-export const ENFORCE_SCRIPT_RULES = false;
+export const ENFORCE_SCRIPT_RULES = true;

@@ -8,14 +8,17 @@
 
 - 開発計画: [docs/ROADMAP.md](docs/ROADMAP.md)
 - 仕様の要点: [docs/GAME_DESIGN.md](docs/GAME_DESIGN.md)
-- 物語の資料: [docs/story/design.md](docs/story/design.md)（設計書）、[docs/story/novel.md](docs/story/novel.md)（小説の本文）
+- 物語の資料: [docs/story/game-script-prologue.md](docs/story/game-script-prologue.md)（ゲーム脚本 序章）、[docs/story/design.md](docs/story/design.md)（設計書）、[docs/story/novel.md](docs/story/novel.md)（小説の本文）
 - 台本の書き方: [docs/SCRIPT_GUIDE.md](docs/SCRIPT_GUIDE.md)
 
 ## 物語の決まり
 
 - **物語の内容は docs/story/ が正。** 筋、人物、台詞を、実装の都合で変えない。変える必要があると考えた時は、
   理由と影響する章を PR の説明に質問として書き、発注者の判断を待つ。
-- **台詞は小説の本文から取る。** 設計書の「6. 台詞と表現の決まり」を守る。
+- **画面に出す台詞、動き、音は、ゲーム脚本（docs/story/game-script-*.md）が正。** 小説は、意図を確かめるための資料として読む。
+  小説の文章を、そのまま画面に出さない。設計書の「6. 台詞と表現の決まり」を守る。
+- **ゲーム脚本にない台詞を足さない。** 足す必要があると考えた時は、PR の説明に質問として書く。
+- **見せられるものは、動き、カメラ、物、音で見せる。文で説明しない。**（字幕は、ゲーム脚本の「字幕」の行だけ）
 - 設計書の「7. 宣伝」で伏せるとされている事柄を、画面の説明文、ジョブやアイテムの名前、PR の題名で明かさない。
 - **分岐とマルチエンディングは作らない。**（会話に選択肢は置かない）
 - 物語の台本（`src/data/story/scripts/`）と章の「これまで」は、例外として text.ts ではなく台本と章のデータに書く。
@@ -173,8 +176,11 @@ npm run balance      # バランス確認: 画面を使わず AI 同士を戦わ
 - 膠着（両軍で 30 手番、ダメージ・回復・状態変化がない時の決着。フェーズ2-6）の判定は `src/core/scenario.ts` の `judgeStalemate`、数値は `src/data/battleRules.ts` の `stalemate`。
 - 会話の見せ方（会話の見せ方の PR A）: 顔の枠は `src/render/portrait.ts`（話者の人形を別のカメラで写す）、話者の頭上の印は `src/render/speakerMark.ts`、
   カメラの控えめな寄せ（`nudge`）と、時間をかけて動かす `lookAt` は `src/render/cameraRig.ts`、名前の札の色は `src/ui/speakerStyle.ts`、
-  台本の決まり（字数・続けて話す枠・語りの行数）の検査は `src/core/scriptRules.ts`、数値と「失敗として扱うか」（`ENFORCE_SCRIPT_RULES`。今は知らせるだけ）は
-  `src/data/story/scriptRules.ts`。一覧は `npm run script-rules`。
+  台本の決まり（字数・続けて話す枠・語りの行数・字幕の1行の字数）の検査は `src/core/scriptRules.ts`、数値と「失敗として扱うか」（`ENFORCE_SCRIPT_RULES`。
+  序章をゲーム脚本に差し替えた後は失敗として扱う）と字幕の字数の例外は `src/data/story/scriptRules.ts`。一覧は `npm run script-rules`。
+- ゲーム脚本のための仕組み（ゲーム脚本の PR）: 物の文字（`@文字`）・言葉にしない声（`@声`。頭上の印は `src/render/voiceMark.ts`）・遠景のカット（`@遠景`）・
+  場所を移す（`@場所`）・物を動かす（`@動かす`）・物をタップする（`@タップ`）・耳に当てて聞く（`@聞く`。進み具合の計算は `src/core/listen.ts`、音は `src/ui/sound.ts`）は
+  `src/core/script.ts`・`dialogue.ts`・`src/ui/dialogue.ts`・`src/main.ts`。戦場の置き物（`decor`。遠景の大勢の人々など）と遠くで続く旋律（`ambient`）は戦場の定義。
 - 物語の土台: 章と場面は `src/core/story.ts`（本の定義は `src/data/story/books.ts`）、台本の読み込みは `src/core/script.ts`、
   会話の進行と舞台の様子は `src/core/dialogue.ts`、会話の枠と操作の場面は `src/ui/dialogue.ts`、舞台の見た目は `src/render/sceneView.ts`。
   台本は `src/data/story/scripts/`、仕草・物・人物の見た目の名前は `src/data/story/stageDefs.ts`、会話用のマップは `src/data/story/stages.ts`。
@@ -184,7 +190,9 @@ npm run balance      # バランス確認: 画面を使わず AI 同士を戦わ
   物の形は `src/data/story/models.ts`、人物の見た目は `src/data/story/looks.ts`、会話用のマップは `src/data/story/stages.ts`（文字の行は `mapRows.ts`）、旋律と効果音の名前は `src/data/sounds.ts`、章のために決めた部隊は `src/data/story/parties.ts`。
   音の合成は `src/ui/sound.ts`、手ほどきは `src/ui/tutorial.ts`、設定の欄と音の印は `src/ui/settingsSheet.ts`。
   設定（音量・消音・見た手ほどき）はセーブデータとは別に `src/save/saveStore.ts` の `createSettingsStore` で保存する（「はじめから」でも消さない）。
-- 序章（序章の PR B）: 台本は `src/data/story/scripts/prologue.ts`、章と場面は `src/data/story/books.ts`（15 の場面）、2つの戦闘は `src/data/battles/prologue/`、
+- 序章（ゲーム脚本の PR）: 台本は `src/data/story/scripts/prologue.ts`（ゲーム脚本の表の1行ずつを `@脚本 場面-行` の印のついた指示の組として書く。
+  対応はテスト `src/data/story/gameScript.test.ts` で確かめる）、章と場面は `src/data/story/books.ts`（脚本の10場面。堰と丘は戦闘の前と戦闘に分けて 12 の場面）、
+  見込みの時間は `src/core/scriptTiming.ts`（数値は `src/data/story/scriptTiming.ts`。`npm run script-rules` で場面ごとに出す）、2つの戦闘は `src/data/battles/prologue/`、
   序章の部隊は `src/data/story/parties.ts` の `prologueParty`、3つの節（ユナの鼻歌・月を呼ぶ節・送りの節）は `src/data/sounds.ts`。
 - 戦闘で人は死なない決まり: 種類と退場しない指定は `src/core/battle.ts`（`defeat`・`countKnockout`・`knockoutCountOf`）、膝をつく姿と退く動きは `src/render/battleView.ts`。
   勝利条件 `hitUnit` の `finisherId`（最後の一撃を当てられるユニット。序章の丘のトウマ）と、勝敗条件の `defeatAllWins: false`（敵をすべて退けても勝たない。序章の堰）。

@@ -135,3 +135,64 @@ describe('台本の決まりの検査（読む量の決まり）', () => {
     expect(formatRuleWarning(w[0]!)).toMatch(/^台本 t: 4行目: 語りが 3 行あります.*1・3・4行目/);
   });
 });
+
+describe('ゲーム脚本のための指示（物の文字・声・遠景・場所・物を動かす・タップ・聞く・脚本の行の印）', () => {
+  const cat: ScriptCatalog = {
+    ...catalog,
+    props: [...catalog.props, '石', '戸'],
+    melodies: ['ユナの鼻歌'],
+    timbres: ['石'],
+    voices: ['叫び', '笑い'],
+    locations: { 'stage-a': [{ name: '机', prop: '椀', x: 1, z: 1 }], 'stage-far': [] },
+  };
+  it('物の文字は、物の呼び名「文」 @文字 で読む。字数の決まりは台詞と同じで、人物の台詞の続きには数えない', () => {
+    const s = parseScriptOrThrow('t', ['測り棒の札「高い所から撃つ矢は、遠くまで届く。」 @文字', 'ユナ「a」', 'ユナ「b」', '封蝋「未来より」 @文字', 'ユナ「c」', 'ユナ「d」'].join('\n'), cat);
+    const first = s.steps[0]!;
+    expect(first).toMatchObject({ kind: 'line', speaker: '測り棒の札', inscription: true });
+    expect(checkScriptRules(s, rules)).toEqual([]);
+    const long = parseScriptOrThrow('t', `札「${'あ'.repeat(41)}」 @文字`, cat);
+    expect(checkScriptRules(long, rules).map((w) => w.kind)).toEqual(['length']);
+    expect(parseScript('t', 'これは語り @文字', cat).ok).toBe(false);
+  });
+
+  it('字幕は ／ で改行する。字幕の1行の字数を調べ、例外に書いた行は知らせない', () => {
+    const s = parseScriptOrThrow('t', `一行目。／${'い'.repeat(41)}`, cat);
+    const line = s.steps[0]!;
+    if (line.kind !== 'line') throw new Error();
+    expect(line.text.map((x) => x.text).join('')).toBe(`一行目。\n${'い'.repeat(41)}`);
+    expect(checkScriptRules(s, { ...rules, maxCaptionLineChars: 40 }).map((w) => w.kind)).toEqual(['caption']);
+    expect(checkScriptRules(s, { ...rules, maxCaptionLineChars: 40, captionExceptions: ['い'.repeat(41)] })).toEqual([]);
+  });
+
+  it('声・遠景・場所・物を動かす・タップ・聞く・脚本の行の印を読む。書き間違いは知らせる', () => {
+    const ds = directivesOf.call(null, '') as Directive[];
+    expect(ds).toEqual([]);
+    const s = parseScriptOrThrow(
+      't',
+      ['@脚本 2-5', '@声 番兵 叫び', '@遠景 stage-far 3', '@場所 stage-a', '@動かす 机 3,4 2', '@タップ 戸 戸を開ける', '@聞く ユナの鼻歌 石 耳に当てる', 'ユナ「a」 @脚本 2-6', '@脚本 外'].join('\n'),
+      cat,
+    );
+    const got = s.steps.flatMap((x) => (x.kind === 'directive' ? [x.directive] : x.directives));
+    expect(got).toEqual([
+      { kind: 'cue', ref: '2-5' },
+      { kind: 'voice', actor: '番兵', voice: '叫び' },
+      { kind: 'cut', stageId: 'stage-far', ms: 3000 },
+      { kind: 'location', stageId: 'stage-a', props: [{ name: '机', prop: '椀', x: 1, z: 1 }] },
+      { kind: 'propMove', name: '机', x: 3, z: 4, ms: 2000 },
+      { kind: 'tapControl', target: '戸', label: '戸を開ける' },
+      { kind: 'listen', melody: 'ユナの鼻歌', timbre: '石', label: '耳に当てる' },
+      { kind: 'cue', ref: '2-6' },
+      { kind: 'cue', ref: '外' },
+    ]);
+    for (const bad of ['@声 番兵 歌う', '@遠景 stage-x 2', '@場所 stage-x', '@聞く 何か 石', '@脚本 二', 'ユナ「a」 @タップ 戸', 'ユナ「a」 @場所 stage-a', '@同時 @遠景 stage-far 1 @間 1']) {
+      expect(parseScript('t', bad, cat).ok, bad).toBe(false);
+    }
+  });
+
+  it('場所を移すと、人物と光はいなくなり、物は新しいマップの物になる。物を動かすと位置が変わる', () => {
+    const before: StageState = { ...EMPTY_STAGE, actors: { ユナ: { x: 1, z: 1, facing: 'south' } }, props: { 椀1: { prop: '椀', x: 2, z: 2 } }, lights: { 門: { x: 1, z: 1, color: '白' } }, dark: true };
+    const s = parseScriptOrThrow('t', '@場所 stage-a\n@動かす 机 3,4', cat);
+    const after = stageAt(s, 2, before);
+    expect(after).toEqual({ actors: {}, props: { 机: { prop: '椀', x: 3, z: 4 } }, dark: true, location: 'stage-a' });
+  });
+});

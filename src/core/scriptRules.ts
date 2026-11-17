@@ -12,9 +12,13 @@ export interface ScriptRules {
   readonly maxSameSpeakerRun: number;
   /** 1つの場面（1つの台本）で語りに使ってよい行の数（これを超えると知らせる） */
   readonly maxNarrationLines: number;
+  /** 字幕（語り）の画面の1行の字数の上限（省くと調べない。／ で改行した行ごとに数える） */
+  readonly maxCaptionLineChars?: number;
+  /** 字数の上限を超えてよい字幕の行（ゲーム脚本の字幕を優先した例外。ルビを除いた1行の文） */
+  readonly captionExceptions?: readonly string[];
 }
 
-export type ScriptRuleKind = 'length' | 'sameSpeaker' | 'narration';
+export type ScriptRuleKind = 'length' | 'sameSpeaker' | 'narration' | 'caption';
 
 export interface ScriptRuleWarning {
   readonly scriptId: string;
@@ -41,10 +45,23 @@ export function checkScriptRules(script: Script, rules: ScriptRules): ScriptRule
       narration.push(step.line);
       runSpeaker = null;
       runLength = 0;
+      const max = rules.maxCaptionLineChars;
+      if (max !== undefined) {
+        for (const row of text.split('\n')) {
+          const n = charCount(row);
+          if (n > max && !(rules.captionExceptions ?? []).includes(row)) warn(step.line, 'caption', `字幕の1行が ${n} 字あります（1行に ${max} 字まで）: ${row}`);
+        }
+      }
       continue;
     }
     const n = charCount(text);
-    if (n > rules.maxLineChars) warn(step.line, 'length', `台詞が ${n} 字あります（1つの枠に ${rules.maxLineChars} 字まで）: ${step.speaker}「${text}」`);
+    if (n > rules.maxLineChars) warn(step.line, 'length', `${step.inscription ? '物の文字' : '台詞'}が ${n} 字あります（1つの枠に ${rules.maxLineChars} 字まで）: ${step.speaker}「${text}」`);
+    // 物の文字は、人物の台詞の続きに数えない
+    if (step.inscription) {
+      runSpeaker = null;
+      runLength = 0;
+      continue;
+    }
     if (step.speaker === runSpeaker) runLength++;
     else {
       runSpeaker = step.speaker;
