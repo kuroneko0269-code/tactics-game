@@ -9,9 +9,11 @@ import { enemyUnit, kit } from '../enemyUnits';
  * 祭壇から動かない（移動力 0）。
  * 誓いの剣（ガレス）に、正面以外から武器の攻撃を4回当てると勝利。最後の1回（剣を折る一撃）はトウマだけが当てられる
  * （ほかの仲間の攻撃では、3回の後は回数が進まない。PR の回答 4）。ガレスは反撃と受け流しを持ち、強い。
- * 衛士は、隊が退けて駆け上がった後（会話の「隊は衛士を退け、祭壇へ駆け上がった。」）なので、戦闘には出さない。
- * 隊は祭壇の手前（高さ 2 の段）から始める。始めに演出（ゴードが斬りかかって剣ごと押し返され、キリの矢が2本払われる）を見せてから操作が始まる。
- * 坂の両わきに、七つの氏族の人々（戦わない）が立つ。
+ * 衛士が2人、祭壇の前にガレスと共に立つ（発注者の指定。弱め。HP が尽きると膝をつき、この戦闘では退場しない）。
+ * 初めて遊ぶ人が、5手番前後で剣を折れる強さを保つ（npm run balance -- --prologue で確かめる）。
+ * 隊は祭壇の手前（高さ 2 の段）から始める。始めに演出（ガレスが剣を抜き、ゴードが斬りかかって剣ごと押し返され、キリの矢が2本払われる）を
+ * 見せてから操作が始まる（戦闘中の台詞はない）。3回目が当たった後、手ほどきで「最後の一撃は、トウマで」と出す。
+ * 坂の両わきに、七つの氏族の人々（戦わない）が立つ。マップの外の左右と砦の後ろに、遠景の大勢の人々（decor）を並べる。
  */
 const map = stageMap('prologue-hill', [
   '3s 3s 3s 5s 5s 5s 3s 3s 3s',
@@ -54,6 +56,9 @@ export const hillBattle: BattleSite = {
           minHp: 1,
           // 祭壇から動かず、HP も尽きないので、退場の決まりは関係しない
         },
+        // 祭壇の前の衛士（弱め）。HP が尽きると膝をつき、最後まで残る
+        { ...enemyUnit({ id: 'hill-sentry-1', job: warrior, x: 2, z: 2, level: 1, statBonus: { maxHp: -16, attack: -9 }, equipment: kit(warrior, 1) }), noRetire: true },
+        { ...enemyUnit({ id: 'hill-sentry-2', job: warrior, x: 6, z: 2, level: 1, statBonus: { maxHp: -16, attack: -9 }, equipment: kit(warrior, 1) }), noRetire: true },
       ],
     },
   ],
@@ -63,6 +68,8 @@ export const hillBattle: BattleSite = {
   },
   events: [
     { id: 'hill-start', trigger: { kind: 'turn', turn: 0 }, effects: [{ kind: 'dialogue', scriptId: 'prologueHillStart' }] },
+    // 誓いの剣に当たるたびに、鐘のような音（4回目は勝った後の台本で、剣が折れる音）
+    ...[1, 2, 3].map((n) => ({ id: `hill-bell-${n}`, trigger: { kind: 'tally' as const, id: 'oath-sword', count: n }, effects: [{ kind: 'dialogue' as const, scriptId: 'prologueHillBell' }] })),
   ],
   // 七つの氏族の人々（戦わない）。坂の両わきと、砦の壁の前
   bystanders: [
@@ -85,7 +92,26 @@ export const hillBattle: BattleSite = {
     氏族F: 'clan-6',
     氏族G: 'clan-2',
     氏族H: 'clan-5',
+    衛士: 'hill-sentry-1',
+    衛士B: 'hill-sentry-2',
   },
-  looks: { 'hill-gareth': 'garethOath', touma: 'toumaLamp' },
+  looks: { 'hill-gareth': 'garethOath', touma: 'toumaLamp', 'hill-sentry-1': 'sentinel', 'hill-sentry-2': 'sentinel' },
   afterVictory: 'prologueHillAfter',
+  // 歌は戦闘中も遠くで続く
+  ambient: { melody: '月を呼ぶ節', timbre: '歌声', level: 35 },
+  tutorial: [{ id: 'hill-finisher', mode: 'main', tally: { id: 'oath-sword', atLeast: 3 }, point: { kind: 'unit', unitId: 'hill-gareth' } }],
+  decor: [
+    { id: '砦', kind: '砦', x: 4, z: 0 },
+    { id: '旗1', kind: '旗', x: 2, z: 1 },
+    { id: '旗2', kind: '青い旗', x: 6, z: 1 },
+    // 遠景の大勢の人々（数千の人々・七つの氏族）。マップの外の左右と、砦の後ろ
+    { id: '群衆1', kind: '群衆', x: -1, z: 2 },
+    { id: '群衆2', kind: '群衆', x: -1, z: 4 },
+    { id: '群衆3', kind: '群衆', x: -1, z: 6 },
+    { id: '群衆4', kind: '群衆', x: 9, z: 2 },
+    { id: '群衆5', kind: '群衆', x: 9, z: 4 },
+    { id: '群衆6', kind: '群衆', x: 9, z: 6 },
+    { id: '群衆7', kind: '群衆', x: 2, z: -1 },
+    { id: '群衆8', kind: '群衆', x: 6, z: -1 },
+  ],
 };

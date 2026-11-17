@@ -78,6 +78,11 @@ export const TEXT = {
     holdDefault: '押し続ける',
     holdHint: 'ボタンを押し続けると、少しずつ進みます。指を離すと止まります。',
     walkHint: '光っているマスを押すと、1マスずつ歩きます。',
+    /** 物をタップする操作（戸を開ける・石を拾う） */
+    tapHint: '光っている所を押します。',
+    /** 耳に当てて聞く操作（押している間だけ鳴る） */
+    listenHint: '押している間だけ、音が聞こえます。指を離すと止まり、押し直すと続きから聞こえます。',
+    listenDefault: '耳に当てる',
     /** 章の題の画面で、次へ進むための案内 */
     titleNext: 'タップで進む',
   },
@@ -88,7 +93,20 @@ export const TEXT = {
     melodyMark: (label: string) => `♪ ${label}`,
     timbres: { 鼻歌: '鼻歌', 石: '石の音', 歌声: '歌声' } as Readonly<Record<string, string>>,
     /** 台本の効果音のうち、画面にも短く出すもの */
-    effectMarks: { gate: '光の音', chime: '石の鳴る音', water: '水の音', break: '折れる音' } as Readonly<Record<string, string>>,
+    effectMarks: {
+      gate: '光の音',
+      chime: '石の鳴る音',
+      water: '水の音',
+      break: '折れる音',
+      crack: '石の割れる音',
+      collapse: '崩れる音',
+      waterSoft: '水の音',
+      waterMid: '水の音',
+      bell: '鐘の音',
+      windUp: 'ねじを巻く音',
+    } as Readonly<Record<string, string>>,
+    /** 耳に当てて聞く間の、貝殻のような音の印 */
+    shellMark: '♪ かすかな音',
   },
 
   /** 設定（序章に足りない仕組み） */
@@ -117,7 +135,12 @@ export const TEXT = {
       'weir-target': '赤く光っている相手を押して選びます。届く相手がいなければ「戻る」。',
       'weir-confirm': '当たる見込みとダメージを確かめて「確定」を押します。',
       'weir-facing': '最後に向きを選んで「手番を終える」。背中から攻撃されると、大きな痛手になります。',
-      'weir-high': '高い所から撃つ矢は、遠くまで届きます。魔法は、唱えてから発動するまで少し時間がかかります。',
+      'weir-gord': 'ゴードは前へ。番兵を引きつけます。',
+      'weir-kiri': 'キリは崖の上へ。光っているマスから登れます。',
+      /** 崖の上に立った時、測り棒の札の文字をもう一度出す（ゲーム脚本の序章 1-9） */
+      'weir-high': '測り棒の札「高い所から撃つ矢は、遠くまで届く。兄さんは高い所が好きでしょう。」',
+      'weir-fen': 'フェンの「攻撃魔法」の「炎」で、合わせ目を割ります。唱えてから発動するまで、少し時間がかかります。',
+      'hill-finisher': '最後の一撃は、トウマで',
     } as Readonly<Record<string, string>>,
   },
 

@@ -34,7 +34,7 @@ import type { Roster } from './progression';
 import type { StoryProgress } from './story';
 
 /** 今のセーブデータの版 */
-export const SAVE_VERSION = 7;
+export const SAVE_VERSION = 8;
 
 /** 途中の戦闘が、どこの戦闘か（訓練戦の段階か、ダンジョンの何戦目か） */
 export type BattleOrigin =
@@ -199,7 +199,30 @@ export const SAVE_MIGRATIONS: SaveMigrations = {
     }
     return { ...old, version: 7, battle, story };
   },
+  /**
+   * 版 7 → 8: 序章の台本をゲーム脚本に差し替え、場面を 15 から 12 に並べ直した。本編の序章の場面の番号を付け替え、
+   * 物語の途中の戦闘は捨てる（丘の戦闘に衛士が加わり、戦闘中の会話も変わったため。戦闘の場面の始め（配置）から始め直す）
+   */
+  7: (old) => {
+    const battle = (old.battle as { origin?: { kind?: string } } | null | undefined)?.origin?.kind === 'story' ? null : (old.battle ?? null);
+    let story = old.story as unknown;
+    if (typeof story === 'object' && story !== null) {
+      const main = (story as Record<string, unknown>).main as Record<string, unknown> | undefined;
+      if (main && typeof main === 'object' && main.chapter === 0 && Number.isInteger(main.scene) && main.finished !== true) {
+        const scene = PROLOGUE_SCENES_V7_TO_V8[main.scene as number];
+        story = { ...(story as Record<string, unknown>), main: { ...main, scene: scene ?? 0 } };
+      }
+    }
+    return { ...old, version: 8, battle, story };
+  },
 };
+
+/**
+ * 版 7 の序章の場面の番号 → 版 8 の番号。版 7 は 15 の場面（冒頭・堰の会話・堰の戦闘・門の脇・話を聞く部屋・広間・家・都・門・丘の会話・
+ * 丘の戦闘・門の脇・話を聞く部屋・家までの道・物置）。版 8 はゲーム脚本の10場面の並びで 12 の場面（門の脇と話を聞く部屋、
+ * 家までの道と物置を、それぞれ1つにまとめた。まとめた後ろの方からは、まとめた場面の始めから）
+ */
+const PROLOGUE_SCENES_V7_TO_V8: readonly number[] = [0, 1, 2, 3, 3, 4, 5, 6, 7, 8, 9, 10, 10, 11, 11];
 
 /**
  * 版 6 の序章の場面の番号 → 版 7 の番号。版 6 は 12 の場面（冒頭・堰の会話・堰の戦闘・塔・家・都・門・丘の会話・丘の戦闘・帰還・道・物置）。

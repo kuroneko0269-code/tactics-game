@@ -119,7 +119,10 @@ export function createMapView(initialMap: BattleMap): MapView {
   const edgeMaterial = new THREE.LineBasicMaterial({ color: 0x1d1d1d, transparent: true, opacity: 0.35 });
 
   const tileTop = (x: number, z: number): THREE.Vector3 => {
-    const tile = map.tiles[z * map.width + x];
+    // マップの外（遠景の置き物）は、いちばん近い縁のマスの高さ
+    const cx = Math.min(map.width - 1, Math.max(0, x));
+    const cz = Math.min(map.depth - 1, Math.max(0, z));
+    const tile = map.tiles[cz * map.width + cx];
     const h = tile ? tile.height : 0;
     return new THREE.Vector3(x + offsetX, h * HEIGHT_STEP, z + offsetZ);
   };

@@ -26,6 +26,10 @@ export interface StageDefinition {
   readonly id: string;
   readonly map: MapDefinition;
   readonly props?: readonly StageProp[];
+  /** 空の色（省くと昼の空。夜空のカットなど） */
+  readonly sky?: number;
+  /** 遠景のカット（@遠景）で、カメラを向けるマスと寄り（省くとマップの中央を中くらいに） */
+  readonly view?: { readonly x: number; readonly z: number; readonly zoom: 'far' | 'mid' | 'near' };
 }
 
 /** 室内（仮）: 5×5 の床と、奥の壁（高さ 4） */
@@ -143,14 +147,43 @@ export const weirStage: StageDefinition = {
   ],
 };
 
-/** アスタルの丘（序章の戦闘2と同じマップ。戦闘の前の会話に使う） */
+/**
+ * アスタルの丘（序章の戦闘2と同じマップ。戦闘の前の会話に使う）。砦と旗、遠景の大勢の人々（数千の人々。マップの外の左右と手前）は、
+ * 戦闘の時も同じ物を置く（戦場の定義の decor）
+ */
 export const hillStage: StageDefinition = {
   id: 'stage-hill',
   map: hillBattle.map,
-  props: [
-    { id: '旗1', kind: '旗', x: 2, z: 1 },
-    { id: '旗2', kind: '青い旗', x: 6, z: 1 },
-  ],
+  props: (hillBattle.decor ?? []).map((d) => ({ id: d.id, kind: d.kind, x: d.x, z: d.z })),
 };
 
-export const stages: readonly StageDefinition[] = [roomStage, yardStage, homeStage, towerStage, hearingStage, cityStage, weirStage, hillStage];
+// ---- 離れた場所を映す短いカット（@遠景。ゲーム脚本の序章） ----
+
+/** 遠い谷の家々（堰で水が移ってきた村。第2章）。昼なのに、軒の灯が揺れている */
+export const farValleyStage: StageDefinition = {
+  id: 'stage-far-valley',
+  map: stageMap('stage-far-valley', ['2g 2g 3g 3g 3g 2g 2g', '1g 1g 1g 2g 1g 1g 1g', '0g 0g 0g 1g 0g 0g 0g', '0w 0w 0w 0w 0w 0w 0w', '0g 0g 0g 0g 0g 0g 0g']),
+  props: [
+    { id: '家々1', kind: '遠い谷の家々', x: 1, z: 2 },
+    { id: '家々2', kind: '遠い谷の家々', x: 3, z: 2 },
+    { id: '家々3', kind: '遠い谷の家々', x: 5, z: 2 },
+    { id: '木1', kind: '木', x: 0, z: 1 },
+    { id: '木2', kind: '木', x: 6, z: 1 },
+  ],
+  view: { x: 3, z: 2, zoom: 'mid' },
+};
+
+/** 夜空（家の窓の外）。星のよく見える空。星の並びがはっきり分かる画（第2章で、ここからひとつ欠ける） */
+export const nightSkyStage: StageDefinition = {
+  id: 'stage-night-sky',
+  map: stageMap('stage-night-sky', ['0d 0d 0d 0d 0d', '1b 1b 1b 1b 1b', '1b 1b 1b 1b 1b']),
+  props: [
+    { id: '星', kind: '星の並び', x: 2, z: 0 },
+    { id: '家1', kind: '家', x: 0, z: 2 },
+    { id: '家2', kind: '家', x: 4, z: 2 },
+  ],
+  sky: 0x0c1428,
+  view: { x: 2, z: 0, zoom: 'mid' },
+};
+
+export const stages: readonly StageDefinition[] = [roomStage, yardStage, homeStage, towerStage, hearingStage, cityStage, weirStage, hillStage, farValleyStage, nightSkyStage];

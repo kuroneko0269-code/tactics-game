@@ -54,8 +54,15 @@ export const weirBattle: BattleSite = {
     { id: 'weir-seam-3', kind: 'seam', x: 6, z: 2, hp: 22 },
   ],
   objectives: { victory: [{ kind: 'destroyObjects', unitIds: seams }], defeat: [{ kind: 'allDefeated' }], defeatAllWins: false },
+  // 合わせ目が一つ割れるたびに、石の割れる音と水の音が少しずつ強まる（戦闘中の台詞はない。音だけの台本）
   events: [
-    { id: 'weir-last-seam', trigger: { kind: 'objectsBroken', unitIds: seams, count: 3 }, effects: [{ kind: 'terrain', tiles: westValley }] },
+    { id: 'weir-seam-crack-1', trigger: { kind: 'objectsBroken', unitIds: seams, count: 1 }, effects: [{ kind: 'dialogue', scriptId: 'prologueWeirCrack1' }] },
+    { id: 'weir-seam-crack-2', trigger: { kind: 'objectsBroken', unitIds: seams, count: 2 }, effects: [{ kind: 'dialogue', scriptId: 'prologueWeirCrack2' }] },
+    {
+      id: 'weir-last-seam',
+      trigger: { kind: 'objectsBroken', unitIds: seams, count: 3 },
+      effects: [{ kind: 'terrain', tiles: westValley }, { kind: 'dialogue', scriptId: 'prologueWeirCrack3' }],
+    },
   ],
   // 堰を積む男たち（戦わない）。東の崖の上から見ている
   bystanders: [
@@ -71,6 +78,10 @@ export const weirBattle: BattleSite = {
     { id: 'weir-target', mode: 'targeting' },
     { id: 'weir-confirm', mode: 'confirm', point: { kind: 'button', button: 'confirm' } },
     { id: 'weir-facing', mode: 'facing', point: { kind: 'button', button: 'endTurn' } },
-    { id: 'weir-high', mode: 'main', turn: 2 },
+    // ゴードを前へ、キリを崖の上へ、フェンの火で合わせ目を割る。崖の上に立った時、札の文字をもう一度出す
+    { id: 'weir-gord', mode: 'main', unitId: 'gord', point: { kind: 'reachToward', x: 4, z: 3 } },
+    { id: 'weir-kiri', mode: 'main', unitId: 'kiri', point: { kind: 'reachToward', x: 8, z: 3 } },
+    { id: 'weir-high', mode: 'afterMove', unitId: 'kiri', minHeight: 3 },
+    { id: 'weir-fen', mode: 'main', unitId: 'fen', point: { kind: 'button', button: 'ability' } },
   ],
 };

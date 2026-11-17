@@ -212,9 +212,27 @@ describe('セーブデータ（版 6 → 7）', () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.data.battle).toBeNull();
-    // 版 6 の 8 番目（丘の戦闘）は、版 7 では 10 番目
-    expect(r.data.story.main).toEqual({ chapter: 0, scene: 10, finished: false });
+    // 版 6 の 8 番目（丘の戦闘）は、版 7 では 10 番目、版 8 では 9 番目
+    expect(r.data.story.main).toEqual({ chapter: 0, scene: 9, finished: false });
     const later = migrateSaveData({ ...base, battle: null, story: { main: { chapter: 0, scene: 11, finished: false } } }, context);
-    expect(later.ok && later.data.story.main?.scene).toBe(14);
+    expect(later.ok && later.data.story.main?.scene).toBe(11);
+  });
+
+  it('版 7 → 8: 序章の場面の番号をゲーム脚本の並び（12 の場面）に付け替え、物語の途中の戦闘は捨てる。訓練戦の途中の戦闘は残す', () => {
+    const state = makeState({ heights: flat(2, 1), units: [{ id: 'a', team: 'player', x: 0, z: 0 }] });
+    const v7 = { ...base, version: 7 };
+    const at = (scene: number, battle: unknown = null) => migrateSaveData({ ...v7, battle, story: { main: { chapter: 0, scene, finished: false } } }, context);
+    // 話を聞く部屋（4）は門と報告の部屋（3）へ、物置（14）は家までの道と物置（11）へ
+    expect([0, 2, 4, 5, 6, 10, 12, 14].map((n) => {
+      const r = at(n);
+      return r.ok ? r.data.story.main?.scene : -1;
+    })).toEqual([0, 2, 3, 4, 5, 9, 10, 11]);
+    const story = at(10, { origin: { kind: 'story', bookId: 'main', chapter: 0, scene: 10 }, state });
+    expect(story.ok && story.data.battle).toBeNull();
+    const training = at(0, { origin: { kind: 'training', tierId: 'easy' }, state });
+    expect(training.ok && training.data.battle?.origin).toEqual({ kind: 'training', tierId: 'easy' });
+    // 終えた本は、そのまま
+    const done = migrateSaveData({ ...v7, battle: null, story: { main: { chapter: 0, scene: 14, finished: true } } }, context);
+    expect(done.ok && done.data.story.main).toEqual({ chapter: 0, scene: 14, finished: true });
   });
 });

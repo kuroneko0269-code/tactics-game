@@ -57,7 +57,59 @@ export const SOUND_EFFECTS: Readonly<Record<string, SoundEffectId>> = {
   折れる: 'break',
   石の音: 'chime',
   水: 'water',
+  // ゲーム脚本の序章で足した音
+  /** 積み石の合わせ目が割れる音 */
+  石の割れる音: 'crack',
+  /** 堰が崩れる音 */
+  崩れる: 'collapse',
+  /** 水の音（弱い・中くらい。合わせ目が割れるたびに少しずつ強まる。強いのは「水」） */
+  '水・弱': 'waterSoft',
+  '水・中': 'waterMid',
+  /** 灯のねじを巻く音 */
+  ねじ: 'windUp',
+  /** 誓いの剣に当たった時の、鐘のような音 */
+  鐘: 'bell',
 };
 
-export type SoundEffectId = 'attack' | 'hit' | 'miss' | 'magic' | 'confirm' | 'cancel' | 'select' | 'gate' | 'break' | 'chime' | 'water';
+export type SoundEffectId =
+  | 'attack'
+  | 'hit'
+  | 'miss'
+  | 'magic'
+  | 'confirm'
+  | 'cancel'
+  | 'select'
+  | 'gate'
+  | 'break'
+  | 'chime'
+  | 'water'
+  | 'crack'
+  | 'collapse'
+  | 'waterSoft'
+  | 'waterMid'
+  | 'windUp'
+  | 'bell'
+  /** 言葉にしない声（叫び・呼び込み・笑い）。台本の @声 で鳴らす */
+  | 'voiceShout'
+  | 'voiceCall'
+  | 'voiceLaugh';
 
+
+/** 旋律の各音の始まりの時刻（ミリ秒）と、全体の長さ。見込みの時間と、耳に当てて聞く操作で使う */
+export function melodyTimes(name: string): { readonly totalMs: number; readonly noteStarts: readonly number[] } {
+  const def = MELODIES[name];
+  if (!def) return { totalMs: 0, noteStarts: [] };
+  const starts: number[] = [];
+  let t = 0;
+  for (const n of def.notes) {
+    starts.push(Math.round(t * 1000));
+    t += Number(n.trim().split(/\s+/)[1] ?? '1') * def.beatSeconds;
+  }
+  return { totalMs: Math.round(t * 1000), noteStarts: starts };
+}
+
+/**
+ * 耳に当てて聞く操作（序章の場面9の石）。始めの shellMs の間は貝殻のようなかすかな音だけで、その後に旋律が始まる。
+ * 旋律は swellMs かけて、小さな音から大きくなる（計算は src/core/listen.ts）
+ */
+export const LISTEN = { shellMs: 3000, swellMs: 3500 } as const;

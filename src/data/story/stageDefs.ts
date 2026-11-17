@@ -1,5 +1,6 @@
 import type { ScriptCatalog } from '../../core/script';
-import { MELODIES, SOUND_EFFECTS, TIMBRES } from '../sounds';
+import { MELODIES, SOUND_EFFECTS, TIMBRES, type SoundEffectId } from '../sounds';
+import { stages } from './stages';
 
 /**
  * 会話の場面で使う、名前で呼び出す部品（物語の土台）: 仕草・姿勢・物の種類・人物の見た目・光の色。
@@ -117,6 +118,19 @@ export const GESTURES: Readonly<Record<string, GestureDefinition>> = {
   歌う: { seconds: 2.4, frames: [{ t: 0 }, { t: 0.25, head: -0.2, tilt: 0.15 }, { t: 0.5, head: -0.2, tilt: -0.15 }, { t: 0.75, head: -0.2, tilt: 0.15 }, { t: 1 }] },
   /** 足を止める（はっとする） */
   足を止める: { seconds: 0.8, frames: [{ t: 0 }, { t: 0.25, lift: 0.04, head: -0.1 }, { t: 0.6, head: -0.1 }, { t: 1 }] },
+  // ---- ゲーム脚本の序章で足した仕草 ----
+  /** 戸を押して開ける（右手を前へ伸ばし、少し前へ出る） */
+  戸を開ける: { seconds: 0.9, frames: [{ t: 0 }, { t: 0.35, armR: 1.4, bow: 0.1 }, { t: 0.65, armR: 1.5, bow: 0.12 }, { t: 1 }] },
+  /**
+   * 拾った手が、少しだけ止まる（石が温かかった、の代わり。PR の回答）。手を胸の前に上げたまま、じっと見る
+   */
+  手を止める: { seconds: 1.6, frames: [{ t: 0 }, { t: 0.2, armR: 1.1, head: 0.45 }, { t: 0.85, armR: 1.1, head: 0.5 }, { t: 1, armR: 1.1, head: 0.4 }] },
+  /** 頭を、ほかの人より少し長く下げる（序章の場面8で、トウマの前でだけ。PR の回答） */
+  長く頭を下げる: { seconds: 2.4, frames: [{ t: 0 }, { t: 0.2, bow: 0.85, head: 0.3 }, { t: 0.85, bow: 0.85, head: 0.3 }, { t: 1 }] },
+  /** 帳面をめくる */
+  めくる: { seconds: 0.9, frames: [{ t: 0 }, { t: 0.3, armR: 1.0, spreadR: 0.3, head: 0.5 }, { t: 0.6, armR: 1.0, spreadR: -0.3, head: 0.5 }, { t: 1 }] },
+  /** 隊の一人ずつに合図する（手で前を示す） */
+  手で合図する: { seconds: 0.9, frames: [{ t: 0 }, { t: 0.3, armR: 1.5, spreadR: 0.5 }, { t: 0.6, armR: 1.5, spreadR: -0.2 }, { t: 1 }] },
 };
 
 /**
@@ -131,6 +145,8 @@ export const POSTURES: Readonly<Record<string, GesturePose>> = {
   帳面を読む: { drop: 0.2, armL: 0.9, armR: 0.9, head: 0.55, bow: 0.1 },
   うつむいたまま: { head: 0.6, bow: 0.1 },
   背を丸める: { bow: 0.3, head: 0.2 },
+  /** 石を耳に当てたまま（序章の場面9。聞いている間） */
+  耳に当てたまま: { armR: 2.3, tilt: 0.25, head: 0.1 },
 };
 
 /** 物の種類（台本に書く名前 → 見た目の id。見た目は models.ts） */
@@ -196,6 +212,13 @@ export const PROP_KINDS: Readonly<Record<string, string>> = {
   台の道具: 'benchTools',
   台の暦盤: 'benchCalendar',
   台の灯: 'benchLamp',
+  // ゲーム脚本の序章で足した物
+  開いた戸: 'doorOpen',
+  群衆: 'crowd',
+  遠い谷の家々: 'farHouses',
+  星の並び: 'stars',
+  砦: 'fort',
+  広げた指示書: 'scrollOpen',
 };
 
 /**
@@ -217,7 +240,9 @@ export const ACTOR_LOOKS: Readonly<Record<string, string>> = {
   ガレス: 'gareth',
   ミオ: 'mio',
   おかみ: 'baker',
+  パン屋のおかみ: 'baker',
   老婆: 'apothecary',
+  薬屋の老婆: 'apothecary',
   売り子: 'vendor',
   番兵: 'guard',
   番兵A: 'guard',
@@ -227,7 +252,7 @@ export const ACTOR_LOOKS: Readonly<Record<string, string>> = {
   町の人: 'townsman',
   町の人B: 'clanB',
   町の人C: 'clanC',
-  見知らぬ男: 'worker',
+  見知らぬ男: 'stranger',
   氏族: 'clanA',
   氏族B: 'clanB',
   氏族C: 'clanC',
@@ -247,6 +272,13 @@ export const LIGHT_COLORS: Readonly<Record<string, number>> = {
   金: 0xffd27a,
 };
 
+/** 言葉にしない声（台本に書く名前 → 効果音の id。src/data/sounds.ts）。頭上に小さな印を出す */
+export const VOICES: Readonly<Record<string, SoundEffectId>> = {
+  叫び: 'voiceShout',
+  呼び込み: 'voiceCall',
+  笑い: 'voiceLaugh',
+};
+
 /** 台本の読み込みに渡す、使える名前の一覧 */
 export const scriptCatalog: ScriptCatalog = {
   gestures: Object.keys(GESTURES),
@@ -257,4 +289,6 @@ export const scriptCatalog: ScriptCatalog = {
   sounds: Object.keys(SOUND_EFFECTS),
   lightColors: Object.keys(LIGHT_COLORS),
   postures: Object.keys(POSTURES),
+  voices: Object.keys(VOICES),
+  locations: Object.fromEntries(stages.map((st) => [st.id, (st.props ?? []).map((p) => ({ name: p.id, prop: p.kind, x: p.x, z: p.z }))])),
 };

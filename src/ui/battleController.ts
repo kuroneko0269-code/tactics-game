@@ -40,6 +40,15 @@ export type MarkKind =
   | 'spellAreaEnemies'
   | 'spellAreaAllies';
 
+/** 手ほどきに知らせる、今の操作の様子（味方の何回目の手番か・移動できるマス・手番のユニットと立つマスの高さ・数えた回数） */
+export interface TutorialModeInfo {
+  readonly playerTurn: number;
+  readonly reachable: readonly Coord[];
+  readonly unitId?: string;
+  readonly height?: number;
+  readonly tallies?: Readonly<Record<string, number>>;
+}
+
 export interface BattleViewPort {
   sync(state: BattleState): void;
   setMarks(marks: readonly { x: number; z: number; kind: MarkKind }[]): void;
@@ -106,7 +115,7 @@ export interface BattleControllerDeps {
    * 操作の段階が変わった時に呼ぶ（手ほどき。序章に足りない仕組み）。modeKey は TutorialStep の mode の名前
    * （移動した後の main は afterMove）か、入力を待っていない時は busy。playerTurn は、この戦闘で味方の入力を待った手番の数
    */
-  readonly onModeChange?: (modeKey: string, info: { readonly playerTurn: number; readonly reachable: readonly Coord[] }) => void;
+  readonly onModeChange?: (modeKey: string, info: TutorialModeInfo) => void;
   /** 出来事に合わせて効果音を鳴らす（序章に足りない仕組み） */
   readonly sound?: (id: 'attack' | 'hit' | 'miss' | 'magic') => void;
 }
@@ -181,11 +190,14 @@ export function createBattleController(start: ActionResult, deps: BattleControll
   /** 手ほどきに、今の操作の段階を知らせる */
   const reportMode = () => {
     if (!deps.onModeChange) return;
-    if (mode.kind === 'busy' || mode.kind === 'ended' || !state.turn) return deps.onModeChange('busy', { playerTurn: playerTurns, reachable: [] });
+    const tallies = state.scenario.tallies ?? {};
+    if (mode.kind === 'busy' || mode.kind === 'ended' || !state.turn) return deps.onModeChange('busy', { playerTurn: playerTurns, reachable: [], tallies });
     const t = state.turn;
     const key = mode.kind === 'main' ? (t.moved ? 'afterMove' : 'main') : mode.kind === 'spellTargetKind' ? 'spellTarget' : mode.kind;
-    const reachable = mode.kind === 'main' && !t.moved ? reachableTiles(state, actor()) : [];
-    deps.onModeChange(key, { playerTurn: playerTurns, reachable });
+    const a = actor();
+    const reachable = mode.kind === 'main' && !t.moved ? reachableTiles(state, a) : [];
+    const height = state.map.tiles[a.z * state.map.width + a.x]?.height ?? 0;
+    deps.onModeChange(key, { playerTurn: playerTurns, reachable, unitId: a.id, height, tallies });
   };
 
   const turn = () => state.turn;

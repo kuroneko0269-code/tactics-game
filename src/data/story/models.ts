@@ -21,6 +21,8 @@ export interface ShapePart {
   readonly rot?: readonly [number, number, number];
   /** 透けさせる（0〜1。光の輪など） */
   readonly opacity?: number;
+  /** 揺れる（左右に揺れる幅。マスの一辺が 1。軒の灯など） */
+  readonly sway?: number;
 }
 
 export type ModelDefinition = readonly ShapePart[];
@@ -108,7 +110,7 @@ export const MODELS: Readonly<Record<string, ModelDefinition>> = {
     ...Array.from({ length: 13 }, (_, i): ShapePart => {
       const a = (i / 13) * Math.PI * 2;
       // 十三番目の欄だけ、刻みがない（暗い）
-      return box(0.07, 0.07, 0.02, [Math.sin(a) * 0.42, 1.25 + Math.cos(a) * 0.42, -0.36], i === 12 ? 0x5a4a3a : 0xf4e2a0);
+      return box(0.08, 0.08, 0.02, [Math.sin(a) * 0.42, 1.25 + Math.cos(a) * 0.42, -0.36], i === 12 ? 0x2a2018 : 0xf4e2a0, i === 12 ? {} : { glow: 0x3a3010 });
     }),
   ],
   /** 円卓と十三の椅子（ひとつはいつも空いている） */
@@ -117,7 +119,14 @@ export const MODELS: Readonly<Record<string, ModelDefinition>> = {
     cyl(0.18, 0.4, 0.26, [0, 0.2, 0], WOOD_DARK),
     ...Array.from({ length: 13 }, (_, i): ShapePart => {
       const a = (i / 13) * Math.PI * 2;
-      return box(0.2, 0.32, 0.2, [Math.sin(a) * 1.32, 0.16, Math.cos(a) * 1.32], 0x5a3a24);
+      // 手前の1つ（i = 0）だけ、だれも座らず埃をかぶっている（灰色）
+      return box(0.2, 0.32, 0.2, [Math.sin(a) * 1.32, 0.16, Math.cos(a) * 1.32], i === 0 ? 0x9a948a : 0x5a3a24);
+    }),
+    // 空いた椅子の上の埃と、ほかの椅子の座面の擦り切れ（人が座った跡）
+    box(0.21, 0.02, 0.21, [0, 0.33, 1.32], 0xc8c0b0, { opacity: 0.9 }),
+    ...Array.from({ length: 12 }, (_, k): ShapePart => {
+      const a = ((k + 1) / 13) * Math.PI * 2;
+      return box(0.12, 0.012, 0.12, [Math.sin(a) * 1.32, 0.327, Math.cos(a) * 1.32], 0x8a6040);
     }),
   ],
   /** 時の門の輪（立てた石の輪） */
@@ -200,6 +209,51 @@ export const MODELS: Readonly<Record<string, ModelDefinition>> = {
   ],
   benchCalendar: shift([cyl(0.1, 0.02, 0.1, [0, 0.01, 0], BRASS), cyl(0.07, 0.012, 0.07, [0, 0.026, 0], 0xe0c070), box(0.012, 0.012, 0.08, [0, 0.034, 0.03], 0x3a2a1a)], 0.3, BENCH_TOP, 0.05),
   benchLamp: shift([cyl(0.06, 0.13, 0.07, [0, 0.065, 0], BRASS), ball(0.05, [0, 0.16, 0], 0x5a4a2a)], -0.25, BENCH_TOP, 0.12),
+  // ---- ゲーム脚本の序章で足した物 ----
+  /** 開いた戸（戸板が内側へ開いている） */
+  doorOpen: [
+    box(0.08, 0.95, 0.12, [-0.4, 0.47, 0.45], WOOD_DARK),
+    box(0.08, 0.95, 0.12, [0.4, 0.47, 0.45], WOOD_DARK),
+    box(0.88, 0.08, 0.12, [0, 0.95, 0.45], WOOD_DARK),
+    box(0.04, 0.86, 0.72, [-0.36, 0.43, 0.09], 0x8a6a3a),
+  ],
+  /** 遠くの大勢の人々（細かく作らない遠景。小さな人の形を並べ、足もとに地面の板を付ける。マップの外にも置ける） */
+  crowd: [
+    box(1, 0.04, 1, [0, -0.02, 0], 0x5a7a3a),
+    box(1, 1.6, 1, [0, -0.84, 0], 0x5a4a32),
+    ...Array.from({ length: 12 }, (_, i): ShapePart[] => {
+      const x = -0.36 + (i % 4) * 0.24 + (Math.floor(i / 4) % 2) * 0.1;
+      const z = -0.32 + Math.floor(i / 4) * 0.3;
+      const colors = [0x8a5a3a, 0x4a6a5a, 0x6a4a6a, 0x9a7a4a, 0xa8403a, 0x2a6a8a];
+      return [cyl(0.05, 0.2, 0.06, [x, 0.1, z], colors[i % colors.length]!), ball(0.04, [x, 0.24, z], 0xd8b89a)];
+    }).flat(),
+  ],
+  /** 遠い谷の家々（昼なのに、軒の灯が揺れている） */
+  farHouses: [
+    box(0.55, 0.38, 0.5, [-0.22, 0.19, -0.15], 0xd8c8a8),
+    { shape: 'cone', size: [0.45, 0.3], at: [-0.22, 0.53, -0.15], color: 0x8a4a3a, rot: [0, Math.PI / 4, 0] },
+    ball(0.055, [-0.02, 0.34, 0.12], 0xffe08a, { glow: 0xffb84a, sway: 0.03 }),
+    box(0.45, 0.32, 0.42, [0.28, 0.16, 0.2], 0xc8b898),
+    { shape: 'cone', size: [0.38, 0.26], at: [0.28, 0.45, 0.2], color: 0x7a4a3a, rot: [0, Math.PI / 4, 0] },
+    ball(0.05, [0.46, 0.28, 0.43], 0xffe08a, { glow: 0xffb84a, sway: 0.03 }),
+  ],
+  /** 夜空の星の並び（窓の外。第2章で、ここからひとつ欠ける。並びがはっきり分かるよう、七つの明るい星を大きく） */
+  stars: [
+    ...[
+      [-1.6, 2.2],
+      [-0.9, 2.6],
+      [-0.2, 2.35],
+      [0.5, 2.7],
+      [1.1, 2.3],
+      [1.7, 2.65],
+      [0.2, 1.8],
+    ].map(([x, y]): ShapePart => ball(0.07, [x!, y!, 0], 0xffffff, { glow: 0xf4f0d0 })),
+    ...Array.from({ length: 14 }, (_, i): ShapePart => ball(0.025, [-2.2 + ((i * 37) % 44) / 10, 1.4 + ((i * 53) % 17) / 10, -0.2], 0xd8d8e8, { glow: 0x8a8aa0 })),
+  ],
+  /** 円卓の上に広げた明日の指示書（封蝋の印「未来より」）。円卓の手前の縁に置く */
+  scrollOpen: [box(0.42, 0.012, 0.3, [0, 0.47, 0.62], 0xf0e8d0), cyl(0.05, 0.02, 0.05, [0.1, 0.485, 0.66], 0xa02020), cyl(0.03, 0.42, 0.03, [0, 0.48, 0.47], 0xe0d4b0, { rot: [0, 0, Math.PI / 2] })],
+  /** 丘の上の、石を積んだ砦 */
+  fort: [box(2.6, 0.9, 0.4, [0, 0.45, 0], 0x9a9284), box(0.5, 1.3, 0.5, [-1.2, 0.65, 0], 0x8a8274), box(0.5, 1.3, 0.5, [1.2, 0.65, 0], 0x8a8274)],
   // ---- 人物の持ち物（小さな物。人形の手・腰・背に付ける） ----
   /** 真鍮の測り棒（背に括る） */
   measuringRod: [cyl(0.018, 0.62, 0.018, [0, 0.31, 0], BRASS), box(0.06, 0.04, 0.012, [0.03, 0.5, 0], 0xf4f1e8)],

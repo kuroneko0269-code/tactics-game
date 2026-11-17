@@ -114,6 +114,10 @@ export interface BattleView {
   /** 物を置く・消す（見た目だけ） */
   putProp(name: string, model: string, c: Coord): Promise<void>;
   removeProp(name: string): Promise<void>;
+  /** 物（置き物を含む）を、そのマスへ seconds 秒かけて動かす */
+  moveProp(name: string, c: Coord, seconds: number): Promise<void>;
+  /** 台本の人物（ユニットか背景の人）の続く姿勢（勝った後の台本の「膝をついたまま」など）。空なら元に戻す */
+  setActorPose(id: string, pose: PuppetPose): Promise<void>;
   /** 持ち物を付け替える（model が空なら外す） */
   setItems(id: string, slot: 'hand' | 'handL' | 'waist' | 'back', model: string): void;
   /** 光を立てる（マスかユニットに）・消す */
@@ -196,6 +200,8 @@ export function createBattleView(options: {
   lookOf?: (unit: Pick<UnitState, 'id' | 'jobId' | 'team'>) => PuppetLook | undefined;
   /** 背景の人の見た目の名前 → 見た目 */
   bystanderLook?: (look: string) => PuppetLook;
+  /** 見た目だけの置き物（砦・旗・遠景の大勢の人々。物の見た目の id） */
+  decor?: readonly { readonly id: string; readonly model: string; readonly x: number; readonly z: number }[];
 }): BattleView {
   const { scene, mapView } = options;
   const tweens = createTweens();
@@ -278,6 +284,13 @@ export function createBattleView(options: {
   };
   const lights = new Map<string, { pillar: LightPillar; actor?: string }>();
   const props = new Map<string, Puppet>();
+  for (const d of options.decor ?? []) {
+    const p = createPropModel(d.model);
+    p.group.position.copy(mapView.tileTop(d.x, d.z));
+    p.group.traverse((o) => (o.raycast = () => {}));
+    scene.add(p.group);
+    props.set(d.id, p);
+  }
   const items = new Map<string, Record<string, string>>();
   const dropLight = (name: string) => {
     lights.get(name)?.pillar.dispose();
@@ -921,6 +934,22 @@ export function createBattleView(options: {
       p.group.removeFromParent();
       props.delete(name);
     },
+    async moveProp(name, c, seconds) {
+      const p = props.get(name);
+      if (!p) return;
+      const from = p.group.position.clone();
+      const to = mapView.tileTop(c.x, c.z);
+      await tweens.play(Math.max(0.05, seconds), (t) => p.group.position.lerpVectors(from, to, t));
+    },
+    async setActorPose(id, pose) {
+      const a = actorPuppet(id);
+      if (!a?.puppet.setPose) return;
+      await tweens.play(0.4, (t) => {
+        const mix: Record<string, number> = {};
+        for (const [k, v] of Object.entries(pose)) mix[k] = (v ?? 0) * t;
+        a.puppet.setPose!(mix);
+      });
+    },
     setItems(id, slot, model) {
       const a = actorPuppet(id);
       if (!a) return;
@@ -948,6 +977,7 @@ export function createBattleView(options: {
     update(dt, elapsed) {
       tweens.update(dt);
       for (const b of bystanders.values()) b.puppet.update(elapsed);
+      for (const p of props.values()) p.update(elapsed);
       for (const l of lights.values()) {
         const at = l.actor ? actorPuppet(l.actor) : undefined;
         if (at) l.pillar.group.position.set(at.puppet.group.position.x, l.pillar.group.position.y, at.puppet.group.position.z);

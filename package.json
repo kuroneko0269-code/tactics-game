@@ -15,7 +15,7 @@
     "check": "npm run lint && npm run typecheck && npm run test && npm run build",
     "autoplay": "node scripts/autoplay.mjs",
     "autoplay:ci": "node scripts/autoplay.mjs --quick",
-    "script-rules": "vitest run src/data/story/story.test.ts --silent=false -t 台本の決まり",
+    "script-rules": "vitest run src/data/story/story.test.ts src/data/story/scriptTiming.test.ts --silent=false -t \"台本の決まり|見込み\"",
     "balance": "node scripts/balance.mjs"
   },
   "engines": {

@@ -64,9 +64,9 @@ describe('セーブデータ', () => {
   });
 
   it('版 1（フェーズ2-1a・2-1b・2-2a）のデータは、版 2・3・4 を経て版 5 に直す。ダンジョンは挑戦中なし・クリアなし', () => {
-    expect(SAVE_VERSION).toBe(7);
+    expect(SAVE_VERSION).toBe(8);
     const loaded = migrateSaveData({ version: 1, roster: { units: [unitV2] } }, context, SAVE_MIGRATIONS);
-    expect(loaded).toMatchObject({ ok: true, migratedFrom: 1, data: { version: 7, dungeon: EMPTY_DUNGEON_STATE, records: EMPTY_RECORDS, battle: null } });
+    expect(loaded).toMatchObject({ ok: true, migratedFrom: 1, data: { version: 8, dungeon: EMPTY_DUNGEON_STATE, records: EMPTY_RECORDS, battle: null } });
   });
 
   it('版 2 → 3: 育てた状態を残し、各ユニットの今のジョブの最初の装備を配って付け、最初の所持金を持たせる', () => {

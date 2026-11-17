@@ -171,11 +171,11 @@ describe('会話用のマップ（文字の行）', () => {
     expect(() => stageMap('t', ['0g 0g', '0g'])).toThrow();
   });
 
-  it('マップに置いておく物は、マップの中にあり、物の種類がある', () => {
+  it('マップに置いておく物は、マップの中にあり、物の種類がある（遠景の大勢の人々だけは、マップの外にも置ける）', () => {
     for (const st of stages) {
       const map = createMap(st.map);
       for (const p of st.props ?? []) {
-        expect(getTile(map, p.x, p.z), `${st.id} ${p.id}`).toBeDefined();
+        if (p.kind !== '群衆') expect(getTile(map, p.x, p.z), `${st.id} ${p.id}`).toBeDefined();
         expect(PROP_KINDS[p.kind], `${st.id} ${p.kind}`).toBeDefined();
       }
     }

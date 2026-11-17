@@ -43,6 +43,8 @@ export interface StageState {
   readonly lights?: Readonly<Record<string, LightState>>;
   /** 話者の名前の札に添える肩書き（人物の名前 → 肩書き）。省くとなし */
   readonly titles?: Readonly<Record<string, string>>;
+  /** @場所 で移った会話用のマップの id（省くと、場面の始めのマップ） */
+  readonly location?: string;
 }
 
 /**
@@ -160,6 +162,17 @@ export function applyDirective(stage: StageState, d: Directive): StageState {
     }
     case 'together':
       return d.directives.reduce(applyDirective, stage);
+    case 'location': {
+      // 場所を移す: 人物と光はいなくなり、物は新しいマップに置いておく物になる（暗転と肩書きはそのまま）
+      const props = Object.fromEntries(d.props.map((p) => [p.name, { prop: p.prop, x: p.x, z: p.z }]));
+      const { lights: _l, ...rest } = stage;
+      void _l;
+      return { ...rest, actors: {}, props, location: d.stageId };
+    }
+    case 'propMove': {
+      const p = stage.props[d.name];
+      return p ? { ...stage, props: { ...stage.props, [d.name]: { ...p, x: d.x, z: d.z } } } : stage;
+    }
     case 'posture': {
       const a = stage.actors[d.actor];
       if (!a) return stage;
@@ -177,6 +190,11 @@ export function applyDirective(stage: StageState, d: Directive): StageState {
     case 'chapterTitle':
     case 'strike':
     case 'pushBack':
+    case 'cue':
+    case 'voice':
+    case 'cut':
+    case 'tapControl':
+    case 'listen':
       return stage;
   }
 }

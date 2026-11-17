@@ -26,6 +26,10 @@ export interface SceneView {
   putProp(name: string, kind: string, c: Coord): Promise<void>;
   removeProp(name: string): Promise<void>;
   changeProp(name: string, kind: string): Promise<void>;
+  /** 物を、そのマスへ seconds 秒かけて動かす（遠くの人々が後ずさる・丘を下りる） */
+  moveProp(name: string, c: Coord, seconds: number): Promise<void>;
+  /** 物をタップする操作: その物を光らせ、マスを色分けする（null で消す） */
+  setTapTarget(name: string | null): Coord | undefined;
   /** 持ち物を付け替える（ActorState の items と同じ形） */
   setItems(name: string, items: ActorState['items']): void;
   /** 続く姿勢（座る など）。undefined で立つ */
@@ -73,6 +77,8 @@ export function createSceneView(options: {
   const actors = new Map<string, { puppet: Puppet; coord: Coord; posture: PuppetPose }>();
   const props = new Map<string, { model: Puppet; kind: string; coord: Coord }>();
   const lights = new Map<string, { pillar: LightPillar; light: LightState }>();
+  /** タップを待っている物（光らせる） */
+  let tapTarget: string | null = null;
   /** 台本の持ち物（物の種類の名前）を、見た目の id にして人形に付ける */
   const applyItems = (puppet: Puppet, items: ActorState['items']) => {
     const models: Record<string, string> = {};
@@ -240,6 +246,22 @@ export function createSceneView(options: {
       await play(0.3, (t) => p.model.setOpacity(1 - t));
       dropProp(name);
     },
+    async moveProp(name, c, seconds) {
+      const p = props.get(name);
+      if (!p) return;
+      const from = p.model.group.position.clone();
+      const to = mapView.tileTop(c.x, c.z);
+      await play(Math.max(0.05, seconds), (t) => p.model.group.position.lerpVectors(from, to, t));
+      place(p.model.group, c);
+      p.coord = { x: c.x, z: c.z };
+    },
+    setTapTarget(name) {
+      if (tapTarget) props.get(tapTarget)?.model.setGlow(new THREE.Color(0xffffff), 0);
+      tapTarget = name;
+      const p = name ? props.get(name) : undefined;
+      mapView.setMarks(p ? [{ x: p.coord.x, z: p.coord.z, kind: 'selected' }] : []);
+      return p ? { ...p.coord } : undefined;
+    },
     async changeProp(name, kind) {
       const p = props.get(name);
       if (!p) return;
@@ -299,7 +321,7 @@ export function createSceneView(options: {
     setSpeed(multiplier) {
       speed = Math.max(0.1, multiplier);
     },
-    pickTargets: () => [mapView.group, ...[...actors.values()].map((a) => a.puppet.group)],
+    pickTargets: () => [mapView.group, ...[...actors.values()].map((a) => a.puppet.group), ...[...props.values()].map((p) => p.model.group)],
     coordOf(object) {
       for (let o: THREE.Object3D | null = object; o; o = o.parent) {
         const c = o.userData.tileCoord as TileCoord | undefined;
@@ -315,6 +337,9 @@ export function createSceneView(options: {
     update(dt, elapsed) {
       tweens.update(dt);
       for (const a of actors.values()) a.puppet.update(elapsed);
+      for (const p of props.values()) p.model.update(elapsed);
+      // タップを待っている物は、ゆっくり明滅する
+      if (tapTarget) props.get(tapTarget)?.model.setGlow(new THREE.Color(0xffe8a0), 0.35 + Math.sin(elapsed * 4) * 0.25);
       for (const l of lights.values()) {
         if (l.light.actor) placeLight(l);
         l.pillar.update(elapsed);

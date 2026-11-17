@@ -75,6 +75,16 @@ export interface BattleSite {
   readonly afterVictory?: string;
   /** 戦闘の手ほどき（序章に足りない仕組み。マスやボタンを指し示し、短い説明を出して、その操作を待つ） */
   readonly tutorial?: readonly TutorialStep[];
+  /**
+   * 見た目だけの置き物（砦・旗・遠景の大勢の人々など。ゲーム脚本の序章）。kind は台本の物の種類の名前（src/data/story/stageDefs.ts）。
+   * マップの外（x や z が範囲の外）にも置ける。戦闘の状態には入らない（通れる・対象にならない）。勝った後の台本から @動かす・@消す できる
+   */
+  readonly decor?: readonly { readonly id: string; readonly kind: string; readonly x: number; readonly z: number }[];
+  /**
+   * 戦闘の間、遠くで繰り返し鳴らす旋律（丘の歌。ゲーム脚本の序章）。名前は src/data/sounds.ts の旋律と音色。level は音の大きさ（0〜100）。
+   * 勝った後の台本の @節を止める で止まる
+   */
+  readonly ambient?: { readonly melody: string; readonly timbre: string; readonly level: number };
 }
 
 /**
@@ -93,6 +103,12 @@ export interface TutorialStep {
     /** 移動できるマスのうち、mode の操作で選ぶとよい目標に近いマス（味方の位置によって変わるため） */
     | { readonly kind: 'reachToward'; readonly x: number; readonly z: number };
   readonly turn?: number;
+  /** その人物の手番の時だけ出す（ゲーム脚本の序章: ゴードを前へ、キリを崖の上へ、など） */
+  readonly unitId?: string;
+  /** その人物が、この高さ以上のマスに立っている時だけ出す（崖の上に立った時） */
+  readonly minHeight?: number;
+  /** 数えた回数（勝利条件の hitUnit の id など）がこの数に届いてから出す（3回目が当たった後） */
+  readonly tally?: { readonly id: string; readonly atLeast: number };
 }
 
 /** 手ほどきで指し示せるボタン */
