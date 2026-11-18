@@ -28,25 +28,36 @@ export function showSettingsSheet(root: HTMLElement, current: () => GameSettings
       el('span', 'settings-value', TEXT.settings.volume(s.volume)),
       screenButton(TEXT.settings.volumeUp, () => set({ volume: Math.min(100, s.volume + 10) }), { className: 'settings-step volume-up', disabled: s.volume >= 100 }),
     );
-    body.append(
-      volumeRow,
+    // 切り替えと、その説明を1つのまとまりにする（横向きの低い画面では、まとまりを横に並べる）
+    const item = (...nodes: HTMLElement[]) => {
+      const box = el('div', 'settings-item');
+      box.append(...nodes);
+      return box;
+    };
+    const mute = item(
       screenButton(s.muted ? TEXT.settings.unmute : TEXT.settings.mute, () => set({ muted: !s.muted }), {
         className: 'settings-mute',
         pressed: s.muted,
       }),
     );
-    if (s.muted) body.append(el('p', 'screen-note', TEXT.settings.mutedNote));
+    if (s.muted) mute.append(el('p', 'screen-note', TEXT.settings.mutedNote));
     body.append(
-      screenButton(s.skipSeenTutorials ? TEXT.settings.tutorialOn : TEXT.settings.tutorialOff, () => set({ skipSeenTutorials: !s.skipSeenTutorials }), {
-        className: 'settings-tutorial',
-        pressed: s.skipSeenTutorials,
-      }),
-      el('p', 'screen-note', TEXT.settings.tutorialNote),
-      screenButton(s.checkTools ? TEXT.settings.checkOn : TEXT.settings.checkOff, () => set({ checkTools: !s.checkTools }), {
-        className: 'settings-check',
-        pressed: s.checkTools,
-      }),
-      el('p', 'screen-note', TEXT.settings.checkNote),
+      volumeRow,
+      mute,
+      item(
+        screenButton(s.skipSeenTutorials ? TEXT.settings.tutorialOn : TEXT.settings.tutorialOff, () => set({ skipSeenTutorials: !s.skipSeenTutorials }), {
+          className: 'settings-tutorial',
+          pressed: s.skipSeenTutorials,
+        }),
+        el('p', 'screen-note', TEXT.settings.tutorialNote),
+      ),
+      item(
+        screenButton(s.checkTools ? TEXT.settings.checkOn : TEXT.settings.checkOff, () => set({ checkTools: !s.checkTools }), {
+          className: 'settings-check',
+          pressed: s.checkTools,
+        }),
+        el('p', 'screen-note', TEXT.settings.checkNote),
+      ),
     );
   };
   render();

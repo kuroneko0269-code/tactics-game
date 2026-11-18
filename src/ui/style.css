@@ -3479,6 +3479,29 @@ body.in-dialogue #hud {
   font-weight: bold;
 }
 
+.settings-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 横向きの低い画面: 切り替えのまとまりを3つ横に並べる（欄が画面の高さに収まるように） */
+@media (orientation: landscape) and (max-height: 500px) {
+  .settings-body {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: start;
+  }
+
+  .settings-body .settings-row {
+    grid-column: 1 / -1;
+  }
+
+  .settings-item .screen-button {
+    font-size: 14px;
+  }
+}
+
 .settings-mute[aria-pressed='true'] {
   border-color: var(--accent);
 }
