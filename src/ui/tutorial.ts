@@ -10,6 +10,8 @@ import { TEXT } from './text';
  *   指し示す印（マス・ユニット・ボタン）と短い説明を出し、その操作が済む（段階が変わる）と次の段へ進む。
  * - 人物を決めた段（unitId）・高さを決めた段（minHeight）・回数を決めた段（tally）は、その条件が合う時に出す。条件の合わない段は飛ばして、
  *   先の段を出してよい（人物ごとの手番の順は戦闘ごとに違うため）。人物を決めていない段は、順に出す。
+ * - 高さ・回数を決めた段は、その時を逃すと出せないので、まだ出ていない前の段があっても、条件が合えば先に出す
+ *   （序章の堰: キリが崖の上に立った時の測り棒の札。キリが最初に動く時も、手ほどきの途中でも出る）。
  * - 「手ほどきを飛ばす」で、残りをすべて出さない。最後まで進むか飛ばすと onFinished を呼ぶ（見たことを設定に残す）。
  * - 印と説明はタップを横取りしない（飛ばすボタンだけ押せる）。
  */
@@ -143,6 +145,15 @@ export function createTutorial(root: HTMLElement, steps: readonly TutorialStep[]
         (st.unitId === undefined || st.unitId === info.unitId) &&
         (st.minHeight === undefined || (info.height ?? 0) >= st.minHeight) &&
         (st.tally === undefined || (info.tallies?.[st.tally.id] ?? 0) >= st.tally.atLeast);
+      // その時の様子で決まる段（高さ・回数。測り棒の札・最後の一撃）は、ほかの段より先に、条件が合えばすぐ出す（その時を逃すと出せないため）
+      for (let i = 0; i < steps.length; i++) {
+        const st = steps[i]!;
+        if (shown.has(i) || (st.minHeight === undefined && st.tally === undefined)) continue;
+        if (matches(st)) {
+          showingIndex = i;
+          return show(st, info.reachable);
+        }
+      }
       for (let i = 0; i < steps.length; i++) {
         if (shown.has(i)) continue;
         const st = steps[i]!;

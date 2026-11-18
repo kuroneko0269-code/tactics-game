@@ -2631,7 +2631,12 @@ async function storyRun(browser, baseUrl, name, core) {
   /** 堰の戦闘の手ほどき: 移動の段 → 攻撃の段まで進めてから飛ばす */
   const weirTutorial = async () => {
     await until(() => window.__tactics.tutorial()?.step === 'weir-move', undefined, 120000);
-    const move = await T(() => window.__tactics.marks().find((m) => m.kind === 'move'));
+    // 崖の上（高さ 3 以上）へ動くと、測り棒の札の段が先に出るので、低いマスへ動かす
+    const move = await T(() => {
+      const st = window.__tactics.state();
+      const h = (x, z) => st.map.tiles.find((t) => t.x === x && t.z === z)?.height ?? 0;
+      return window.__tactics.marks().find((m) => m.kind === 'move' && h(m.x, m.z) < 3);
+    });
     check(move, '手ほどきの移動の段で、移動できるマスがありません');
     const at = await T((c) => window.__tactics.tileScreen(c.x, c.z), move);
     await page.mouse.click(at.x, at.y);
@@ -2756,39 +2761,32 @@ async function storyRun(browser, baseUrl, name, core) {
    */
   const weirTagByHand = async () => {
     await until(() => window.__tactics.tutorial()?.step === 'weir-move', undefined, 120000);
-    const playerUnit = () => T(() => {
-      const st = window.__tactics.state();
-      const u = st?.turn && st.units.find((x) => x.id === st.turn.unitId);
-      return u && u.team === 'player' ? u.id : null;
-    });
+    const playerUnit = () =>
+      T(() => {
+        const st = window.__tactics.state();
+        const u = st?.turn && st.units.find((x) => x.id === st.turn.unitId);
+        return u && u.team === 'player' ? u.id : null;
+      });
     const endTurn = async () => {
       await press(text.buttons.wait);
       await until(() => window.__tactics.mode() === 'facing');
       await press(text.buttons.endTurn);
       await until(() => window.__tactics.mode() !== 'facing');
     };
-    // トウマ: 移動 → 攻撃 → 相手 → 確定 → 向き（手ほどきの段を順に進める）
-    const move = await T(() => window.__tactics.marks().filter((m) => m.kind === 'move').sort((a, b) => a.z - b.z)[0]);
-    const at = await T((c) => window.__tactics.tileScreen(c.x, c.z), move);
-    await page.mouse.click(at.x, at.y);
-    await until(() => window.__tactics.tutorial()?.step === 'weir-attack', undefined, 30000);
-    await press(text.buttons.attack);
-    await until(() => window.__tactics.mode() === 'targeting');
-    const target = await T(() => window.__tactics.marks().find((m) => m.kind === 'target'));
-    if (target) {
-      const tp = await T((c) => window.__tactics.tileScreen(c.x, c.z), target);
-      await page.mouse.click(tp.x, tp.y);
-      await until(() => window.__tactics.mode() === 'confirm');
-      await press(text.buttons.confirm);
-      await until(() => window.__tactics.mode() === 'facing', undefined, 30000);
-      await press(text.buttons.endTurn);
-    } else {
-      await press(text.buttons.back);
-      await endTurn();
-    }
-    for (let guard = 0; guard < 400; guard++) {
-      const tut = await T(() => window.__tactics.tutorial());
-      if (tut?.step === 'weir-high') break;
+    /** 移動できるマスのうち、高さが min 以上（low なら 3 より低い）のマス */
+    const moveTile = (high) =>
+      T((high) => {
+        const st = window.__tactics.state();
+        const h = (x, z) => st.map.tiles.find((t) => t.x === x && t.z === z)?.height ?? 0;
+        return window.__tactics.marks().filter((m) => m.kind === 'move' && (high ? h(m.x, m.z) >= 3 : h(m.x, m.z) < 3)).sort((a, b) => (high ? b.z - a.z : a.z - b.z))[0];
+      }, high);
+    const tapTile = async (c) => {
+      await until(() => window.__tactics.camera().idle);
+      const p = await T((c) => window.__tactics.tileScreen(c.x, c.z), c);
+      await page.mouse.click(p.x, p.y);
+    };
+    // 味方の手番ごとに: キリなら崖の上へ動かして札を待つ。ほかの人物は低いマスへ動くか、そのまま待機して手番を終える
+    for (let guard = 0; guard < 600; guard++) {
       const mode = await T(() => window.__tactics.mode());
       const who = mode === 'main' ? await playerUnit() : null;
       if (!who) {
@@ -2798,17 +2796,17 @@ async function storyRun(browser, baseUrl, name, core) {
       if (who === 'kiri') {
         const name = await T(() => document.querySelector('.unit-info strong')?.textContent ?? '');
         check(name === '弓使いキリ', `戦闘の名札に役目が添えられていません（${name}）`);
-        const high = await T(() => {
-          const st = window.__tactics.state();
-          const h = (x, z) => st.map.tiles.find((t) => t.x === x && t.z === z)?.height ?? 0;
-          return window.__tactics.marks().filter((m) => m.kind === 'move' && h(m.x, m.z) >= 3).sort((a, b) => b.z - a.z)[0];
-        });
+        const high = await moveTile(true);
         check(high, 'キリが崖の上へ移動できません');
-        await until(() => window.__tactics.camera().idle);
-        const hp = await T((c) => window.__tactics.tileScreen(c.x, c.z), high);
-        await page.mouse.click(hp.x, hp.y);
+        await tapTile(high);
         await until(() => window.__tactics.tutorial()?.step === 'weir-high', undefined, 30000);
         break;
+      }
+      const low = await moveTile(false);
+      if (low) {
+        await tapTile(low);
+        // 移動の後も、画面の段階は main（移動したかは手番の状態が持つ）
+        await until(() => window.__tactics.mode() === 'main' && window.__tactics.state()?.turn?.moved === true, undefined, 30000);
       }
       await endTurn();
     }
