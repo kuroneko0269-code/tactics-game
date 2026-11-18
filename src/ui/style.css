@@ -3584,6 +3584,12 @@ body.in-dialogue #hud {
   font-size: 13px;
 }
 
+.tutorial-bubble.inscription .tutorial-skip {
+  background: #e2d5b4;
+  color: #2a2016;
+  border-color: #8a6a3a;
+}
+
 .tutorial-bubble.inscription .tutorial-text {
   font-family: 'Klee One', 'Hiragino Maru Gothic ProN', 'Yu Mincho', 'Noto Serif JP', serif;
   font-size: 18px;
