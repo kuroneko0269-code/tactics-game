@@ -344,3 +344,19 @@ describe('場面を選ぶ（確認用の機能）の番号と、序章のすべ�
     }
   });
 });
+
+describe('場面9の帰り道（発注者の回答）', () => {
+  it('パン屋のおかみ・薬屋の老婆・ミオが朝と同じ場所にいる。ミオは薬屋の奥で薬研を持つ。三人とも台詞も会釈もない。売り子とユナはいない', () => {
+    const steps = parseScriptOrThrow('prologueEnd', scriptTexts['prologueEnd']!, scriptCatalog).steps;
+    const ds = steps.flatMap(directivesOf);
+    const morning = parseScriptOrThrow('prologueCity', scriptTexts['prologueCity']!, scriptCatalog).steps.flatMap(directivesOf);
+    for (const who of ['パン屋のおかみ', '薬屋の老婆', 'ミオ']) {
+      const at = (list: Directive[]) => list.find((d) => d.kind === 'enter' && d.actor === who);
+      expect(at(ds), who).toEqual(at(morning));
+      expect(ds.some((d) => (d.kind === 'gesture' || d.kind === 'walk' || d.kind === 'voice') && d.actor === who), who).toBe(false);
+      expect(steps.some((x) => x.kind === 'line' && x.speaker === who), who).toBe(false);
+    }
+    expect(ds).toContainEqual({ kind: 'carry', actor: 'ミオ', item: '薬研', slot: 'hand' });
+    expect(ds.some((d) => d.kind === 'enter' && (d.actor === '売り子' || d.actor === 'ユナ'))).toBe(false);
+  });
+});

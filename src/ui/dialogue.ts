@@ -721,6 +721,8 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       // 秒を決めた物の文字（封蝋の印など）は、その間だけ出して次へ（タップでも進む）
       else if (step.autoMs !== undefined) await wait(step.autoMs);
       else await new Promise<void>((resolve) => (release = resolve));
+      // 字幕と物の文字は、読み終えたらすぐ消す（暗転の上の字幕が、明けた画の上に残らないように）。台詞の枠は次の台詞まで残す
+      if (step.speaker === null || step.inscription) hideLine(true);
       index = advance(script, nextStop(script, index));
     }
     if (!skipped && listenSession) await joinListen();

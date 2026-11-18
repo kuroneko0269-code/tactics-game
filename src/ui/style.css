@@ -3211,23 +3211,21 @@ body.in-dialogue #hud {
   opacity: 0.92;
 }
 
-/* 重ねる短い画（回想）: 今の場面の写しを薄くして、別の画を透かして見せる */
+/* 重ねる短い画（回想）: 今の場面の写しを薄くして、別の画を透かして見せる。画の層（#stage）の中だけに置き、会話の枠や操作のボタンにはかけない */
 .overlay-snapshot {
-  position: fixed;
+  position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
   pointer-events: none;
-  z-index: 4;
   transition: opacity 0.18s ease;
 }
 
 .overlay-tint {
-  position: fixed;
+  position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 4;
   background: radial-gradient(ellipse at center, rgba(255, 236, 196, 0.08) 30%, rgba(60, 40, 16, 0.45) 100%);
   mix-blend-mode: multiply;
   transition: opacity 0.18s ease;
