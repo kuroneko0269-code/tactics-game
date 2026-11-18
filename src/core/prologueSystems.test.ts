@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { applyAction, startBattle } from './battle';
 import type { BattleSetup, BattleState } from './battleTypes';
 import { knockbackOutcome, previewAttack } from './combat';
-import { applyDirective, applyStep, EMPTY_STAGE, isStop, stageAt, type StageState } from './dialogue';
+import { applyDirective, applyStep, EMPTY_STAGE, isStop, lineBeforeControl, stageAt, type StageState } from './dialogue';
 import { previewSpellAt } from './magic';
 import { reachableTiles } from './movement';
 import { suspendedBattleFits } from './saveData';
@@ -223,5 +223,15 @@ describe('章のために決めた部隊の、物語の戦闘の途中保存', (
     expect(suspendedBattleFits({ origin: { kind: 'story', bookId: 'main', chapter: 0, scene: 2 }, state }, roster, dungeon, story)).toBe(true);
     expect(suspendedBattleFits({ origin: { kind: 'story', bookId: 'main', chapter: 0, scene: 1 }, state }, roster, dungeon, story)).toBe(false);
     expect(suspendedBattleFits({ origin: { kind: 'training', tierId: 'easy' }, state }, roster, dungeon, story)).toBe(false);
+  });
+});
+
+describe('操作の直前の台詞（早送りでも、読み終えるまで待つ）', () => {
+  const catalog: ScriptCatalog = { gestures: ['うなずく'], props: ['椀'] };
+  it('次に止まる所が操作の場面なら true（間に指示があってもよい）。台詞や章の題の前なら false', () => {
+    const r = parseScript('t', '@登場 母 1,1 南\n@登場 トウマ 2,2 北\n母「だれ？」\n@仕草 母 うなずく\n@歩かせる トウマ 2,1 3,1\nトウマ「ああ」\n母「うん」\n', catalog);
+    if (!r.ok) throw new Error(r.errors.join('\n'));
+    const lines = r.script.steps.map((s, i) => [s, i] as const).filter(([s]) => s.kind === 'line').map(([, i]) => i);
+    expect(lines.map((i) => lineBeforeControl(r.script, i))).toEqual([true, false, false]);
   });
 });

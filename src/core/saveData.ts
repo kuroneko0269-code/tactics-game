@@ -24,6 +24,8 @@
  * - 版 6（物語の土台）: 物語の進み具合（story。本ごとの章と場面の番号）と、途中の戦闘の出どころ「物語の戦闘」を追加。
  *   マップ上のイベントの「短いメッセージ」を「会話」に置き換えたので、途中の戦闘の中のイベントも直す（文の id がそのまま台本の id）。
  *   版 5 のデータは「物語はまだ始めていない」として直す。
+ * - 版 9（物語の確認用の機能）: 物語の進み具合に、確認用の機能（場面を選ぶ）で進めた印（checked）を足した。
+ *   版 8 のデータは、印なし（ふつうに進めた）として、そのまま読む。
  * - 版 7（戦闘で人は死なない決まり）: 途中の戦闘のユニットに種類（kind。人・影・獣・物）を足した。
  *   序章の場面の並びを変えた（話を聞く部屋を別の場面に分けた）ので、本編の序章の場面の番号を付け替える。
  *   途中の戦闘が物語の戦闘なら捨てる（堰の番兵の決まりが変わったため。その戦闘の始めからやり直す）。
@@ -34,7 +36,7 @@ import type { Roster } from './progression';
 import type { StoryProgress } from './story';
 
 /** 今のセーブデータの版 */
-export const SAVE_VERSION = 8;
+export const SAVE_VERSION = 9;
 
 /** 途中の戦闘が、どこの戦闘か（訓練戦の段階か、ダンジョンの何戦目か） */
 export type BattleOrigin =
@@ -215,6 +217,8 @@ export const SAVE_MIGRATIONS: SaveMigrations = {
     }
     return { ...old, version: 8, battle, story };
   },
+  /** 版 8 → 9: 物語の進み具合に、確認用の機能で進めた印（checked）を足した。印のないデータはそのまま（ふつうに進めた） */
+  8: (old) => ({ ...old, version: 9 }),
 };
 
 /**
@@ -349,7 +353,7 @@ function looksLikeStory(value: unknown): Record<string, StoryProgress> {
   for (const [id, raw] of Object.entries(value as Record<string, unknown>)) {
     const p = raw as Record<string, unknown> | null;
     if (typeof p === 'object' && p !== null && Number.isInteger(p.chapter) && Number.isInteger(p.scene) && typeof p.finished === 'boolean') {
-      out[id] = { chapter: p.chapter as number, scene: p.scene as number, finished: p.finished };
+      out[id] = { chapter: p.chapter as number, scene: p.scene as number, finished: p.finished, ...(p.checked === true ? { checked: true as const } : {}) };
     }
   }
   return out;

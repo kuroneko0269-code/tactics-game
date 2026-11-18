@@ -84,7 +84,7 @@ describe('行動アビリティ: 狙い撃ち', () => {
     });
 
   it('射程は 3〜6（弓より 1 長い）。近すぎるマスは狙えない', () => {
-    const tiles = spellRangeTiles(field().map, testAimedShot, { x: 0, z: 0 }).map((t) => t.x);
+    const tiles = spellRangeTiles(field(), testAimedShot, { x: 0, z: 0 }).map((t) => t.x);
     expect(tiles).toEqual([3, 4, 5, 6]);
     expect(() => applyAction(field(), { type: 'cast', spellId: 'aimedShot', target: { kind: 'unit', unitId: 'near' } })).toThrow();
   });

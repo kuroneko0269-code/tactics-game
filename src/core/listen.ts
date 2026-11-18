@@ -1,7 +1,8 @@
 /**
  * 「耳に当てて聞く」操作の進み具合（序章の場面9。台本の @聞く）。画面にも音の仕組みにも依存しない計算だけを持つ。
  *
- * - 押している間だけ時間が進む（離すと止まり、押し直すと続きから）。進んだ時間は「押していた時間の合計」。
+ * - 押している間だけ時間が進む（離すと止まる）。押し直すと、旋律がもう始まっていれば、節の頭から鳴らし直す
+ *   （物語の作者の指摘: 終わりの三つの音まで、途切れずに一度聞かせるため。listenRestart）。貝殻の音の間に離した時は、そこから続ける。
  * - 始めの shellMs の間は、貝殻のようなかすかな音だけが鳴る。その後、旋律の音を順に鳴らす（旋律の最初の音は shellMs の時点）。
  * - 貝殻の音は、旋律が始まるにつれて小さくなる。旋律の音量は、始めは小さく、少しずつ大きくなる（「やがて、それが節になる」）。
  * - 旋律の最後の音が鳴りきったら終わり（終わりの三つの音まで）。
@@ -54,4 +55,14 @@ export function pressedMs(presses: readonly { readonly down: number; readonly up
   let sum = 0;
   for (const p of presses) sum += Math.max(0, (p.up ?? now) - p.down);
   return sum;
+}
+
+/**
+ * 指を離して押し直した時に、どこから鳴らすか（押していた時間の合計で表す）。旋律がもう始まっていれば、節の頭（貝殻の音の終わり）から。
+ * まだ貝殻の音だけの間なら、そのまま続きから。聞き終えていれば、そのまま
+ */
+export function listenRestart(t: ListenTimeline, elapsed: number): number {
+  const e = Math.max(0, Math.floor(elapsed));
+  if (e >= listenTotal(t)) return e;
+  return e > t.shellMs ? t.shellMs : e;
 }

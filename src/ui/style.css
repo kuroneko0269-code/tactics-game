@@ -3482,3 +3482,97 @@ body.in-dialogue #hud {
 .settings-mute[aria-pressed='true'] {
   border-color: var(--accent);
 }
+
+/* ---- 確認用の機能（物語を確かめるための機能。設定で入にした時だけ） ---- */
+.check-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 45;
+  pointer-events: none;
+}
+
+.check-layer > * {
+  pointer-events: auto;
+}
+
+/* 入になっていることの印。画面の右下の隅に小さく出す（版の表示は左下） */
+.check-badge {
+  position: absolute;
+  right: max(4px, env(safe-area-inset-right));
+  bottom: 1px;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(168, 48, 42, 0.75);
+  color: #fff;
+  pointer-events: none;
+}
+
+.check-badge[hidden],
+.check-win[hidden] {
+  display: none;
+}
+
+/* 物語の戦闘の「勝ったことにする」。戦闘のカメラ操作のボタンのすぐ上に出す（位置は checkBadge.ts で測る。見えない時は右上） */
+.screen-button.check-win {
+  position: absolute;
+  min-height: 48px;
+  padding: 4px 12px;
+  font-size: 13px;
+  background: rgba(120, 36, 32, 0.85);
+  border-color: rgba(255, 160, 150, 0.6);
+}
+
+.story-menu-screen .game-sub {
+  margin: 0;
+  color: #a8b4c6;
+}
+
+/* 場面を選ぶ: 題・章のタブ・場面の一覧（一覧の枠の中だけスクロールする）・戻る */
+.scene-select-screen {
+  max-width: 640px;
+}
+
+.scene-select-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.scene-select-tabs {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+
+.scene-select-list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-right: 2px;
+}
+
+.scene-select-list .scene-select-item {
+  flex: none;
+  min-height: 48px;
+  justify-content: flex-start;
+  text-align: left;
+  font-size: 15px;
+}
+
+.screen-button.check-win.corner {
+  right: max(8px, env(safe-area-inset-right));
+  top: max(8px, env(safe-area-inset-top));
+}
+
+@media (orientation: landscape) {
+  .scene-select-list {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-content: start;
+  }
+}

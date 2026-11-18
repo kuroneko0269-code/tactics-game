@@ -133,16 +133,18 @@ export function createSaveStore(
  * 端末ごとの設定（序章に足りない仕組み）: 音量・消音・手ほどき。セーブデータとは別に置き、「はじめから」でも消さない。
  * - volume: 0〜100、muted: 消音
  * - skipSeenTutorials: 一度見た手ほどきは、次から出さない（はじめから遊び直しても）
- * - seenTutorials: 見た手ほどきの戦場の id
+ * - seenTutorials: 見た手ほどきの戦場の id（物語の「はじめから」で、物語の戦場の分を消す）
+ * - checkTools: 確認用の機能（物語の場面を選ぶ・物語の戦闘を勝ったことにする）を使うか。初めは切
  */
 export interface GameSettings {
   readonly volume: number;
   readonly muted: boolean;
   readonly skipSeenTutorials: boolean;
   readonly seenTutorials: readonly string[];
+  readonly checkTools: boolean;
 }
 
-export const DEFAULT_SETTINGS: GameSettings = { volume: 70, muted: false, skipSeenTutorials: true, seenTutorials: [] };
+export const DEFAULT_SETTINGS: GameSettings = { volume: 70, muted: false, skipSeenTutorials: true, seenTutorials: [], checkTools: false };
 
 export interface SettingsStore {
   load(): GameSettings;
@@ -162,6 +164,7 @@ export function normalizeSettings(raw: unknown): GameSettings {
     muted: typeof r.muted === 'boolean' ? r.muted : DEFAULT_SETTINGS.muted,
     skipSeenTutorials: typeof r.skipSeenTutorials === 'boolean' ? r.skipSeenTutorials : DEFAULT_SETTINGS.skipSeenTutorials,
     seenTutorials: Array.isArray(r.seenTutorials) ? r.seenTutorials.filter((x): x is string => typeof x === 'string') : [],
+    checkTools: r.checkTools === true,
   };
 }
 

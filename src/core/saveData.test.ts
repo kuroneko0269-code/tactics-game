@@ -64,9 +64,9 @@ describe('セーブデータ', () => {
   });
 
   it('版 1（フェーズ2-1a・2-1b・2-2a）のデータは、版 2・3・4 を経て版 5 に直す。ダンジョンは挑戦中なし・クリアなし', () => {
-    expect(SAVE_VERSION).toBe(8);
+    expect(SAVE_VERSION).toBe(9);
     const loaded = migrateSaveData({ version: 1, roster: { units: [unitV2] } }, context, SAVE_MIGRATIONS);
-    expect(loaded).toMatchObject({ ok: true, migratedFrom: 1, data: { version: 8, dungeon: EMPTY_DUNGEON_STATE, records: EMPTY_RECORDS, battle: null } });
+    expect(loaded).toMatchObject({ ok: true, migratedFrom: 1, data: { version: 9, dungeon: EMPTY_DUNGEON_STATE, records: EMPTY_RECORDS, battle: null } });
   });
 
   it('版 2 → 3: 育てた状態を残し、各ユニットの今のジョブの最初の装備を配って付け、最初の所持金を持たせる', () => {
@@ -147,6 +147,14 @@ describe('セーブデータ', () => {
     expect(migrateSaveData({ version: 2, team: roster, dungeon, records }, context, migrations, 3)).toMatchObject({ ok: true, migratedFrom: 2 });
     // 直す処理が抜けている版は読めない
     expect(migrateSaveData(v1, context, { 2: migrations[2]! }, 3)).toEqual({ ok: false, reason: 'noMigration' });
+  });
+
+  it('版 8 のデータは、物語の進み具合をそのまま読む（確認用の機能の印 checked は、付いていれば残す）', () => {
+    const v8 = { version: 8, roster, dungeon, records, battle: null, story: { main: { chapter: 0, scene: 4, finished: false } } };
+    expect(migrateSaveData(v8, context)).toMatchObject({ ok: true, migratedFrom: 8, data: { version: 9, story: { main: { chapter: 0, scene: 4, finished: false } } } });
+    const checked = { ...v8, version: 9, story: { main: { chapter: 0, scene: 4, finished: false, checked: true }, other: { chapter: 0, scene: 1, finished: false, checked: 'yes' } } };
+    const r = migrateSaveData(checked, context);
+    expect(r.ok && r.data.story).toEqual({ main: { chapter: 0, scene: 4, finished: false, checked: true }, other: { chapter: 0, scene: 1, finished: false } });
   });
 
   it('読めないデータは、理由を返して読み込まない', () => {

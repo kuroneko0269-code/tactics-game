@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import gameScript from '../../../docs/story/game-script-prologue.md?raw';
 import { parseScriptOrThrow, plainText, type Directive, type ScriptStep } from '../../core/script';
 import { hillBattle, weirBattle } from '../battles/prologue';
+import { currentScene, progressAt } from '../../core/story';
 import { mainBook } from './books';
 import { scriptTexts } from './scripts';
 import { scriptCatalog } from './stageDefs';
@@ -216,5 +217,32 @@ describe('序章の台本とゲーム脚本の対応', () => {
     expect(hillBattle.ambient).toMatchObject({ melody: '月を呼ぶ節' });
     // 7-11: 3回目が当たった後、案内「最後の一撃は、トウマで」
     expect(hillBattle.tutorial?.[0]).toMatchObject({ id: 'hill-finisher', tally: { id: 'oath-sword', atLeast: 3 } });
+  });
+});
+
+describe('場面を選ぶ（確認用の機能）の番号と、序章のすべての場面からの始まり', () => {
+  /** 脚本の場面の見出し（## 場面4（全角の空白）家・夕食と工房の夜）→ 番号と名前 */
+  const headings = [...gameScript.matchAll(/^## 場面(\d+)\s+(.+)$/gm)].map((m) => ({ n: Number(m[1]), name: m[2]!.replace(/（.*）$/, '').trim() }));
+  const scenes = mainBook.chapters[0]!.scenes;
+
+  it('序章の場面はすべて、脚本の場面の番号を持つ。番号は脚本の順に並び、脚本のすべての場面がある', () => {
+    expect(headings.map((h) => h.n)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    const nums = scenes.map((s) => s.scriptScene);
+    expect(nums.every((n) => n !== undefined)).toBe(true);
+    expect([...new Set(nums)]).toEqual(headings.map((h) => h.n));
+    expect([...nums].sort((a, b) => a! - b!)).toEqual(nums);
+  });
+
+  it('序章のすべての場面から始められる: 選んだ場面が今の場面になり、その場面の台本・会話のマップ・戦場がある', () => {
+    for (const [i, s] of scenes.entries()) {
+      const p = progressAt(mainBook, 0, i)!;
+      expect(currentScene(mainBook, p)?.scene.id, s.id).toBe(s.id);
+      expect(p.checked).toBe(true);
+      if (s.kind === 'dialogue' || s.kind === 'interactive') {
+        expect(scriptTexts[s.scriptId], s.id).toBeDefined();
+        parseScriptOrThrow(s.scriptId, scriptTexts[s.scriptId]!, scriptCatalog);
+      }
+      if (s.kind === 'battle') expect([weirBattle.id, hillBattle.id], s.id).toContain(s.battleId);
+    }
   });
 });

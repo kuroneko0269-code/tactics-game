@@ -224,6 +224,15 @@ export function nextStop(script: Script, index: number): number {
   return script.steps.length;
 }
 
+/**
+ * index の手順（台詞・語り）の次に止まる所が、操作の場面か（序章の場面9: 母の「だれ？」の次が、廊下へ歩かせる操作）。
+ * 操作の直前の台詞は、早送りでも読み終えるまで待つ（読む前に操作へ進まないように）
+ */
+export function lineBeforeControl(script: Script, index: number): boolean {
+  const next = script.steps[nextStop(script, index + 1)];
+  return next !== undefined && next.kind === 'directive' && isInteractive(next.directive);
+}
+
 /** 止まっている手順を読み終えた（タップした・操作を終えた）: 次の手順の番号 */
 export function advance(script: Script, index: number): number {
   return Math.min(script.steps.length, index + 1);

@@ -52,7 +52,7 @@ describe('セーブの出入口', () => {
     const dungeon = { run: { dungeonId: 'ruins', battle: 2 }, clears: { ruins: 1 } };
     const records = { trainingWins: { easy: 3, normal: 1 } };
     store.save({ roster: { ...roster, gold: 1234 }, dungeon, records, battle: null });
-    expect(JSON.parse(backend.text!).version).toBe(8);
+    expect(JSON.parse(backend.text!).version).toBe(9);
     expect(store.load()).toEqual({ roster: { ...roster, gold: 1234 }, dungeon, records, battle: null, story: {} });
     store.clear();
     expect(store.load()).toBeUndefined();
@@ -125,7 +125,7 @@ describe('セーブの出入口', () => {
     let u = learnAbility(hero, 'warrior', 'counter', catalog, progressionRules);
     u = setPassive(u, 'reaction', 'counter', catalog);
     store.save({ roster: replaceUnit(loaded.roster, u), dungeon: loaded.dungeon, records: loaded.records, battle: null });
-    expect(JSON.parse(backend.text!).version).toBe(8);
+    expect(JSON.parse(backend.text!).version).toBe(9);
     expect(findUnit(store.load()!.roster, 'touma').slots).toEqual({ secondary: 'warrior', reaction: 'counter', support: null, movement: null });
   });
 
@@ -163,8 +163,10 @@ describe('端末ごとの設定（序章に足りない仕組み）', () => {
     let text: string | null = null;
     const store = createSettingsStore({ read: () => text, write: (t) => (text = t), remove: () => (text = null) });
     expect(store.load()).toEqual(DEFAULT_SETTINGS);
-    store.save({ volume: 30, muted: true, skipSeenTutorials: false, seenTutorials: ['a'] });
-    expect(store.load()).toEqual({ volume: 30, muted: true, skipSeenTutorials: false, seenTutorials: ['a'] });
+    expect(DEFAULT_SETTINGS.checkTools).toBe(false);
+    store.save({ volume: 30, muted: true, skipSeenTutorials: false, seenTutorials: ['a'], checkTools: true });
+    expect(store.load()).toEqual({ volume: 30, muted: true, skipSeenTutorials: false, seenTutorials: ['a'], checkTools: true });
+    expect(normalizeSettings({ checkTools: 'yes' }).checkTools).toBe(false);
     expect(normalizeSettings({ volume: 250, muted: 'x', seenTutorials: [1, 'b'] })).toEqual({ ...DEFAULT_SETTINGS, volume: 100, seenTutorials: ['b'] });
     text = '{壊れた';
     expect(store.load()).toEqual(DEFAULT_SETTINGS);

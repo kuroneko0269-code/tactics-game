@@ -3,7 +3,7 @@ import { el, screenButton, showSheet } from './dom';
 import { TEXT } from './text';
 
 /**
- * 設定の欄（序章に足りない仕組み）: 音量（10 ずつ）・消音・見た手ほどきを出さないか。下からせり上がる欄に出す。
+ * 設定の欄（序章に足りない仕組み）: 音量（10 ずつ）・消音・見た手ほどきを出さないか・確認用の機能。下からせり上がる欄に出す。
  * 変えるたびに onChange を呼ぶ（保存と、音の仕組みへの反映は呼ぶ側）
  */
 export function showSettingsSheet(root: HTMLElement, current: () => GameSettings, onChange: (next: GameSettings) => void, onClose?: () => void): void {
@@ -42,6 +42,11 @@ export function showSettingsSheet(root: HTMLElement, current: () => GameSettings
         pressed: s.skipSeenTutorials,
       }),
       el('p', 'screen-note', TEXT.settings.tutorialNote),
+      screenButton(s.checkTools ? TEXT.settings.checkOn : TEXT.settings.checkOff, () => set({ checkTools: !s.checkTools }), {
+        className: 'settings-check',
+        pressed: s.checkTools,
+      }),
+      el('p', 'screen-note', TEXT.settings.checkNote),
     );
   };
   render();

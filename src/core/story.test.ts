@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { advance, backlog, isFinished, linesOf, nextStop, skipToEnd, stageAt, walkPath, EMPTY_STAGE } from './dialogue';
 import { createSaveData, migrateSaveData, SAVE_MIGRATIONS, suspendedBattleFits, type SaveMigrationContext } from './saveData';
 import { parseScript, parseScriptOrThrow, plainText, type ScriptCatalog } from './script';
-import { advanceScene, currentScene, normalizeProgress, recapFor, STORY_START, validateBook, type BookDefinition } from './story';
+import { advanceScene, currentScene, isChecked, normalizeProgress, progressAt, recapFor, sceneEntries, STORY_START, validateBook, type BookDefinition } from './story';
 import { flat, makeState } from './testSupport';
 import type { Roster } from './progression';
 
@@ -202,5 +202,41 @@ describe('セーブデータ（版 6）', () => {
     expect(suspendedBattleFits(battle, roster, dungeon, { trial: { chapter: 0, scene: 2, finished: false } })).toBe(true);
     expect(suspendedBattleFits(battle, roster, dungeon, { trial: { chapter: 0, scene: 3, finished: false } })).toBe(false);
     expect(suspendedBattleFits(battle, roster, dungeon, {})).toBe(false);
+  });
+});
+
+describe('確認用の機能の「場面を選ぶ」と、確認用の印（checked）', () => {
+  const book: BookDefinition = {
+    id: 'b',
+    chapters: [
+      { id: 'c1', recap: ['一'], scenes: [{ kind: 'base', id: 'a' }, { kind: 'base', id: 'b', scriptScene: 1 }] },
+      { id: 'c2', recap: ['二'], scenes: [{ kind: 'base', id: 'c' }] },
+    ],
+  };
+
+  it('場面の一覧は、章と場面の番号を順に並べる', () => {
+    expect(sceneEntries(book).map((e) => [e.chapter, e.scene, e.chapterId, e.definition.id])).toEqual([
+      [0, 0, 'c1', 'a'],
+      [0, 1, 'c1', 'b'],
+      [1, 0, 'c2', 'c'],
+    ]);
+  });
+
+  it('選んだ場面が今の場面になり、それより前は済んだことになる。本にない場面は選べない', () => {
+    const p = progressAt(book, 1, 0)!;
+    expect(p).toEqual({ chapter: 1, scene: 0, finished: false, checked: true });
+    expect(currentScene(book, p)?.scene.id).toBe('c');
+    expect(progressAt(book, 0, 5)).toBeUndefined();
+    expect(progressAt(book, 3, 0)).toBeUndefined();
+  });
+
+  it('確認用の印は、場面を進めても、最後まで終えても残る。読み込み直しても残る。ふつうに始めた進み具合には付かない', () => {
+    const p = progressAt(book, 0, 1)!;
+    const next = advanceScene(book, p);
+    expect(next).toEqual({ chapter: 1, scene: 0, finished: false, checked: true });
+    expect(advanceScene(book, next)).toMatchObject({ finished: true, checked: true });
+    expect(isChecked(normalizeProgress(book, next))).toBe(true);
+    expect(isChecked(advanceScene(book, STORY_START))).toBe(false);
+    expect(isChecked(undefined)).toBe(false);
   });
 });

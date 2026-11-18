@@ -2390,7 +2390,19 @@ async function storyRun(browser, baseUrl, name, core) {
     const before = await status();
     await noteMelody();
     if (before.inscription) stats.inscriptions.push(before.text);
-    await page.locator(before.inscription ? '.dialogue-inscription' : before.caption ? '.dialogue-caption' : '.dialogue-body').click();
+    // 早送りの間は、台詞がひとりでに進む（押そうとした時には消えていることがある）。操作の直前の台詞だけは、早送りでも押して進める
+    const tapped = page.locator(before.inscription ? '.dialogue-inscription' : before.caption ? '.dialogue-caption' : '.dialogue-body');
+    let moved = false;
+    if (before.fast) {
+      // 少し見守る（その間の声の印なども記録する）。進まなければ、操作の直前の台詞なので押す
+      for (let i = 0; i < 20 && !moved; i++) {
+        await noteMarks();
+        const d = await status();
+        moved = !d || d.index !== before.index;
+        if (!moved) await page.waitForTimeout(50);
+      }
+    }
+    if (!moved) await tapped.click();
     stats.lines++;
     await until((i) => {
       const d = window.__tactics.dialogue();
@@ -2431,7 +2443,8 @@ async function storyRun(browser, baseUrl, name, core) {
     return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
   };
   /**
-   * 耳に当てて聞く操作: 押している間だけ鳴る。pauseAt を渡すと、そこで指を離して止まることを確かめ、押し直して続きから鳴ることを確かめる
+   * 耳に当てて聞く操作: 押している間だけ鳴る。pauseAt を渡すと、そこで指を離して止まることを確かめ、
+   * 押し直すと節の頭（旋律の1つ目の音）から鳴り直すことを確かめる（物語の作者の指摘）
    */
   const doListen = async (pauseAt) => {
     const c = await listenButton();
@@ -2451,8 +2464,11 @@ async function storyRun(browser, baseUrl, name, core) {
       check((await status()).listenMs === kept, '指を離している間に、聞く操作が進んでいます');
       await page.mouse.down();
       await page.waitForTimeout(150);
-      const resumed = await T(() => window.__tactics.sound().melody);
-      check(resumed && resumed.index >= playing.index, `押し直した時に、続きから鳴っていません（${playing.index} → ${resumed?.index}）`);
+      const resumed = await T(() => ({ melody: window.__tactics.sound().melody, ms: window.__tactics.dialogue()?.listenMs ?? -1 }));
+      check(
+        resumed.melody && resumed.melody.index <= 1 && resumed.melody.index < playing.index && resumed.ms >= 3000 && resumed.ms < 3000 + 600,
+        `押し直した時に、節の頭から鳴り直していません（離す前 ${playing.index} 音目 → 押し直し ${resumed.melody?.index} 音目・${resumed.ms}ms）`,
+      );
       await screenshot('listen');
     }
     await until(() => window.__tactics.dialogue()?.waiting !== 'listen', undefined, 60000);
@@ -2498,7 +2514,9 @@ async function storyRun(browser, baseUrl, name, core) {
     await page.reload();
     stats.reloads++;
     await until(() => window.__tactics?.screen() === 'title');
-    await press(text.title.storyContinue);
+    await press(text.title.story);
+    await until(() => window.__tactics.screen() === 'story-menu');
+    await press(text.title.continue);
     await until(() => window.__tactics.screen() === 'recap');
     check((await T(() => document.querySelectorAll('.recap-line').length)) > 0, '「これまで」が出ません');
     await press(text.story.recapContinue);
@@ -2509,6 +2527,59 @@ async function storyRun(browser, baseUrl, name, core) {
     await press(text.deploy.start);
     await until(() => window.__tactics.screen() === 'battle' && window.__tactics.state() !== null);
   };
+  // ---- 確認用の機能（設定で入にする・場面を選ぶ・物語の戦闘を勝ったことにする） ----
+  const book = core.data.books.find((b) => b.id === 'main');
+  const scenes = book.chapters[0].scenes;
+  const sceneLabel = (i) => text.story.sceneLabel(text.story.chapters[book.chapters[0].id], scenes[i].scriptScene, text.story.scenes[scenes[i].id]);
+  const enableCheckTools = async () => {
+    await press(text.settings.open);
+    await press(text.settings.checkOff);
+    await press(text.settings.close);
+    check((await T(() => window.__tactics.settings().checkTools)) === true, '設定で確認用の機能を入にできません');
+    check(await T(() => !document.querySelector('.check-badge').hidden), '確認用の機能が入なのに、画面の隅の印が出ていません');
+  };
+  /** 題名の画面から「物語」→「場面を選ぶ」→ 場面 i */
+  const selectScene = async (i) => {
+    await press(text.title.story);
+    await until(() => window.__tactics.screen() === 'story-menu');
+    await press(text.check.sceneSelect);
+    await until(() => window.__tactics.screen() === 'scene-select');
+    check((await T(() => document.querySelectorAll('.scene-select-item').length)) === scenes.length, '場面を選ぶ画面に、序章のすべての場面が並んでいません');
+    await page.getByRole('button', { name: sceneLabel(i), exact: true }).click();
+  };
+  /** 物語の戦闘の「勝ったことにする」→ 確認の欄の「勝ったことにして進む」 */
+  const winByCheck = async () => {
+    await until(() => !document.querySelector('.check-win').hidden);
+    await press(text.check.winBattle);
+    await until(() => document.querySelector('.sheet[data-sheet="check-win"]') !== null);
+    await press(text.check.winYes);
+    await until(() => document.querySelector('.check-win').hidden && !document.querySelector('.sheet[data-sheet="check-win"]'), undefined, 30000);
+  };
+  /**
+   * 物語を最後まで進めた後の「はじめから」: 「つづきから」には終わりの画面の案内。確認を取ってから、物語の進み具合だけを消す。
+   * 部隊・装備・ゴールド・記録は残り、見た手ほどきは、もう一度出るように戻る
+   */
+  const restartStory = async (rosterBefore) => {
+    await press(text.title.toTitle);
+    await until(() => window.__tactics.screen() === 'title');
+    const recordsBefore = await T(() => JSON.stringify([window.__tactics.records(), window.__tactics.dungeon()]));
+    check((await T(() => window.__tactics.settings().seenTutorials)).includes('prologue-weir'), '堰の手ほどきを見た記録がありません');
+    await press(text.title.story);
+    await until(() => window.__tactics.screen() === 'story-menu');
+    check((await T(() => document.querySelector('.story-continue .sub')?.textContent)) === text.story.nextChapterSoon, '最後まで進めた後の「つづきから」に、終わりの案内が出ていません');
+    await press(text.title.restart);
+    await until(() => document.querySelector('[data-screen="story-restart"]') !== null);
+    await screenshot('restart-confirm');
+    await press(text.title.confirmRestartYes);
+    await until(() => window.__tactics.screen() === 'scene' && window.__tactics.dialogue() !== null);
+    const after = await T(() => ({ story: window.__tactics.story().main, tutorials: window.__tactics.settings().seenTutorials, roster: JSON.stringify(window.__tactics.roster()), rec: JSON.stringify([window.__tactics.records(), window.__tactics.dungeon()]) }));
+    check(after.story.scene === 0 && after.story.chapter === 0 && !after.story.finished && !after.story.checked, `「はじめから」で物語の最初に戻っていません（${JSON.stringify(after.story)}）`);
+    check(after.roster === rosterBefore && after.rec === recordsBefore, '「はじめから」で、部隊か訓練と遺跡の記録が変わっています');
+    check(!after.tutorials.some((id) => id.startsWith('prologue-')), '「はじめから」で、見た手ほどきが戻っていません');
+  };
+  /** 部隊（経験値・JP・ゴールド・所持品）が変わっていないか */
+  const rosterText = () => T(() => JSON.stringify(window.__tactics.roster()));
+
   /** 戦闘中の会話（台詞のない、音や動きだけの会話を含む）が閉じるまで待つ */
   const waitBattleDialogue = async () => {
     for (let guard = 0; guard < 400; guard++) {
@@ -2688,29 +2759,43 @@ async function storyRun(browser, baseUrl, name, core) {
     check(counts.collapse >= 1 && counts.gate >= 1 && counts.chime >= 1, `堰の勝った後の音（崩れる・門・石の鳴る音）が鳴っていません（${JSON.stringify(counts)}）`);
     check(stats.cuts > 0, '堰の勝った後に、遠い谷の家々のカットが出ていません');
     log('冒頭の石の節・堰の会話（ルビ・物の文字・読み返し・読み込み直しと「これまで」・早送り）・堰の戦闘（手ほどき・退場しない番兵・読み込み直しと再開・勝った後の遠景）✔');
-    // 場面2〜7 の会話はスキップ。丘の戦闘
-    for (const n of [3, 4, 5, 6, 7, 8]) {
-      await waitScene(n);
-      await until(() => window.__tactics.screen() === 'scene' && window.__tactics.dialogue() !== null);
-      await skip();
-    }
+    // 確認用の機能: 読み込み直してタイトルへ。設定で入にし、「場面を選ぶ」で丘の戦闘から始める（場面2〜7の会話を飛ばす）
+    await waitScene(3);
+    const rosterBefore = await rosterText();
+    await page.reload();
+    await until(() => window.__tactics?.screen() === 'title');
+    await enableCheckTools();
+    await press(text.title.story);
+    await until(() => window.__tactics.screen() === 'story-menu');
+    check((await T(() => document.querySelector('.story-continue .sub')?.textContent)) === sceneLabel(3), '「つづきから」に今の場面が出ていません');
+    await screenshot('story-menu');
+    await press(text.title.back);
+    await selectScene(9);
+    await screenshot('scene-select-done');
     await waitScene(9);
+    check((await T(() => window.__tactics.story().main.checked)) === true, '場面を選んで始めたのに、確認用の印が付いていません');
     await hillStart();
     await until(() => ['main', 'busy', 'ended'].includes(window.__tactics.mode()) && !window.__tactics.dialogue());
-    await T(() => window.__tactics.finishBattle('player'));
+    await screenshot('check-win');
+    await winByCheck();
     await until(() => window.__tactics.dialogue()?.waiting === 'line', undefined, 60000);
+    check((await T(() => window.__tactics.dialogue().speaker)) === '氏族の男', '勝ったことにした後、丘の勝った後の台本が流れていません');
     await skip();
     await waitScene(10);
+    check((await rosterText()) === rosterBefore, '勝ったことにしたのに、部隊（経験値・JP・ゴールド・所持品）が変わっています');
     await until(() => window.__tactics.screen() === 'scene' && window.__tactics.dialogue() !== null);
     await skip();
-    log('残りの会話はスキップ・丘の戦闘（始めの演出・衛士・遠くで続く歌）✔');
+    log('確認用の機能（設定・隅の印・つづきからの場面・場面を選ぶ・丘の始めの演出の後に勝ったことにする・報酬なし）✔');
     // 場面9: 操作（早送りで台詞を進め、操作は止まる）
     await waitScene(11);
     await until(() => window.__tactics.screen() === 'scene' && window.__tactics.dialogue() !== null);
     await finalScene(false);
     check(stats.walks >= 12 && stats.taps === 2 && stats.listens === 1, `場面9の操作が足りません（歩く ${stats.walks}・タップ ${stats.taps}・聞く ${stats.listens}）`);
     check((await T(() => document.querySelector('.story-end-screen .screen-title')?.textContent)) === text.story.nextChapterSoon, '「第1章は準備中です」が出ていません');
-    log('場面9（歩かせる・戸をタップ・石をタップ・耳に当てる（離すと止まり、押し直すと続き））・「第1章は準備中です」✔');
+    log('場面9（歩かせる・戸をタップ・石をタップ・耳に当てる（離すと止まり、押し直すと節の頭から））・「第1章は準備中です」✔');
+    // はじめから（手ほどきの途中で勝ったことにするのは、全体の版で確かめる。CI の検査全体を6分以内に収めるため）
+    await restartStory(rosterBefore);
+    log('はじめから（確認・部隊と記録が残る・手ほどきが戻る）✔');
     return {};
   };
 
@@ -2870,22 +2955,31 @@ async function storyRun(browser, baseUrl, name, core) {
   check((await T(() => window.__tactics.story().main?.finished)) === true, '序章を終えた記録がありません');
   await press(text.title.toTitle);
   await until(() => window.__tactics.screen() === 'title');
-  log('塔へ帰る・家までの道（歩かせる・見知らぬ男の礼）・戸をタップ・物置（石をタップ・耳に当てる・離すと止まり押し直すと続き・読み込み直し）・「第1章は準備中です」✔');
+  log('塔へ帰る・家までの道（歩かせる・見知らぬ男の礼）・戸をタップ・物置（石をタップ・耳に当てる・離すと止まり押し直すと節の頭から・読み込み直し）・「第1章は準備中です」✔');
 
-  // ---- 2回目: すべてスキップで通す（操作の場面もスキップで飛ばす） ----
+  // ---- 2回目: 確認用の機能を入にして「はじめから」。会話はすべてスキップし、戦闘は「勝ったことにする」で通す ----
+  // 堰は手ほどきの途中で、丘は始めの演出の途中で勝ったことにする（手ほどきと演出もあわせて飛ばせること）
   await T(() => window.__tactics.setAutoPlayer(false));
+  const rosterBefore = await rosterText();
+  await enableCheckTools();
+  // 最後まで進めた後の「つづきから」は、終わりの画面（「第1章は準備中です」）。restartStory はそこの「タイトルへ」から始める
   await press(text.title.story);
-  const book = core.data.books.find((b) => b.id === 'main');
-  const scenes = book.chapters[0].scenes;
+  await press(text.title.continue);
+  await until(() => window.__tactics.screen() === 'story-end');
+  await restartStory(rosterBefore);
   for (let n = 0; n < scenes.length; n++) {
     await waitScene(n);
     if (scenes[n].kind === 'battle') {
       await deployAndStart();
-      await waitBattleDialogue();
-      if (n === 2) check((await T(() => window.__tactics.tutorial())) === null, '2回目の堰の戦闘で、見た手ほどきがまた出ています');
-      await until(() => ['main', 'busy', 'ended'].includes(window.__tactics.mode()) && !window.__tactics.dialogue());
-      await T(() => window.__tactics.finishBattle('player'));
+      if (n === 2) {
+        await until(() => window.__tactics.tutorial()?.step === 'weir-move', undefined, 60000);
+      } else {
+        await until(() => window.__tactics.dialogue() !== null, undefined, 60000);
+      }
+      await winByCheck();
+      check((await T(() => window.__tactics.tutorial())) === null, '勝ったことにした後も、手ほどきが残っています');
       await until(() => window.__tactics.dialogue() !== null, undefined, 60000);
+      if (n !== 2) check((await T(() => window.__tactics.state()?.winner ?? 'player')) === 'player', '勝ったことにした後の様子が勝ちになっていません');
       await until(() => window.__tactics.dialogue() === null || ['line', 'busy'].includes(window.__tactics.dialogue().waiting));
       await press(text.dialogue.skip);
       await press(text.dialogue.skipYes);
@@ -2895,7 +2989,25 @@ async function storyRun(browser, baseUrl, name, core) {
     await skip();
   }
   await until(() => window.__tactics.screen() === 'story-end');
-  log('スキップで最初から最後まで ✔');
+  check((await rosterText()) === rosterBefore, '勝ったことにした戦闘で、部隊（経験値・JP・ゴールド・所持品）が変わっています');
+  log('はじめから（確認・部隊と記録が残る・手ほどきが戻る）・スキップと「勝ったことにする」（手ほどきの途中・始めの演出の途中）で最後まで ✔');
+  // ---- 場面を選ぶ: 序章のすべての場面から始められる ----
+  for (let n = 0; n < scenes.length; n++) {
+    await page.goto(`${baseUrl}?seed=${SEED}&speed=${SPEED}`);
+    await until(() => window.__tactics?.screen() === 'title');
+    await selectScene(n);
+    const sc = scenes[n];
+    if (sc.kind === 'battle') {
+      await until(() => window.__tactics.mode() === 'deploy', undefined, 60000);
+      const r = await T(() => ({ map: window.__tactics.deploy().state.map.id, story: window.__tactics.story().main }));
+      check(r.map === sc.battleId && r.story.scene === n && r.story.checked, `場面 ${sceneLabel(n)} を選んで、その戦闘の配置から始まりません（${JSON.stringify(r)}）`);
+    } else {
+      await until(() => window.__tactics.screen() === 'scene' && window.__tactics.dialogue() !== null, undefined, 60000);
+      const r = await T(() => ({ stage: window.__tactics.sceneStage(), story: window.__tactics.story().main }));
+      check(r.stage === sc.stageId && r.story.scene === n && r.story.checked, `場面 ${sceneLabel(n)} を選んで、その場面から始まりません（${JSON.stringify(r)}）`);
+    }
+  }
+  log(`場面を選ぶ: 序章の ${scenes.length} の場面すべてから始められる ✔`);
   check(errors.length === 0, `ページでエラー: ${errors.map((e) => e.message).join(' / ')}`);
   await context.close();
   return { story: true, seconds: Math.round((Date.now() - started) / 1000), ...stats, melodies: stats.melodies.size, inscriptions: stats.inscriptions.length, locations: stats.locations.size };
@@ -2935,7 +3047,7 @@ async function checkLayouts(browser, baseUrl, name, core) {
       if (!s.hidden && (s.scrollHeight > s.clientHeight + 1 || s.scrollWidth > s.clientWidth + 1)) {
         out.push(`画面の中身があふれている ${s.scrollWidth}×${s.scrollHeight}`);
       }
-      for (const b of document.querySelectorAll('#screen button, #hud button, #dialogue button')) {
+      for (const b of document.querySelectorAll('#screen button, #hud button, #dialogue button, .check-layer button')) {
         if (b.offsetParent === null) continue;
         const r = b.getBoundingClientRect();
         if (r.width === 0 || r.height === 0) continue;
@@ -2944,7 +3056,7 @@ async function checkLayouts(browser, baseUrl, name, core) {
         const area = b.closest('.scroll-area');
         const box = area ? area.getBoundingClientRect() : r;
         if (box.top < -1 || box.left < -1 || box.bottom > vh + 1 || box.right > vw + 1) out.push(`画面の外: ${name}`);
-        if ((b.closest('#screen') || b.closest('#dialogue')) && r.height < 47.5) out.push(`小さいボタン（高さ ${Math.round(r.height)}px）: ${name}`);
+        if ((b.closest('#screen') || b.closest('#dialogue') || b.closest('.check-layer')) && r.height < 47.5) out.push(`小さいボタン（高さ ${Math.round(r.height)}px）: ${name}`);
       }
       return out;
     });
@@ -3111,9 +3223,56 @@ async function checkLayouts(browser, baseUrl, name, core) {
   }
   await screenIs('title');
 
+  /**
+   * 物語の画面（つづきから・はじめから・場面を選ぶ）と、確認用の機能（隅の印・物語の戦闘の「勝ったことにする」と確認の欄）。
+   * どちらの版でも確かめる。終わった後は、確認用の機能を切り、物語の進み具合を消しておく
+   */
+  const storyMenuLayouts = async () => {
+    await page.goto(`${baseUrl}?seed=${SEED}&speed=${SPEED}`);
+    await screenIs('title');
+    await press(text.settings.open);
+    await press(text.settings.checkOff);
+    await press(text.settings.close);
+    check(await page.evaluate(() => !document.querySelector('.check-badge').hidden), '確認用の機能を入にしても、隅の印が出ていません');
+    await press(text.title.story);
+    await screenIs('story-menu');
+    await inspect('story-menu-first');
+    await press(text.check.sceneSelect);
+    await screenIs('scene-select');
+    await inspect('scene-select');
+    const weir = core.data.text.story.sceneLabel('序章', 1, text.story.scenes.weir);
+    await press(weir);
+    await until(() => window.__tactics.mode() === 'deploy');
+    await until(() => !document.querySelector('.check-win').hidden);
+    await inspect('check-deploy');
+    await press(text.objectives.close);
+    await press(text.deploy.start);
+    await until(() => window.__tactics.tutorial() !== null && window.__tactics.camera().idle);
+    await page.waitForTimeout(500);
+    await inspect('check-battle');
+    await press(text.check.winBattle);
+    await until(() => document.querySelector('.sheet[data-sheet="check-win"]') !== null);
+    await inspect('check-win-sheet');
+    await press(text.check.winNo);
+    await page.reload();
+    await screenIs('title');
+    await press(text.title.story);
+    await screenIs('story-menu');
+    await inspect('story-menu');
+    await press(text.title.restart);
+    await until(() => document.querySelector('[data-screen="story-restart"]') !== null);
+    await inspect('story-restart');
+    await press(text.title.back);
+    await page.evaluate(() => {
+      localStorage.clear();
+    });
+  };
+
   // ---- 物語の土台: 題名・会話・読み返し・スキップの確認・操作の場面・対象物のある戦闘・「これまで」 ----
-  // 短くした版（CI）では確かめない（試しの場面の通しで同じ画面を通る。収まりは全体の自動プレイの4つの画面サイズで確かめる。CI の検査全体を6分以内に収めるため）
+  // 短くした版（CI）では、物語の画面（つづきから・はじめから・場面を選ぶ・勝ったことにする）だけを確かめる
+  // （残りは試しの場面の通しで同じ画面を通る。収まりは全体の自動プレイの4つの画面サイズで確かめる。CI の検査全体を6分以内に収めるため）
   if (QUICK) {
+    await storyMenuLayouts();
     await context.close();
     return { screens, seconds: Math.round((Date.now() - started) / 1000) };
   }
@@ -3189,7 +3348,9 @@ async function checkLayouts(browser, baseUrl, name, core) {
   await inspect('dialogue-line-2');
   await page.reload();
   await screenIs('title');
-  await press(text.title.storyContinue);
+  await press(text.title.story);
+  await screenIs('story-menu');
+  await press(text.title.continue);
   await screenIs('recap');
   await inspect('recap');
   await press(text.story.recapContinue);
@@ -3204,6 +3365,8 @@ async function checkLayouts(browser, baseUrl, name, core) {
   await until(() => window.__tactics.story().main?.scene === 6 && window.__tactics.dialogue() !== null);
   await until(() => window.__tactics.dialogue()?.waiting === 'walk' && window.__tactics.camera().idle);
   await inspect('interactive-walk');
+  await page.evaluate(() => localStorage.clear());
+  await storyMenuLayouts();
   await context.close();
   return { screens, seconds: Math.round((Date.now() - started) / 1000) };
 }

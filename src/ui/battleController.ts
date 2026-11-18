@@ -15,7 +15,7 @@ import { attackableTargets, attackRangeTiles, previewAttack, strikeOf, weaponFit
 import { isSilencedFor, mpCostOf, passiveIdOf, statusBlocker } from '../core/effects';
 import { directionToward, type Coord, type Direction } from '../core/geometry';
 import { affectsUnit, chargeArea, hasMpFor, inSpellRange, previewSpellAt, spellOf, spellRangeTiles, targetCenter } from '../core/magic';
-import { isAlive, isKnockedOut, occupantAt, reachableTiles, unitAt } from '../core/movement';
+import { isAlive, isBystanderTile, isKnockedOut, occupantAt, reachableTiles, unitAt } from '../core/movement';
 import { targetUnitIds } from '../core/scenario';
 import { predictTimeline } from '../core/turnOrder';
 import { objectivesView, overlayTiles, type OverlayKind } from './objectives';
@@ -267,6 +267,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
   /** 魔法の狙い先として選べるマスか（射程の内側。蘇生は、戦闘不能のユニットがいるマスだけ） */
   const canAim = (spell: SpellDefinition, c: Coord) =>
     inSpellRange(spell, actor(), c) &&
+    !isBystanderTile(state, c) &&
     (!unitOnly(spell) || state.units.some((u) => affectsUnit(spell, u, actor()) && u.x === c.x && u.z === c.z));
   /** ユニットだけを狙う魔法・業か（蘇生と、狙える相手が決まっている時守の業） */
   const unitOnly = (spell: SpellDefinition) => spell.effect === 'revive' || spell.targets !== undefined;
@@ -513,7 +514,7 @@ export function createBattleController(start: ActionResult, deps: BattleControll
       case 'spellTargetKind':
       case 'spellConfirm': {
         const spell = spellOf(unit, mode.spellId);
-        const range = spellRangeTiles(state.map, spell, unit).map((c) => ({ ...c, kind: 'spellRange' as const }));
+        const range = spellRangeTiles(state, spell, unit).map((c) => ({ ...c, kind: 'spellRange' as const }));
         if (mode.kind === 'spellTarget') {
           // 蘇生は、狙える戦闘不能のユニットのマスも示す
           // 時守の業も、狙える味方・敵のマスを示す
