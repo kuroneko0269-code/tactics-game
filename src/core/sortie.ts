@@ -71,6 +71,8 @@ export interface BattleSite {
   readonly cast?: Readonly<Record<string, string>>;
   /** ユニットの id → 人物の見た目の名前（src/data/story/looks.ts。物語の相手。省くとジョブの形と陣営の色） */
   readonly looks?: Readonly<Record<string, string>>;
+  /** 名札に役目（ジョブの名前）を添えるユニットの id（ゲーム脚本の序章: 戦士ゴード・弓使いキリ・魔道士フェン・治癒師ノノ） */
+  readonly roleTags?: readonly string[];
   /** 勝った後に、戦闘のマップの上で流す台本の id（帰りの門の光・人物が消える、など。戦闘の結果は変えない） */
   readonly afterVictory?: string;
   /** 戦闘の手ほどき（序章に足りない仕組み。マスやボタンを指し示し、短い説明を出して、その操作を待つ） */
@@ -109,6 +111,11 @@ export interface TutorialStep {
   readonly minHeight?: number;
   /** 数えた回数（勝利条件の hitUnit の id など）がこの数に届いてから出す（3回目が当たった後） */
   readonly tally?: { readonly id: string; readonly atLeast: number };
+  /**
+   * この段で、物に書かれた文字（台本の @文字 の行）を、紙の札のように出す（ゲーム脚本の序章 1-10: キリを崖の上へ動かすと、
+   * 測り棒の札が出る）。台本の名前。札の文は台本が正（text.ts には書かない）
+   */
+  readonly scriptId?: string;
 }
 
 /** 手ほどきで指し示せるボタン */

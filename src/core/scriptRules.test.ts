@@ -132,7 +132,17 @@ describe('台本の決まりの検査（読む量の決まり）', () => {
     const w = checkScriptRules(three, rules);
     expect(w).toHaveLength(1);
     expect(w[0]).toMatchObject({ line: 4, kind: 'narration' });
-    expect(formatRuleWarning(w[0]!)).toMatch(/^台本 t: 4行目: 語りが 3 行あります.*1・3・4行目/);
+    expect(formatRuleWarning(w[0]!)).toMatch(/^台本 t: 4行目: 字幕が 3 行あります.*1・3・4行目/);
+  });
+
+  it('字幕は画面に出る行で数える（／ の改行は2行）。札と物の文字は数えない。台本ごとの例外（場面1は3行）', () => {
+    const lines = parseScriptOrThrow('t', '一行目／二行目\n@札 今　暦の塔\n朝。', catalog);
+    expect(checkScriptRules(lines, rules).map((x) => x.kind)).toEqual(['narration']);
+    const placard = parseScriptOrThrow('t', '@札 過去　谷の外れの堰\n一行目／二行目', catalog);
+    expect(checkScriptRules(placard, rules)).toEqual([]);
+    const three = parseScriptOrThrow('weir', '一日前。\n前提。\n堰。', catalog);
+    expect(checkScriptRules(three, rules)).toHaveLength(1);
+    expect(checkScriptRules(three, { ...rules, narrationLimits: { weir: 3 } })).toEqual([]);
   });
 });
 

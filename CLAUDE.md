@@ -90,7 +90,8 @@ npm run build        # 公開用ファイルを dist/ に作る
 npm run preview      # ビルド結果を確認（http://localhost:4173/tactics-game/）
 npm run check        # lint・型チェック・テスト・ビルドをまとめて実行
 npm run autoplay     # 自動プレイ（全体。手元で実行）: 実際のブラウザで画面をタップして1戦を最後まで進め、core だけの計算と結果が一致するか確かめる（約15〜20分。画面サイズを減らすと短い）
-npm run script-rules # 台本の決まり（台詞の字数・続けて話す枠・語りの行数）に合わない所の一覧を出す
+npm run script-rules # 台本の決まり（台詞の字数・続けて話す枠・字幕の行数）に合わない所の一覧を出す
+npm run script-export # 序章の「画面に出るものだけ」（札・字幕・台詞と肩書き・物の文字・名札・操作の案内）を場面ごとに書き出す（-- --out=ファイル でファイルに）
 npm run autoplay:ci  # 自動プレイ（短くした版。CI で実行）: 1戦は操作を一通り確かめたところで照合して打ち切る（約3〜4分）
 npm run balance      # バランス確認: 画面を使わず AI 同士を戦わせ、敵の段階ごとの勝率、ジョブごとのレベル 50 までの戦闘数・成長率の違い、ダンジョンの各戦闘の勝率と時間、装備の段階ごとの勝率・お金の速さ・買いそろえるまでの戦闘数を集計する（約15分。-- --dungeon-only でダンジョンだけ、-- --equipment-only で装備だけ、-- --jobs でジョブごとの勝率の比較だけ（1つのジョブだけを入れ替えた部隊どうしを戦わせる）、-- --unlocks で新しいジョブの解放までの戦闘数だけ、-- --prologue で序章の2つの戦闘の勝率と見込みの時間だけ）
 ```
@@ -199,6 +200,10 @@ npm run balance      # バランス確認: 画面を使わず AI 同士を戦わ
   対応はテスト `src/data/story/gameScript.test.ts` で確かめる）、章と場面は `src/data/story/books.ts`（脚本の10場面。堰と丘は戦闘の前と戦闘に分けて 12 の場面）、
   見込みの時間は `src/core/scriptTiming.ts`（数値は `src/data/story/scriptTiming.ts`。`npm run script-rules` で場面ごとに出す）、2つの戦闘は `src/data/battles/prologue/`、
   序章の部隊は `src/data/story/parties.ts` の `prologueParty`、3つの節（ユナの鼻歌・月を呼ぶ節・送りの節）は `src/data/sounds.ts`。
+- 序章の改訂（ゲーム脚本の改訂版 2026-11-18）: 場所と時の札（`@札`）・暗転の上の字幕（`@暗転の上`）・肩書き（`話者〔肩書き〕「台詞」`）・名札（`@名札`）・映す秒数（`@映す`・`@文字 秒`）・
+  音を切る（`@節を切る`）は `src/core/script.ts` と `src/ui/dialogue.ts`、短い画を重ねる（`@重ねる`）は `src/main.ts` の `showOverlay`（回想の台本を別のシーンとカメラで描き、今の画の写しを薄く重ねる）、
+  聞く操作は待たずに進み、後の `@節を待つ` が聞く進み具合を待つ（`src/ui/dialogue.ts`）。隊員の名札の役目は戦場の定義の `roleTags`、手ほどきで物の文字を出す段は `scriptId`。
+  字幕の行数は画面の行で数え、場面1だけ3行（`src/data/story/scriptRules.ts` の `narrationLimits`）。書き出しは `src/core/scriptExport.ts` と `scripts/script-export.mjs`。
 - 物語の確認（物語の確認の PR）: 題名の「物語」の後の「つづきから／はじめから」と「場面を選ぶ」の画面は `src/ui/titleScreen.ts`、場面の一覧と選んだ場面の進み具合は
   `src/core/story.ts`（`sceneEntries`・`progressAt`。場面の脚本の番号は `books.ts` の `scriptScene`、名前は text.ts の `story.scenes`）。確認用の機能の切り替えは設定（`checkTools`）、
   隅の印と「勝ったことにする」は `src/ui/checkBadge.ts`、勝った状態を作るのは `src/core/battle.ts` の `forceVictory`。確認用の機能で進めた物語は進み具合に `checked` が付き、報酬を得ない。

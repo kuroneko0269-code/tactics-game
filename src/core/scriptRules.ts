@@ -10,8 +10,13 @@ export interface ScriptRules {
   readonly maxLineChars: number;
   /** 同じ人物が続けて話してよい枠の数（これを超えると知らせる） */
   readonly maxSameSpeakerRun: number;
-  /** 1つの場面（1つの台本）で語りに使ってよい行の数（これを超えると知らせる） */
+  /**
+   * 1つの場面（1つの台本）で字幕（語り）に使ってよい行の数（これを超えると知らせる）。画面に出る行で数える（／ で改行した字幕は2行）。
+   * 場所と時の札・物の文字は数えない
+   */
   readonly maxNarrationLines: number;
+  /** 台本ごとの字幕の行数の上限の例外（台本の名前 → 行数。序章の場面1は前提の字幕のため 3 行） */
+  readonly narrationLimits?: Readonly<Record<string, number>>;
   /** 字幕（語り）の画面の1行の字数の上限（省くと調べない。／ で改行した行ごとに数える） */
   readonly maxCaptionLineChars?: number;
   /** 字数の上限を超えてよい字幕の行（ゲーム脚本の字幕を優先した例外。ルビを除いた1行の文） */
@@ -37,12 +42,13 @@ export function checkScriptRules(script: Script, rules: ScriptRules): ScriptRule
   const warn = (line: number, kind: ScriptRuleKind, message: string) => out.push({ scriptId: script.id, line, kind, message });
   let runSpeaker: string | null = null;
   let runLength = 0;
+  /** 字幕の画面の行（台本の行の番号を、出る行の数だけ並べる） */
   const narration: number[] = [];
   for (const step of script.steps) {
     if (step.kind !== 'line') continue;
     const text = plainText(step.text);
     if (step.speaker === null) {
-      narration.push(step.line);
+      narration.push(...text.split('\n').map(() => step.line));
       runSpeaker = null;
       runLength = 0;
       const max = rules.maxCaptionLineChars;
@@ -72,11 +78,12 @@ export function checkScriptRules(script: Script, rules: ScriptRules): ScriptRule
       warn(step.line, 'sameSpeaker', `${step.speaker}の台詞が ${rules.maxSameSpeakerRun + 1} 枠続いています（続けて ${rules.maxSameSpeakerRun} 枠まで）`);
     }
   }
-  if (narration.length > rules.maxNarrationLines) {
+  const limit = rules.narrationLimits?.[script.id] ?? rules.maxNarrationLines;
+  if (narration.length > limit) {
     warn(
-      narration[rules.maxNarrationLines]!,
+      narration[limit]!,
       'narration',
-      `語りが ${narration.length} 行あります（1つの場面に ${rules.maxNarrationLines} 行まで。語りの行: ${narration.join('・')}行目）`,
+      `字幕が ${narration.length} 行あります（この場面は ${limit} 行まで。字幕の台本の行: ${[...new Set(narration)].join('・')}行目）`,
     );
   }
   return out.sort((a, b) => a.line - b.line);

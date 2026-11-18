@@ -36,6 +36,8 @@ export function estimateScriptMs(script: Script, timing: ScriptTiming, initial: 
   let stage = initial;
   /** 鳴っている旋律と、鳴りはじめた時刻（節を待つ のため） */
   let melody: { name: string; at: number } | undefined;
+  /** 耳に当てて聞く操作の間（聞く時間は @聞く で数え、その間の 節を待つ・重ねる は数えない） */
+  let listening = false;
   const one = (d: Directive, st: StageState): number => {
     switch (d.kind) {
       case 'together':
@@ -58,18 +60,27 @@ export function estimateScriptMs(script: Script, timing: ScriptTiming, initial: 
       case 'melody':
         melody = { name: d.melody, at: total };
         return 0;
-      case 'melodyWait': {
+      case 'melodyWait':
+      case 'melodyCut': {
+        if (listening) return 0;
         const m = melody ? timing.melodies[melody.name] : undefined;
         if (!m || !melody) return 0;
         const starts = m.noteStarts;
-        const target = d.remaining <= 0 ? m.totalMs : (starts[starts.length - d.remaining] ?? m.totalMs);
+        const first = d.kind === 'melodyWait' && d.first;
+        const target = first ? (starts[0] ?? 0) : d.remaining <= 0 ? (d.kind === 'melodyCut' ? 0 : m.totalMs) : (starts[starts.length - d.remaining] ?? m.totalMs);
+        if (d.kind === 'melodyCut' && d.remaining <= 0) return 0;
         return Math.max(0, melody.at + target - total);
       }
+      case 'shot':
+        return d.ms;
+      case 'overlay':
+        return listening ? 0 : d.ms + 300;
       case 'walkControl':
         return d.path.length * timing.walkControlStepMs;
       case 'tapControl':
         return timing.tapMs;
       case 'listen':
+        listening = true;
         return timing.listenMs;
       case 'hold':
         return d.steps * timing.holdStepMs;
@@ -102,7 +113,9 @@ export function estimateScriptMs(script: Script, timing: ScriptTiming, initial: 
       total += one(d, stage);
       stage = applyStep(stage, { kind: 'directive', line: step.line, directive: d });
     }
-    if (step.kind === 'line') total += timing.msPerLine + [...plainText(step.text)].length * timing.msPerChar;
+    if (step.kind === 'line') listening = false;
+    if (step.kind === 'line' && step.autoMs !== undefined) total += step.autoMs;
+    else if (step.kind === 'line') total += timing.msPerLine + [...plainText(step.text)].length * timing.msPerChar;
   }
   return total;
 }

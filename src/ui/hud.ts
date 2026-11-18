@@ -129,6 +129,8 @@ export interface AttackPreviewView {
 }
 
 export interface HudHandlers {
+  /** 名札に役目を添えるユニットの id（ゲーム脚本の序章: 戦士ゴード・弓使いキリ・魔道士フェン・治癒師ノノ） */
+  readonly roleTags?: readonly string[];
   onRotate(direction: 1 | -1): void;
   /** 1 で拡大、-1 で縮小 */
   onZoom(steps: 1 | -1): void;
@@ -319,7 +321,7 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
         if (e.kind === 'turn') {
           const chip = el('span', `chip team-${e.team}${i === 0 ? ' current' : ''}`);
           chip.textContent = TEXT.jobShort[e.jobId] ?? '?';
-          chip.title = unitName(e.id, e.jobId);
+          chip.title = handlers.roleTags?.includes(e.id) ? TEXT.roleName(TEXT.jobs[e.jobId] ?? e.jobId, unitName(e.id, e.jobId)) : unitName(e.id, e.jobId);
           order.append(chip);
           return;
         }
@@ -338,7 +340,7 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
       head.append(turn);
       info.append(head);
       if (!unit) return;
-      infoState = { ...infoState, name: unitName(unit.id, unit.jobId) };
+      infoState = { ...infoState, name: handlers.roleTags?.includes(unit.id) ? TEXT.roleName(TEXT.jobs[unit.jobId] ?? unit.jobId, unitName(unit.id, unit.jobId)) : unitName(unit.id, unit.jobId) };
       const name = el('strong', `team-text-${unit.team}`);
       name.textContent = `${infoState.name}`;
       const job = el('span', 'job');

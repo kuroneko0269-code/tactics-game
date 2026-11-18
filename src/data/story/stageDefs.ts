@@ -219,6 +219,11 @@ export const PROP_KINDS: Readonly<Record<string, string>> = {
   星の並び: 'stars',
   砦: 'fort',
   広げた指示書: 'scrollOpen',
+  // ゲーム脚本の改訂（2026-11-18）で足した物
+  窓: 'window',
+  /** 遠くの家（マップの外の遠景。堰の下流の村の屋根） */
+  遠くの家: 'house',
+  壁の工具: 'wallTools',
 };
 
 /**

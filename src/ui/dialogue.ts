@@ -1,4 +1,4 @@
-import { advance, applyDirective, applyStep, backlog, isFinished, lineBeforeControl, nextStop, skipToEnd, walkPath, type StageState } from '../core/dialogue';
+import { advance, applyDirective, applyStep, backlog, isFinished, isStop, lineBeforeControl, nextStop, skipToEnd, walkPath, type StageState } from '../core/dialogue';
 import type { Coord, Direction } from '../core/geometry';
 import { listenPhase, listenRestart, listenTotal, type ListenTimeline } from '../core/listen';
 import type { Directive, RubySegment, Script } from '../core/script';
@@ -55,6 +55,10 @@ export interface DialogueDeps {
   readonly portrait?: PortraitPort;
   /** 人物の服の主な色と帯の色（名前の札の色）。省くと決まった色 */
   readonly speakerColors?: (name: string) => { readonly body: number; readonly accent: number } | undefined;
+  /** 短い画を重ねる（@重ねる。回想の台本を ms の間だけ、今の場面の上に重ねる）。省くと待つだけ */
+  readonly overlay?: (scriptId: string, ms: number, fast: boolean) => Promise<void>;
+  /** 札・名札を出した時に知らせる（自動テストの記録用） */
+  readonly onNotice?: (kind: 'placard' | 'nameTag', text: string) => void;
 }
 
 /** 会話から使う音の口 */
@@ -75,6 +79,8 @@ export interface DialogueSound {
   listenPause?(finished: boolean): void;
   /** 旋律の各音の始まりの時刻（聞く操作の表を作るため） */
   listenTimeline?(melody: string): ListenTimeline | undefined;
+  /** 鳴っている旋律を、終わりから remaining 個目の音の手前で切る（0 ならすぐ）。切った時に解決する */
+  cutMelody?(remaining: number): Promise<void>;
 }
 
 /** 自動プレイが読む、今の会話の様子 */
@@ -101,6 +107,12 @@ export interface DialogueStatus {
   readonly inscription: boolean;
   /** 物をタップする操作の、物のあるマス */
   readonly tapTarget?: Coord;
+  /** 出している場所と時の札（出していなければ空） */
+  readonly placard: string;
+  /** 出している名札（名前〔肩書き〕。出していなければ空） */
+  readonly nameTag: string;
+  /** 短い画を重ねているか */
+  readonly overlay: boolean;
   /** 耳に当てて聞く操作: 押していた時間の合計・全体の長さ・今押しているか */
   readonly listenMs: number;
   readonly listenTotal: number;
@@ -136,6 +148,20 @@ export function rubyNodes(segments: readonly RubySegment[]): Node[] {
     r.append(rt);
     return [r];
   });
+}
+
+/**
+ * 物に書かれた文字を組み立てる。終わりが全角の空白で区切られた短い名（測り棒の札の「\u3000ユナ」）なら、署名として右に寄せて出す
+ */
+export function inscriptionNodes(segments: readonly RubySegment[]): Node[] {
+  const last = segments[segments.length - 1];
+  const at = last && !last.ruby ? last.text.lastIndexOf('\u3000') : -1;
+  if (!last || at < 0 || last.text.length - at > 8) return rubyNodes(segments);
+  const body = [...segments.slice(0, -1), { text: last.text.slice(0, at) }];
+  const sign = document.createElement('span');
+  sign.className = 'inscription-signature';
+  sign.textContent = last.text.slice(at + 1);
+  return [...rubyNodes(body), sign];
 }
 
 const plain = (segments: readonly RubySegment[]) => segments.map((s) => s.text).join('');
@@ -183,7 +209,20 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
   // 操作の場面の部品（押し続けるボタンと、手引きの文）
   const control = el('div', 'dialogue-control');
   control.hidden = true;
-  root.append(caption, inscription, control, box);
+  // 場所と時の札（画面の隅に短く出す。「今」「過去」は色の違う印で）
+  const placard = el('div', 'dialogue-placard');
+  placard.hidden = true;
+  const placardEra = el('span', 'dialogue-placard-era');
+  const placardText = el('span', 'dialogue-placard-text');
+  placard.append(placardEra, placardText);
+  placard.setAttribute('aria-live', 'polite');
+  // 名札（台詞のない人物の名前と肩書き）
+  const nameTag = el('div', 'dialogue-nametag');
+  nameTag.hidden = true;
+  const nameTagName = el('span', 'dialogue-nametag-name');
+  const nameTagTitle = el('span', 'dialogue-nametag-title');
+  nameTag.append(nameTagName, nameTagTitle);
+  root.append(caption, inscription, control, placard, nameTag, box);
 
   let index = 0;
   let stage: StageState = deps.initial ?? { actors: {}, props: {}, dark: false };
@@ -204,6 +243,13 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
   let listening = false;
   /** 聞く操作で、押していた時間の合計（押している間も進む） */
   let listenNow = () => listenMs;
+  /** 聞く操作（@聞く）を始めてから、聞き終えるまで: 聞き終えた時に解決する。旋律の表と、今の聞く進み具合 */
+  let listenSession: { done: Promise<void>; readonly timeline?: ListenTimeline; finished: boolean; abort: () => void } | undefined;
+  let placardShown = '';
+  let nameTagShown = '';
+  let overlayOn = false;
+  let placardTimer: number | undefined;
+  let nameTagTimer: number | undefined;
   /** 今待っているもの（タップ・操作）を解決する関数 */
   let release: (() => void) | undefined;
   let walkTap: ((c: readonly Coord[]) => void) | undefined;
@@ -295,6 +341,7 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       close();
       skipped = true;
       walkTap = undefined;
+      listenSession?.abort();
       wake();
     });
     ref.sheet = showSheet(root, {
@@ -342,7 +389,7 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       box.classList.add('tools-only');
       box.classList.remove('narration');
       inscriptionLabel.textContent = who;
-      inscriptionText.replaceChildren(...rubyNodes(step.text));
+      inscriptionText.replaceChildren(...inscriptionNodes(step.text));
       inscription.hidden = false;
       shownTitle = '';
       setSpeakerView(null, null);
@@ -364,8 +411,10 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
     box.classList.remove('narration', 'tools-only');
     name.textContent = who;
     paintPlate(plate, who);
-    shownTitle = stage.titles?.[who] ?? '';
+    // 初めて出る人物の肩書き（その台詞だけ）か、@肩書き で付けた肩書き。名の下に出す
+    shownTitle = step.speakerTitle ?? stage.titles?.[who] ?? '';
     title.textContent = shownTitle;
+    plate.classList.toggle('with-title', shownTitle !== '');
     title.hidden = shownTitle === '';
     text.replaceChildren(...rubyNodes(step.text));
     setSpeakerView(step.portrait === false ? null : who, step.highlight === false ? null : who);
@@ -499,7 +548,7 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
    * 耳に当てて聞く操作。押している間だけ時間が進み、貝殻の音から旋律へ移る。離すと止まり、押し直すと節の頭から（貝殻の音の間なら続きから）。
    * 旋律を鳴りきると次へ（余韻は切らない）
    */
-  const listenStep = (melody: string, timbre: string, label: string) =>
+  const listenStep = (melody: string, timbre: string, label: string, onAbort: (abort: () => void) => void) =>
     new Promise<void>((resolve) => {
       const timeline = deps.sound?.listenTimeline?.(melody);
       listenMs = 0;
@@ -562,8 +611,8 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       };
       button.addEventListener('pointerdown', down);
       for (const ev of ['pointerup', 'pointerleave', 'pointercancel'] as const) button.addEventListener(ev, up);
-      // スキップされた時
-      release = () => finish(false);
+      // スキップされた時（聞く操作の間も、ほかの指示が進むので、待つ口とは別に止める口を渡す）
+      onAbort(() => finish(false));
     });
 
   const walkStep = (actor: string, path: readonly Coord[]) =>
@@ -610,6 +659,9 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       if (isFinished(script, index)) break;
       const step = script.steps[index]!;
       waiting = 'busy';
+      // 聞く操作の後の、台詞・ほかの操作・章の題の前では、聞き終えるのを待つ
+      if (listenSession && (step.kind === 'line' || isStop(step))) await joinListen();
+      if (skipped) break;
       if (step.kind === 'directive') {
         const d = step.directive;
         if (d.kind === 'hold') {
@@ -627,10 +679,15 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
           waiting = 'tap';
           await tapStep(d.target, d.label);
         } else if (d.kind === 'listen') {
+          // 聞く操作は待たずに次へ進む（聞いている間に、@節を待つ で進み具合を待ち、@重ねる で短い画を重ねられる）。
+          // 台詞・ほかの操作・台本の終わりの前で、聞き終えるのを待つ
           hideLine(true);
           setFast(false);
-          waiting = 'listen';
-          await listenStep(d.melody, d.timbre, d.label);
+          const session: NonNullable<typeof listenSession> = { done: Promise.resolve(), finished: false, abort: () => {}, ...(deps.sound?.listenTimeline?.(d.melody) ? { timeline: deps.sound.listenTimeline(d.melody)! } : {}) };
+          session.done = listenStep(d.melody, d.timbre, d.label, (abort) => (session.abort = abort)).then(() => {
+            session.finished = true;
+          });
+          listenSession = session;
         } else if (d.kind === 'walkControl') {
           // 歩かせる間は台詞の枠を隠す（横向きの低い画面で、枠が光るマスを覆わないように）。スキップのボタンは残す
           hideLine(true);
@@ -652,14 +709,26 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
         if (skipped) break;
       }
       if (skipped) break;
+      // 暗転の上の字幕: 暗くなっていなければ、暗転してから出す
+      if (step.overDark && !stage.dark) {
+        await deps.setDark(true, fast ? 150 : 600);
+        stage = { ...stage, dark: true };
+      }
       showLine(step);
       waiting = 'line';
       // 早送りは操作の場面で止まる。操作の直前の台詞（場面9の母の「だれ？」など）は、早送りでもタップを待つ
       if (deps.autoAdvance?.() || (fast && !lineBeforeControl(script, index))) await wait(fast ? FAST_LINE_MS : 30);
+      // 秒を決めた物の文字（封蝋の印など）は、その間だけ出して次へ（タップでも進む）
+      else if (step.autoMs !== undefined) await wait(step.autoMs);
       else await new Promise<void>((resolve) => (release = resolve));
+      // 字幕と物の文字は、読み終えたらすぐ消す（暗転の上の字幕が、明けた画の上に残らないように）。台詞の枠は次の台詞まで残す
+      if (step.speaker === null || step.inscription) hideLine(true);
       index = advance(script, nextStop(script, index));
     }
+    if (!skipped && listenSession) await joinListen();
     if (skipped) {
+      listenSession?.abort();
+      listenSession = undefined;
       deps.sound?.stopMelody();
       const r = skipToEnd(script, index, stage);
       stage = r.stage;
@@ -668,12 +737,78 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       await deps.setDark(stage.dark, 0);
     }
     setSpeakerView(null, null);
+    window.clearTimeout(placardTimer);
+    window.clearTimeout(nameTagTimer);
     waiting = 'none';
     root.innerHTML = '';
     root.hidden = true;
     document.body.classList.remove('in-dialogue');
     return { skipped };
   })();
+
+  /** 場所と時の札を画面の隅に出し、数秒で消す（待たない）。暗転の中なら、明けてから見えるように少し長く残す */
+  function showPlacard(textOf: string, era: string | undefined) {
+    const body = era ? textOf.slice(era.length).replace(/^[\s\u3000]+/, '') : textOf;
+    placardEra.textContent = era ?? '';
+    placardEra.hidden = !era;
+    placardEra.dataset.era = era === '過去' ? 'past' : era === '今' ? 'now' : '';
+    placardText.textContent = body;
+    placard.dataset.era = placardEra.dataset.era;
+    placard.hidden = false;
+    placard.classList.remove('leaving');
+    placardShown = textOf;
+    deps.onNotice?.('placard', textOf);
+    window.clearTimeout(placardTimer);
+    const ms = (fast ? 1600 : 3600) + (stage.dark ? 1000 : 0);
+    placardTimer = window.setTimeout(() => {
+      placard.classList.add('leaving');
+      placardTimer = window.setTimeout(() => {
+        placard.hidden = true;
+        placardShown = '';
+      }, 400);
+    }, ms);
+  }
+
+  /** 名札（台詞のない人物の名前と肩書き）を、画面の上の方に短く出す（待たない） */
+  function showNameTag(who: string, titleOf: string) {
+    nameTagName.textContent = who;
+    nameTagTitle.textContent = titleOf;
+    paintPlate(nameTag, who);
+    nameTag.hidden = false;
+    nameTagShown = `${who}〔${titleOf}〕`;
+    deps.onNotice?.('nameTag', nameTagShown);
+    window.clearTimeout(nameTagTimer);
+    nameTagTimer = window.setTimeout(() => {
+      nameTag.hidden = true;
+      nameTagShown = '';
+    }, fast ? 1500 : 3200);
+  }
+
+  /** 聞き終えるのを待つ（聞く操作を始めた後の、台詞・操作・台本の終わりの前） */
+  async function joinListen() {
+    const session = listenSession;
+    if (!session) return;
+    waiting = 'listen';
+    await session.done;
+    if (listenSession === session) listenSession = undefined;
+    waiting = 'busy';
+  }
+
+  /** 聞く操作の旋律が、終わりから remaining 個目の音（first なら最初の音）まで進むのを待つ（0 なら聞き終えるまで） */
+  async function waitListen(remaining: number, first: boolean) {
+    const session = listenSession;
+    if (!session) return;
+    const t = session.timeline;
+    if (!t || (!first && remaining <= 0)) return joinListen();
+    const total = t.noteStarts.length;
+    const want = first ? 1 : total - remaining + 1;
+    const prevWaiting = waiting;
+    waiting = 'listen';
+    while (!skipped && !session.finished && listenPhase(t, listenNow()).notesStarted < want) {
+      await new Promise((r) => window.setTimeout(r, 40));
+    }
+    waiting = prevWaiting;
+  }
 
   /** 指示を見せる（暗転と間は、ここで扱う）。before は指示の前の舞台（同時の指示の中では、それまでの指示を行った舞台） */
   async function runDirective(d: Directive, before: StageState = stage): Promise<void> {
@@ -696,13 +831,59 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       await wait(fast ? Math.min(d.ms, 120) : d.ms);
       return;
     }
+    if (d.kind === 'placard') return showPlacard(d.text, d.era);
+    if (d.kind === 'nameTag') return showNameTag(d.actor, d.title);
+    if (d.kind === 'shot') {
+      // 映す: 動く時間を含めて、ちょうど ms の間だけ映す（早送りなら短く）
+      const total = fast ? Math.min(d.ms, 300) : d.ms;
+      const move = Math.min(600, Math.floor(total * 0.4));
+      const started = performance.now();
+      const { kind: _k, ms: _ms, ...target } = d;
+      void _k;
+      void _ms;
+      await port.run({ kind: 'camera', ...target, ...(move > 0 ? { ms: move } : {}) }, before, fast);
+      const rest = total - (performance.now() - started);
+      if (rest > 0) await wait(rest);
+      return;
+    }
+    if (d.kind === 'overlay') {
+      overlayOn = true;
+      try {
+        if (deps.overlay) await deps.overlay(d.scriptId, d.ms, fast);
+        else await wait(fast ? Math.min(d.ms, 300) : d.ms);
+      } finally {
+        overlayOn = false;
+      }
+      return;
+    }
+    if (d.kind === 'melodyCut') {
+      // 鳴っている旋律を、その音の手前で切り、別の音を鳴らす（早送りの時は、すぐに切る）
+      if (deps.sound?.cutMelody) {
+        const p = deps.sound.cutMelody(fast ? 0 : d.remaining);
+        await new Promise<void>((resolve) => {
+          const prev = release;
+          release = () => {
+            resolve();
+            prev?.();
+          };
+          void p.then(resolve);
+        });
+      } else deps.sound?.stopMelody();
+      deps.sound?.effect(d.sound);
+      return;
+    }
+    // 聞く操作の間の 節を待つ: プレイヤーが押して進める旋律を待つ（早送りでも待つ）
+    if (d.kind === 'melodyWait' && listenSession) {
+      await waitListen(d.remaining, d.first === true);
+      return;
+    }
     // 旋律と効果音（序章に足りない仕組み）。旋律は待たずに次へ進む（待つ時は 節を待つ）
     if (d.kind === 'melody') return deps.sound?.playMelody(d.melody, d.timbre, d.mark);
     if (d.kind === 'melodyStop') return deps.sound?.stopAll ? deps.sound.stopAll() : deps.sound?.stopMelody();
     if (d.kind === 'sound') return deps.sound?.effect(d.sound);
     if (d.kind === 'melodyWait') {
-      // 早送りの時は待たない（節はそのまま鳴り続ける）
-      if (fast || !deps.sound) return;
+      // 早送りの時は待たない（節はそのまま鳴り続ける）。旋律の頭は、鳴らした時点で始まっている
+      if (fast || !deps.sound || d.first) return;
       const p = deps.sound.waitMelody(d.remaining);
       // スキップされたら、待つのをやめる
       await new Promise<void>((resolve) => {
@@ -722,7 +903,8 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
     done,
     status: () => ({
       active: waiting !== 'none',
-      waiting,
+      // 聞く操作の間は、ほかの指示（重ねる など）が進んでいても、聞く操作を待っている
+      waiting: listenSession && !listenSession.finished && waiting === 'busy' ? 'listen' : waiting,
       index,
       speaker,
       text: shown,
@@ -736,6 +918,9 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       caption: !caption.hidden,
       inscription: !inscription.hidden,
       ...(tapTarget ? { tapTarget } : {}),
+      placard: placardShown,
+      nameTag: nameTagShown,
+      overlay: overlayOn,
       listenMs: Math.floor(listenNow()),
       listenTotal: listenAll,
       listening,
@@ -747,6 +932,7 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
     abort() {
       skipped = true;
       walkTap = undefined;
+      listenSession?.abort();
       wake();
     },
     advance() {

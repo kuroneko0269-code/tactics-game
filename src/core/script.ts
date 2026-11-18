@@ -61,8 +61,11 @@ export type Directive =
   | { readonly kind: 'lightOff'; readonly name: string }
   /** 旋律を鳴らす（待たずに次へ進む）。melody は旋律の名前、timbre は音色の名前。mark は鳴っている間の印に添える文（省くと音色の名前） */
   | { readonly kind: 'melody'; readonly melody: string; readonly timbre: string; readonly mark?: string }
-  /** 鳴っている旋律が、残り remaining 個の音になるまで待つ（0 なら終わるまで。鳴っていなければ待たない） */
-  | { readonly kind: 'melodyWait'; readonly remaining: number }
+  /**
+   * 鳴っている旋律が、残り remaining 個の音になるまで待つ（0 なら終わるまで。鳴っていなければ待たない）。first なら、旋律の最初の音が鳴りはじめるまで。
+   * 耳に当てて聞く操作の間は、プレイヤーが押して進める旋律を待つ（早送りでも待つ）
+   */
+  | { readonly kind: 'melodyWait'; readonly remaining: number; readonly first?: true }
   | { readonly kind: 'melodyStop' }
   /** 効果音を鳴らす */
   | { readonly kind: 'sound'; readonly sound: string }
@@ -105,7 +108,27 @@ export type Directive =
    * 操作の場面: 押し続けて聞く（石を耳に当てる）。押している間だけ鳴り、離すと止まり、押し直すと続きから鳴る。
    * 初めは貝殻のようなかすかな音で、やがて旋律になる。旋律を鳴りきると次へ
    */
-  | { readonly kind: 'listen'; readonly melody: string; readonly timbre: string; readonly label: string };
+  | { readonly kind: 'listen'; readonly melody: string; readonly timbre: string; readonly label: string }
+  /**
+   * 場所と時の札（改訂の決まり）。場面が変わった時に、画面の隅に短く出して数秒で消える（待たずに次へ進む）。字幕の行数には数えない。
+   * era は札の始めの「今」「過去」（時をまたぐ物語なので、一目で分かる色で出す）。text は札の文のまま（era を含む）
+   */
+  | { readonly kind: 'placard'; readonly text: string; readonly era?: string }
+  /** 名札: 台詞のない人物の名前と肩書きを、短く画面に出す（序章の丘のガレス〔アスタルの若き王〕）。待たずに次へ進む */
+  | { readonly kind: 'nameTag'; readonly actor: string; readonly title: string }
+  /**
+   * 映す: カメラをマスか人物・物に向け、ちょうど ms の間（動く時間を含む）映してから次へ移る（意味ありげなカットを長く止めない）
+   */
+  | { readonly kind: 'shot'; readonly x?: number; readonly z?: number; readonly actor?: string; readonly zoom?: CameraZoom; readonly ms: number }
+  /**
+   * 重ねる: 今の場面の上に、別の短い画（回想の台本 scriptId が作る舞台）を ms の間だけ重ねて見せる（序章の場面9: ユナの指）
+   */
+  | { readonly kind: 'overlay'; readonly scriptId: string; readonly ms: number }
+  /**
+   * 音を、別の音で途中から切る: 鳴っている旋律を、終わりから remaining 個目の音の手前で切り、効果音 sound を鳴らす
+   * （remaining が 0 なら、すぐに切る。序章の場面4: 鼻歌が戸の開く音に切られる）
+   */
+  | { readonly kind: 'melodyCut'; readonly sound: string; readonly remaining: number };
 
 /** 場所を移した時に、新しいマップに置いておく物 */
 export interface LocationProp {
@@ -122,7 +145,7 @@ export const ITEM_SLOTS_JA: Readonly<Record<string, ItemSlot>> = { 手: 'hand', 
 /** 操作の場面の指示か（プレイヤーの操作を待つ） */
 export const isInteractive = (d: Directive) => d.kind === 'hold' || d.kind === 'walkControl' || d.kind === 'tapControl' || d.kind === 'listen';
 /** 台詞の後ろには書けない指示か（操作の場面と章の題。1行に分けて書く） */
-const isStandalone = (d: Directive) => isInteractive(d) || d.kind === 'chapterTitle' || d.kind === 'cut' || d.kind === 'location';
+const isStandalone = (d: Directive) => isInteractive(d) || d.kind === 'chapterTitle' || d.kind === 'cut' || d.kind === 'location' || d.kind === 'overlay';
 
 /** 歩く速さの言葉（百分率） */
 export const WALK_SPEEDS_JA: Readonly<Record<string, number>> = { ゆっくり: 50, ふつう: 100, 速く: 170, 走る: 250 };
@@ -143,6 +166,12 @@ export type ScriptStep =
       readonly highlight?: false;
       /** 物に書かれた文字（@文字）。speaker は物の呼び名（測り棒の札など）。物を大きく映した上に、読める大きさで出す */
       readonly inscription?: true;
+      /** 初めて出る人物の肩書き（話者〔肩書き〕「台詞」）。この台詞の時だけ、顔の枠の名の下に出す */
+      readonly speakerTitle?: string;
+      /** 暗転の上に出す字幕（@暗転の上）。暗くなっていなければ暗転してから、画面の中央に出す */
+      readonly overDark?: true;
+      /** 物の文字を、この時間（ミリ秒）だけ出して次へ進む（@文字 1.5秒。タップでも進む） */
+      readonly autoMs?: number;
     }
   | { readonly kind: 'directive'; readonly line: number; readonly directive: Directive };
 
@@ -219,13 +248,19 @@ export const DIRECTIVE_USAGE: Readonly<Record<string, string>> = {
   攻撃: '@攻撃 名前 相手の名前 [当たる・外れる・払う]（戦闘中の台本だけ。見た目だけ）',
   押し返す: '@押し返す 名前（戦闘中の台本だけ。戦闘の中の位置へ滑るように戻る）',
   脚本: '@脚本 場面-行（ゲーム脚本の行の印。例 @脚本 2-5。ゲームとして足した演出は @脚本 外）',
-  文字: '台詞の形で 物の呼び名「書かれた文」 @文字（物に書かれた文字を、読める大きさで出す）',
+  文字: '台詞の形で 物の呼び名「書かれた文」 @文字 [秒]（物に書かれた文字を、読める大きさで出す。秒を書くと、その間だけ出して次へ）',
   声: '@声 名前 声の種類（叫び・呼び込み・笑い。言葉にしない声）',
   遠景: '@遠景 会話のマップの id 秒（離れた場所を短く映して戻る）',
   場所: '@場所 会話のマップの id（場所を移す。人物はいなくなる）',
   動かす: '@動かす 物の名前 x,z [秒]（物をそのマスへ動かす）',
   タップ: '@タップ 物の名前 [案内の文]（操作の場面: 物をタップする）',
-  聞く: '@聞く 旋律の名前 音色 [案内の文]（操作の場面: 押している間だけ鳴る）',
+  聞く: '@聞く 旋律の名前 音色 [案内の文]（操作の場面: 押している間だけ鳴る。待たずに次の行へ進み、@節を待つ で聞く進み具合を待つ）',
+  札: '@札 今　暦の塔（場所と時の札。画面の隅に短く出す）',
+  名札: '@名札 名前 肩書き（台詞のない人物の名前と肩書きを短く出す）',
+  映す: '@映す x,z か 人物・物の名前 [遠・中・近] 秒（その秒の間だけ映して次へ）',
+  重ねる: '@重ねる 回想の台本の名前 秒（今の場面の上に、別の短い画を重ねる）',
+  節を切る: '@節を切る 効果音の名前 [残りの音の数]（鳴っている旋律を、その音の手前で切って効果音を鳴らす）',
+  暗転の上: '字幕の後ろに @暗転の上（暗転してから、画面の中央に出す）',
 };
 
 const STRIKE_OUTCOMES: Readonly<Record<string, 'hit' | 'miss' | 'parry'>> = { 当たる: 'hit', 外れる: 'miss', 払う: 'parry' };
@@ -258,7 +293,7 @@ export function parseScript(id: string, text: string, catalog: ScriptCatalog): P
       }
       for (const part of parts) {
         if (LINE_MODIFIERS.includes(part)) {
-          fail(`@${part} は台詞の後ろに書きます（書き方: ${DIRECTIVE_USAGE[part]}）`);
+          fail(`@${part} は台詞か字幕の後ろに書きます（書き方: ${DIRECTIVE_USAGE[part]}）`);
           continue;
         }
         const d = parseDirective(part, catalog);
@@ -271,9 +306,22 @@ export function parseScript(id: string, text: string, catalog: ScriptCatalog): P
     const { body, rest } = splitTrailing(trimmed);
     const directives: Directive[] = [];
     const modifiers = new Set<string>();
+    /** @文字 1.5秒: 物の文字を、その秒だけ出して次へ（意味ありげなカットを長く止めない） */
+    let autoMs: number | undefined;
     for (const part of rest) {
       if (LINE_MODIFIERS.includes(part)) {
         modifiers.add(part);
+        continue;
+      }
+      const timed = /^文字[\s\u3000]+([\d.]+)秒?$/.exec(part);
+      if (timed) {
+        const v = Number(timed[1]);
+        if (!(v > 0 && v <= 30)) {
+          fail(`@文字 の秒「${timed[1]}」は 0 より大きく 30 までの数で書きます`);
+          continue;
+        }
+        modifiers.add('文字');
+        autoMs = Math.round(v * 1000);
         continue;
       }
       const d = parseDirective(part, catalog);
@@ -282,9 +330,10 @@ export function parseScript(id: string, text: string, catalog: ScriptCatalog): P
       else if (d.kind === 'together') fail('@同時 は、台詞の後ろではなく1行に分けて書いてください');
       else directives.push(d);
     }
-    const speech = /^([^\s「」@＠{}|]+)「(.*)」$/.exec(body);
+    const speech = /^([^\s「」@＠{}|〔〕]+)(?:〔([^〔〕]+)〕)?「(.*)」$/.exec(body);
     const speaker = speech ? speech[1]! : null;
-    const content = speech ? speech[2]! : body;
+    const speakerTitle = speech?.[2];
+    const content = speech ? speech[3]! : body;
     const ruby = parseRuby(content);
     if (typeof ruby === 'string') return fail(ruby);
     // 話者「… のまま 」 で閉じていない（書き忘れ）
@@ -292,6 +341,7 @@ export function parseScript(id: string, text: string, catalog: ScriptCatalog): P
       return fail('台詞の 」 がありません（話者「台詞」 の形で、行の終わり（指示の前）を 」 にします）');
     }
     if (speaker === null && modifiers.has('文字')) return fail(`@文字 は 物の呼び名「書かれた文」 の形の行に書きます（書き方: ${DIRECTIVE_USAGE['文字']}）`);
+    if (speaker !== null && modifiers.has('暗転の上')) return fail('@暗転の上 は字幕（語り）の後ろに書きます');
     steps.push({
       kind: 'line',
       line,
@@ -301,6 +351,9 @@ export function parseScript(id: string, text: string, catalog: ScriptCatalog): P
       ...(modifiers.has('顔なし') ? { portrait: false as const } : {}),
       ...(modifiers.has('強調なし') ? { highlight: false as const } : {}),
       ...(modifiers.has('文字') ? { inscription: true as const } : {}),
+      ...(speakerTitle ? { speakerTitle } : {}),
+      ...(modifiers.has('暗転の上') ? { overDark: true as const } : {}),
+      ...(autoMs !== undefined ? { autoMs } : {}),
     });
   });
   return errors.length > 0 ? { ok: false, errors } : { ok: true, script: { id, steps } };
@@ -316,7 +369,7 @@ export function parseScriptOrThrow(id: string, text: string, catalog: ScriptCata
 const isAt = (c: string) => c === '@' || c === '＠';
 
 /** 台詞の後ろに書く、その台詞だけの見せ方の指定 */
-const LINE_MODIFIERS: readonly string[] = ['顔なし', '強調なし', '文字'];
+const LINE_MODIFIERS: readonly string[] = ['顔なし', '強調なし', '文字', '暗転の上'];
 
 /** 「@a … @b …」を指示ごとに分ける */
 function splitDirectives(text: string): string[] {
@@ -495,6 +548,7 @@ function parseDirective(text: string, catalog: ScriptCatalog): Directive | strin
       return { kind: 'melody', melody: args[0]!, timbre: args[1]!, ...(mark ? { mark } : {}) };
     }
     case '節を待つ': {
+      if (args[0] === '頭') return { kind: 'melodyWait', remaining: 0, first: true };
       const n = args[0] === undefined ? 0 : Number(args[0]);
       if (!Number.isInteger(n) || n < 0 || n > 50) return bad(`残りの音の数「${args[0]}」は 0〜50 の整数で書きます`);
       return { kind: 'melodyWait', remaining: n };
@@ -599,6 +653,57 @@ function parseDirective(text: string, catalog: ScriptCatalog): Directive | strin
       if (!(catalog.timbres ?? []).includes(args[1]!)) return bad(`音色「${args[1]}」はありません（使える音色: ${(catalog.timbres ?? []).join('・')}）`);
       return { kind: 'listen', melody: args[0]!, timbre: args[1]!, label: args.slice(2).join(' ') };
     }
+    case '札': {
+      const e = need(1);
+      if (e) return e;
+      const text = args.join('　');
+      return { kind: 'placard', text, ...(args[0] === '今' || args[0] === '過去' ? { era: args[0] } : {}) };
+    }
+    case '名札': {
+      const e = need(2);
+      if (e) return e;
+      return { kind: 'nameTag', actor: args[0]!, title: args.slice(1).join('　') };
+    }
+    case '映す': {
+      const e = need(2);
+      if (e) return e;
+      let zoom: CameraZoom | undefined;
+      let ms: number | undefined;
+      for (const w of args.slice(1)) {
+        if (ZOOMS_JA[w] && !zoom) {
+          zoom = ZOOMS_JA[w];
+          continue;
+        }
+        if (/^[\d.]+秒?$/.test(w) && ms === undefined) {
+          const v = seconds(w, 0);
+          if (typeof v === 'string') return v;
+          ms = v;
+          continue;
+        }
+        return bad(`「${w}」は、寄り（遠・中・近）か秒（例: 1.5秒）で書きます`);
+      }
+      if (!ms) return bad('映す秒を書きます');
+      const c = coord(args[0]!);
+      return c ? { kind: 'shot', ...c, ...(zoom ? { zoom } : {}), ms } : { kind: 'shot', actor: args[0]!, ...(zoom ? { zoom } : {}), ms };
+    }
+    case '重ねる': {
+      const e = need(2);
+      if (e) return e;
+      const ms = seconds(args[1], 0);
+      if (typeof ms === 'string') return ms;
+      if (ms <= 0) return bad('重ねる秒は 0 より大きい数で書きます');
+      return { kind: 'overlay', scriptId: args[0]!, ms };
+    }
+    case '節を切る': {
+      const e = need(1);
+      if (e) return e;
+      if (!(catalog.sounds ?? []).includes(args[0]!)) return bad(`効果音「${args[0]}」はありません（使える効果音: ${(catalog.sounds ?? []).join('・')}）`);
+      const n = args[1] === undefined ? 0 : Number(args[1]);
+      if (!Number.isInteger(n) || n < 0 || n > 50) return bad(`残りの音の数「${args[1]}」は 0〜50 の整数で書きます`);
+      return { kind: 'melodyCut', sound: args[0]!, remaining: n };
+    }
+    case '暗転の上':
+      return bad('@暗転の上 は字幕の後ろに書きます');
     case '文字':
       return bad('@文字 は台詞の形の行の後ろに書きます');
     case '同時':

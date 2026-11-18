@@ -70,6 +70,8 @@ export const homeStage: StageDefinition = {
   props: [
     { id: '食卓', kind: '食卓', x: 2, z: 2 },
     { id: '戸', kind: '戸', x: 2, z: 4 },
+    // ユナの部屋（のちの物置）の窓。場面4と場面9で、同じ形と位置（改訂の決まり: 物置が元はユナの部屋だったと分かるように）
+    { id: '窓', kind: '窓', x: 6, z: 1 },
   ],
 };
 
@@ -144,6 +146,10 @@ export const weirStage: StageDefinition = {
   props: [
     { id: '積み石1', kind: '積み石', x: 1, z: 3 },
     { id: '積み石2', kind: '積み石', x: 7, z: 4 },
+    // 下流の遠くに、村の屋根が三つ（百年後に沈む村。マップの外の手前）
+    { id: '村1', kind: '遠くの家', x: 2, z: 11 },
+    { id: '村2', kind: '遠くの家', x: 4, z: 12 },
+    { id: '村3', kind: '遠くの家', x: 6, z: 11 },
   ],
 };
 

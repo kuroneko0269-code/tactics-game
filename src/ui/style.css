@@ -3081,6 +3081,156 @@ body.in-dialogue #hud {
   letter-spacing: 0.04em;
 }
 
+/* 肩書きのある名前の札: 肩書きを名の下に出す（初めて出る人物の台詞・@肩書き） */
+.dialogue-plate.with-title {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  padding-bottom: 4px;
+}
+
+.dialogue-plate.with-title .dialogue-title {
+  font-size: 14px;
+  line-height: 1.3;
+  letter-spacing: 0.04em;
+}
+
+/* 手書きの札の署名（測り棒の札の「ユナ」）。右に寄せて、少し小さく */
+.inscription-signature {
+  display: block;
+  text-align: right;
+  font-size: 0.85em;
+  margin-top: 2px;
+}
+
+/* 場所と時の札: 画面の左上の隅に短く出し、数秒で消える。「今」と「過去」は色の違う印で一目で分かるように */
+.dialogue-placard {
+  position: absolute;
+  left: max(12px, env(safe-area-inset-left));
+  top: calc(max(10px, env(safe-area-inset-top)) + 52px);
+  display: flex;
+  align-items: stretch;
+  max-width: calc(100% - 24px);
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(10, 14, 22, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  color: #f4f1e8;
+  font-family: 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif;
+  pointer-events: none;
+  z-index: 3;
+  animation: placard-in 0.45s ease-out;
+  transition: opacity 0.4s ease;
+}
+
+.dialogue-placard[hidden] {
+  display: none;
+}
+
+.dialogue-placard.leaving {
+  opacity: 0;
+}
+
+.dialogue-placard-era {
+  display: flex;
+  align-items: center;
+  padding: 4px 10px;
+  font-family: system-ui, sans-serif;
+  font-weight: bold;
+  font-size: 15px;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+
+.dialogue-placard-era[hidden] {
+  display: none;
+}
+
+/* 今: 澄んだ青。過去: 古い紙の琥珀色 */
+.dialogue-placard-era[data-era='now'] {
+  background: #2f7fb8;
+  color: #fff;
+}
+
+.dialogue-placard-era[data-era='past'] {
+  background: #c8923a;
+  color: #24180a;
+}
+
+.dialogue-placard[data-era='past'] {
+  border-color: rgba(232, 184, 108, 0.7);
+}
+
+.dialogue-placard-text {
+  padding: 5px 12px;
+  font-size: 16px;
+  line-height: 1.4;
+  letter-spacing: 0.06em;
+}
+
+@keyframes placard-in {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+}
+
+/* 名札（台詞のない人物の名前と肩書き）。画面の上の中ほどに短く出す（色は人物の服の色） */
+.dialogue-nametag {
+  position: absolute;
+  left: 50%;
+  top: calc(max(10px, env(safe-area-inset-top)) + 100px);
+  transform: translateX(-50%);
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: calc(100% - 32px);
+  padding: 4px 16px 5px;
+  border-radius: 8px;
+  border: 2px solid var(--accent);
+  border-left-width: 6px;
+  background: #2a3550;
+  color: #fff;
+  pointer-events: none;
+  animation: caption-in 0.4s ease-out;
+}
+
+.dialogue-nametag[hidden] {
+  display: none;
+}
+
+.dialogue-nametag-name {
+  font-weight: bold;
+  font-size: 20px;
+  letter-spacing: 0.06em;
+}
+
+.dialogue-nametag-title {
+  font-size: 14px;
+  opacity: 0.92;
+}
+
+/* 重ねる短い画（回想）: 今の場面の写しを薄くして、別の画を透かして見せる。画の層（#stage）の中だけに置き、会話の枠や操作のボタンにはかけない */
+.overlay-snapshot {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+
+.overlay-tint {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, rgba(255, 236, 196, 0.08) 30%, rgba(60, 40, 16, 0.45) 100%);
+  mix-blend-mode: multiply;
+  transition: opacity 0.18s ease;
+}
+
 /* 物をタップする操作の、手もとのボタン（物を押す代わりにも使える） */
 .tap-button {
   min-height: 52px;
@@ -3420,6 +3570,31 @@ body.in-dialogue #hud {
   grid-template-areas: 'label skip' 'text skip';
   column-gap: 8px;
   align-items: center;
+}
+
+/* 物に書かれた文字の段（測り棒の札）: 紙の札のように、手書きの字で */
+.tutorial-bubble.inscription {
+  background: #efe6cf;
+  color: #2a2016;
+  border-color: #8a6a3a;
+}
+
+.tutorial-bubble.inscription .tutorial-label {
+  color: #6a5034;
+  font-size: 13px;
+}
+
+.tutorial-bubble.inscription .tutorial-skip {
+  background: #e2d5b4;
+  color: #2a2016;
+  border-color: #8a6a3a;
+}
+
+.tutorial-bubble.inscription .tutorial-text {
+  font-family: 'Klee One', 'Hiragino Maru Gothic ProN', 'Yu Mincho', 'Noto Serif JP', serif;
+  font-size: 18px;
+  line-height: 1.7;
+  color: #2a2016;
 }
 
 .tutorial-bubble.upper {
