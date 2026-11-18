@@ -180,8 +180,11 @@ function main(): void {
     { capture: true },
   );
   const soundMark = createSoundMark(document.getElementById('app') ?? document.body);
+  /** 開発中だけ: これまでに鳴らした旋律・見せた場所・言葉にしない声の数（自動プレイが、短い印を見逃さずに確かめるため） */
+  const devHistory = { melodies: new Set<string>(), stages: new Set<string>(), voices: 0 };
   sound.onMelodyChange(() => {
     const m = sound.melody();
+    if (m) devHistory.melodies.add(`${m.melody}/${m.timbre}`);
     soundMark.show(m ? TEXT.sound.melodyMark(m.mark ?? TEXT.sound.timbres[m.timbre] ?? m.timbre) : null);
   });
   /** 会話から使う音の口 */
@@ -793,6 +796,7 @@ function main(): void {
     const id = VOICES[voice];
     if (!id) return;
     sound.effect(id);
+    devHistory.voices++;
     voiceMarks.show(headOf, VOICE_KINDS[id] ?? 'call', 1.5);
   };
   /** 遠景のカット（@遠景）で見せている舞台（カットの間だけある） */
@@ -1352,6 +1356,7 @@ function main(): void {
     if (!stageDef) throw new Error(`会話の場面のマップ ${stageId} が見つかりません`);
     sceneView?.dispose();
     currentStageId = stageDef.id;
+    devHistory.stages.add(stageDef.id);
     useMap(stageDef.map);
     applySky(stageDef);
     rig.reset();
@@ -1566,6 +1571,8 @@ function main(): void {
       settings: () => settings,
       /** 物語の進み具合 */
       story: () => story,
+      /** これまでに鳴らした旋律（旋律/音色）・見せた会話用マップ・言葉にしない声の数（読み込み直すと消える） */
+      history: () => ({ melodies: [...devHistory.melodies], stages: [...devHistory.stages], voices: devHistory.voices }),
       /** 暗転しているか */
       dark: () => fadeEl.classList.contains('dark'),
       /** 話者の印が見えているか・顔の枠に写している人物（会話の見せ方） */

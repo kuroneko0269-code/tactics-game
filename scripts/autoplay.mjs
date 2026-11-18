@@ -2884,6 +2884,7 @@ async function storyRun(browser, baseUrl, name, core) {
     });
     const seen = { hearing: false, twoLines: false, seal: false, teo: false, follow: false, apothecary: false };
     const voicesBefore = stats.voices;
+    const voicesAtScene = (await T(() => window.__tactics.history())).voices;
     if (n === 8) {
       // 丘（戦闘の前）は台詞のない場面: 歌の印を見ながら、戦闘の場面へ進むまで待つ
       for (let guard = 0; guard < 2000 && (await sceneNow()) === 8; guard++) {
@@ -2921,8 +2922,18 @@ async function storyRun(browser, baseUrl, name, core) {
     });
     if (n === 3) check(seen.hearing && seen.twoLines, '話を聞く部屋への切り替え・ハルドの名前と顔の枠と印・2行の字幕を確かめられませんでした');
     if (n === 4) check(seen.seal && seen.teo, '封蝋の印「未来より」か、テオの名前が出ていません');
-    if (n === 5) check(stats.voices > voicesBefore && stats.melodies.has('ユナの鼻歌/鼻歌') && stats.locations.has('stage-night-sky'), '家族の笑い声の印・ユナの鼻歌の印・窓の外の夜空を確かめられませんでした');
-    if (n === 6) check(seen.follow && seen.apothecary && stats.voices > voicesBefore, '都で、ユナの後について歩く操作・薬屋の老婆の顔の枠・売り子の呼び込みの印を確かめられませんでした');
+    if (n === 5) {
+      // 短い印は、画面を見る間隔によっては見逃すので、これまでの記録（開発用）でも確かめる（重い時に見逃さないように）
+      const h = await T(() => window.__tactics.history());
+      for (const m of h.melodies) stats.melodies.add(m);
+      for (const st of h.stages) stats.locations.add(st);
+      const voiced = stats.voices > voicesBefore || h.voices > voicesAtScene;
+      check(
+        voiced && stats.melodies.has('ユナの鼻歌/鼻歌') && stats.locations.has('stage-night-sky'),
+        `家族の笑い声の印・ユナの鼻歌の印・窓の外の夜空を確かめられませんでした（声 ${voiced}・旋律 ${[...stats.melodies]}・場所 ${[...stats.locations]}）`,
+      );
+    }
+    if (n === 6) check(seen.follow && seen.apothecary && (stats.voices > voicesBefore || (await T(() => window.__tactics.history())).voices > voicesAtScene), '都で、ユナの後について歩く操作・薬屋の老婆の顔の枠・売り子の呼び込みの印を確かめられませんでした');
   }
   check(stats.melodies.has('月を呼ぶ節/歌声'), `月を呼ぶ節（丘の歌）の印を確かめられませんでした（${[...stats.melodies]}）`);
   log(`塔（報告の部屋・2行の字幕）・広間（封蝋の印）・家（笑い声・鼻歌・夜空）・都（後について歩く・呼び込み）・門・丘の会話 ✔`);
