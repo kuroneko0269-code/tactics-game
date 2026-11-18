@@ -7,6 +7,8 @@ import * as THREE from 'three';
 export interface Stage {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene: THREE.Scene;
+  /** 空からの光（半球の光）と、日の光（影を落とす向きのある光）。場面の時刻で色と明るさを変える */
+  readonly lights: { readonly hemi: THREE.HemisphereLight; readonly sun: THREE.DirectionalLight };
   /** 画面サイズが変わったときに呼ばれる処理を登録する */
   onResize(listener: (width: number, height: number) => void): void;
 }
@@ -22,7 +24,8 @@ export function createStage(container: HTMLElement): Stage {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x9fc6e8);
 
-  scene.add(new THREE.HemisphereLight(0xdfefff, 0x5a4a3a, 1.4));
+  const hemi = new THREE.HemisphereLight(0xdfefff, 0x5a4a3a, 1.4);
+  scene.add(hemi);
   const sun = new THREE.DirectionalLight(0xffffff, 2.2);
   sun.position.set(6, 12, 4);
   sun.castShadow = true;
@@ -50,6 +53,7 @@ export function createStage(container: HTMLElement): Stage {
   return {
     renderer,
     scene,
+    lights: { hemi, sun },
     onResize(listener) {
       listeners.push(listener);
       listener(container.clientWidth, container.clientHeight);

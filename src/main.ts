@@ -40,6 +40,8 @@ import { jobs } from './data/jobs';
 import { progressionRules } from './data/progression';
 import { initialRoster } from './data/roster';
 import { createStage } from './render/stage';
+import { applyLighting } from './render/lighting';
+import { DEFAULT_TIME, TIMES_OF_DAY } from './data/lighting';
 import { createCameraRig } from './render/cameraRig';
 import { createMapView, type MapView } from './render/mapView';
 import { createBattleView, type BattleView } from './render/battleView';
@@ -232,6 +234,15 @@ function main(): void {
   let nextSeed = Number.isInteger(seedParam) && seedParam > 0 ? seedParam : randomSeed();
 
   const stage = createStage(stageEl);
+  /** 場面の時刻の光（朝・昼・夕方・夜）。省くと昼 */
+  const timeLight = (name: string | undefined) => TIMES_OF_DAY[name ?? DEFAULT_TIME] ?? TIMES_OF_DAY[DEFAULT_TIME]!;
+  /** 今の時刻の光（自動テスト用と、遠景のカットから戻す時のため） */
+  let currentTime: { name: string; sky?: number } = { name: DEFAULT_TIME };
+  /** 場面の時刻の光を当てる。sky を渡すと空の色だけはそれ（マップが決めた空の色） */
+  const applyTime = (name: string | undefined, sky?: number) => {
+    currentTime = { name: name ?? DEFAULT_TIME, ...(sky !== undefined ? { sky } : {}) };
+    applyLighting(stage.scene, stage.lights, timeLight(name), sky);
+  };
   // マップの見た目は戦場の定義から作る（拠点や編成の画面でも、最後に出したマップを背景に出す）
   const rigOptions = (view: MapView, def: MapDefinition) => {
     const m = createMap(def);
@@ -289,6 +300,7 @@ function main(): void {
     liveStoryBattle = null;
     refreshCheckWin();
     sound.stopAmbient();
+    applyTime(undefined);
     if (!battle) return;
     battle.tutorial?.dispose();
     battle.controller?.dispose();
@@ -651,6 +663,8 @@ function main(): void {
   /** 戦闘の表示（ユニットの見た目・情報欄とボタン・頭上の HP）を作る */
   const createBattleShell = (start: ActionResult) => {
     const looks = currentSite?.looks ?? {};
+    // 戦場の時刻の光（序章の丘は建国の朝）
+    applyTime(currentSite?.time);
     const view = createBattleView({
       scene: stage.scene,
       mapView,
@@ -712,10 +726,13 @@ function main(): void {
       );
     // 戦闘の手ほどき（序章に足りない仕組み）: 手ほどきのある戦場で、まだ見ていないか、見たものも出す設定の時
     const site = currentSite;
-    const steps = site?.tutorial ?? [];
+    // 見た手ほどきを出さない設定で、もう見た戦場でも、物語の段（測り棒の札など。scriptId）だけは出す
+    const seen = site !== undefined && settings.skipSeenTutorials && settings.seenTutorials.includes(site.id);
+    const steps = (site?.tutorial ?? []).filter((st) => !seen || st.scriptId !== undefined);
     const tutorial =
-      site && steps.length > 0 && !(settings.skipSeenTutorials && settings.seenTutorials.includes(site.id))
+      site && steps.length > 0
         ? createTutorial(hudEl, steps, {
+            ...(seen ? { storyOnly: true } : {}),
             tileScreen: (x, z) => view.tileScreenPosition(x, z),
             unitScreen: (id) => {
               try {
@@ -826,8 +843,8 @@ function main(): void {
     const view = createSceneView({ ...sceneViewOptions(), mapView: cutMap });
     view.sync({ actors: {}, props: Object.fromEntries((def.props ?? []).map((p) => [p.id, { prop: p.kind, x: p.x, z: p.z }])), dark: false });
     cutView = view;
-    const background = stage.scene.background;
-    if (def.sky !== undefined) stage.scene.background = new THREE.Color(def.sky);
+    const timeBefore = currentTime;
+    applyTime(def.time, def.sky);
     rig.setMap(rigOptions(cutMap, def.map));
     rig.reset();
     const v = def.view;
@@ -839,7 +856,7 @@ function main(): void {
     cutView = undefined;
     stage.scene.remove(cutMap.group);
     cutMap.dispose();
-    stage.scene.background = background;
+    applyTime(timeBefore.name, timeBefore.sky);
     for (const o of hidden) o.visible = true;
     hudEl.hidden = hudWas;
     labelsEl.hidden = labelsWas;
@@ -872,11 +889,13 @@ function main(): void {
     stageEl.append(shot, tint);
     // 回想の舞台（別のシーン・別のカメラ）
     const scene = new THREE.Scene();
-    scene.background = def.sky !== undefined ? new THREE.Color(def.sky) : defaultSky.clone();
-    scene.add(new THREE.HemisphereLight(0xfff0d8, 0x5a4a3a, 1.5));
-    const sun = new THREE.DirectionalLight(0xffe8c8, 1.8);
+    // 回想の画の時刻の光（回想の台本の @時刻 か、マップの時刻。序章の場面9は昨夜の作業台）
+    const tod = flat.find((d) => d.kind === 'timeOfDay');
+    const hemi = new THREE.HemisphereLight();
+    const sun = new THREE.DirectionalLight();
     sun.position.set(6, 12, 4);
-    scene.add(sun);
+    scene.add(hemi, sun);
+    applyLighting(scene, { hemi, sun }, timeLight(tod && tod.kind === 'timeOfDay' ? tod.time : def.time), def.sky);
     const map = createMapView(createMap(def.map));
     scene.add(map.group);
     const oRig = createCameraRig(rigOptions(map, def.map));
@@ -927,8 +946,6 @@ function main(): void {
     speakerMark.setTarget(headOf);
     rig.nudge(headOf?.() ?? null);
   };
-  /** 昼の空の色（夜空のマップから戻す時に使う） */
-  const defaultSkyColor = (stage.scene.background as THREE.Color | null)?.clone();
   /** 会話の場面の舞台（会話の場面の間だけある） */
   let sceneView: SceneView | undefined;
   /** 進めている会話（会話の間だけある） */
@@ -936,7 +953,7 @@ function main(): void {
   function endScene() {
     sceneView?.dispose();
     sceneView = undefined;
-    if (stage.scene.background instanceof THREE.Color && defaultSkyColor) stage.scene.background.copy(defaultSkyColor);
+    applyTime(undefined);
   }
   /** 暗転（画面を暗くする）と明転 */
   const setDark = (dark: boolean, ms: number) =>
@@ -990,6 +1007,11 @@ function main(): void {
   const scenePort = (first: SceneView): StagePort => {
     let view = first;
     /** 舞台の場所（@場所）を、会話用のマップに合わせる。違えば、マップと舞台を作り直す */
+    /** 舞台の時刻の光（@時刻 で決めた時刻か、今のマップの時刻） */
+    const syncTime = (st: StageState) => {
+      const def = stages.find((x) => x.id === (st.location ?? sceneBaseStageId));
+      applyTime(st.time ?? def?.time, def?.sky);
+    };
     const ensureLocation = (st: StageState) => {
       const want = st.location ?? sceneBaseStageId;
       if (!want || want === currentStageId) return;
@@ -999,6 +1021,7 @@ function main(): void {
     sync: (st) => {
       ensureLocation(st);
       view.sync(st);
+      syncTime(st);
     },
     async run(d, before, fast) {
       view.setSpeed(fast ? 4 : 1);
@@ -1006,7 +1029,10 @@ function main(): void {
       switch (d.kind) {
         case 'location':
           ensureLocation(after);
-          return view.sync(after);
+          view.sync(after);
+          return syncTime(after);
+        case 'timeOfDay':
+          return syncTime(after);
         case 'cut':
           return showCut(d.stageId, d.ms, fast);
         case 'voice':
@@ -1176,6 +1202,8 @@ function main(): void {
           return;
         case 'cut':
           return showCut(d.stageId, d.ms, fast);
+        case 'timeOfDay':
+          return applyTime(d.time);
         case 'voice': {
           const id = battleActorId(d.actor);
           if (id) playVoice(d.voice, () => battle?.view.actorHead(id));
@@ -1429,10 +1457,8 @@ function main(): void {
     };
   }
   /** 会話用マップの空の色（夜空など）。省いたマップは昼の空 */
-  const defaultSky = (stage.scene.background as THREE.Color | null)?.clone() ?? new THREE.Color(0x9fc6e8);
-  const applySky = (def: { sky?: number }) => {
-    stage.scene.background = def.sky !== undefined ? new THREE.Color(def.sky) : defaultSky.clone();
-  };
+  /** 会話用マップの時刻の光と空の色（夜空のマップなど） */
+  const applySky = (def: { sky?: number; time?: string }) => applyTime(def.time, def.sky);
   /** 会話の場面の途中で場所を移す（@場所）: 会話用マップと舞台を作り直す（今の会話は続ける） */
   function switchLocation(stageId: string): SceneView {
     const stageDef = stages.find((st) => st.id === stageId);
@@ -1655,6 +1681,7 @@ function main(): void {
       /** 物語の進み具合 */
       story: () => story,
       /** これまでに鳴らした旋律（旋律/音色）・見せた会話用マップ・言葉にしない声の数（読み込み直すと消える） */
+      time: () => currentTime.name,
       history: () => ({ melodies: [...devHistory.melodies], stages: [...devHistory.stages], voices: devHistory.voices, overlays: devHistory.overlays, placards: [...devHistory.placards], nameTags: [...devHistory.nameTags] }),
       /** 暗転しているか */
       dark: () => fadeEl.classList.contains('dark'),

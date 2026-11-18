@@ -45,6 +45,8 @@ export interface StageState {
   readonly titles?: Readonly<Record<string, string>>;
   /** @場所 で移った会話用のマップの id（省くと、場面の始めのマップ） */
   readonly location?: string;
+  /** @時刻 で決めた場面の時刻（朝・昼・夕方・夜。省くと、今のマップの時刻） */
+  readonly time?: string;
 }
 
 /**
@@ -165,8 +167,10 @@ export function applyDirective(stage: StageState, d: Directive): StageState {
     case 'location': {
       // 場所を移す: 人物と光はいなくなり、物は新しいマップに置いておく物になる（暗転と肩書きはそのまま）
       const props = Object.fromEntries(d.props.map((p) => [p.name, { prop: p.prop, x: p.x, z: p.z }]));
-      const { lights: _l, ...rest } = stage;
+      // 時刻も、移った先のマップの時刻に戻る
+      const { lights: _l, time: _t, ...rest } = stage;
       void _l;
+      void _t;
       return { ...rest, actors: {}, props, location: d.stageId };
     }
     case 'propMove': {
@@ -201,6 +205,8 @@ export function applyDirective(stage: StageState, d: Directive): StageState {
     case 'overlay':
     case 'melodyCut':
       return stage;
+    case 'timeOfDay':
+      return { ...stage, time: d.time };
   }
 }
 

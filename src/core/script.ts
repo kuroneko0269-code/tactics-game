@@ -128,7 +128,9 @@ export type Directive =
    * 音を、別の音で途中から切る: 鳴っている旋律を、終わりから remaining 個目の音の手前で切り、効果音 sound を鳴らす
    * （remaining が 0 なら、すぐに切る。序章の場面4: 鼻歌が戸の開く音に切られる）
    */
-  | { readonly kind: 'melodyCut'; readonly sound: string; readonly remaining: number };
+  | { readonly kind: 'melodyCut'; readonly sound: string; readonly remaining: number }
+  /** 場面の時刻の光（朝・昼・夕方・夜）。空の色・光の色と明るさが変わる。場所を移すと、移った先のマップの時刻に戻る */
+  | { readonly kind: 'timeOfDay'; readonly time: string };
 
 /** 場所を移した時に、新しいマップに置いておく物 */
 export interface LocationProp {
@@ -203,6 +205,8 @@ export interface ScriptCatalog {
   readonly postures?: readonly string[];
   /** 言葉にしない声の種類の名前（叫び・呼び込み・笑い） */
   readonly voices?: readonly string[];
+  /** 場面の時刻の名前（朝・昼・夕方・夜。@時刻 で使える） */
+  readonly times?: readonly string[];
   /** 会話用のマップの id → 置いておく物（@場所・@遠景 で使える場所） */
   readonly locations?: Readonly<Record<string, readonly LocationProp[]>>;
 }
@@ -261,6 +265,7 @@ export const DIRECTIVE_USAGE: Readonly<Record<string, string>> = {
   重ねる: '@重ねる 回想の台本の名前 秒（今の場面の上に、別の短い画を重ねる）',
   節を切る: '@節を切る 効果音の名前 [残りの音の数]（鳴っている旋律を、その音の手前で切って効果音を鳴らす）',
   暗転の上: '字幕の後ろに @暗転の上（暗転してから、画面の中央に出す）',
+  時刻: '@時刻 朝・昼・夕方・夜（場面の時刻の光。空の色・光の色と明るさ）',
 };
 
 const STRIKE_OUTCOMES: Readonly<Record<string, 'hit' | 'miss' | 'parry'>> = { 当たる: 'hit', 外れる: 'miss', 払う: 'parry' };
@@ -701,6 +706,12 @@ function parseDirective(text: string, catalog: ScriptCatalog): Directive | strin
       const n = args[1] === undefined ? 0 : Number(args[1]);
       if (!Number.isInteger(n) || n < 0 || n > 50) return bad(`残りの音の数「${args[1]}」は 0〜50 の整数で書きます`);
       return { kind: 'melodyCut', sound: args[0]!, remaining: n };
+    }
+    case '時刻': {
+      const e = need(1);
+      if (e) return e;
+      if (!(catalog.times ?? []).includes(args[0]!)) return bad(`時刻「${args[0]}」はありません（使える時刻: ${(catalog.times ?? []).join('・')}）`);
+      return { kind: 'timeOfDay', time: args[0]! };
     }
     case '暗転の上':
       return bad('@暗転の上 は字幕の後ろに書きます');

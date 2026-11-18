@@ -1,11 +1,12 @@
 /**
  * 「画面に出るものだけ」の書き出し（物語の作者が、実装が脚本のとおりかを読んで確かめるため）。
  * 台本から、場所と時の札・字幕・台詞（話者と肩書きつき）・物に書かれた文字・名札・章の題・操作の案内を、出る順に取り出す。
- * 動き・カメラ・音は出さない（画面に文字として出ないため）。ここは台本を読むだけの計算で、画面にも定義データにも依存しない。
+ * あわせて、物語の作者が脚本と突き合わせるために、伏線のカットの秒数（映す・秒を決めた物の文字・重ねる画・遠景）と、場面の光（時刻）も出す。
+ * それ以外の動き・カメラ・音は出さない（画面に文字として出ないため）。ここは台本を読むだけの計算で、画面にも定義データにも依存しない。
  */
 import { plainText, type Directive, type Script } from './script';
 
-export type ScreenTextKind = '札' | '字幕' | '台詞' | '物の文字' | '名札' | '章の題' | '操作の案内';
+export type ScreenTextKind = '札' | '字幕' | '台詞' | '物の文字' | '名札' | '章の題' | '操作の案内' | 'カット' | '光';
 
 export interface ScreenText {
   readonly kind: ScreenTextKind;
@@ -21,34 +22,77 @@ export interface ControlLabels {
   readonly holdDefault: string;
 }
 
+/** 場面の光を出すための情報（会話用のマップの時刻。省くと光は出さない） */
+export interface LightInfo {
+  /** 台本の始めの会話用マップの id */
+  readonly startStage: string;
+  /** 会話用のマップの id → そのマップの時刻（なければ undefined） */
+  readonly timeOf: (stageId: string) => string | undefined;
+  /** 時刻を決めていない時の時刻（昼） */
+  readonly defaultTime: string;
+}
+
+const ZOOM_JA: Readonly<Record<string, string>> = { far: '遠', mid: '中', near: '近' };
+const seconds = (ms: number) => `${Math.round(ms / 100) / 10}秒`;
+
 /** 台本の中で、画面に文字として出るものを、出る順に並べる */
-export function screenTextOf(script: Script, labels: ControlLabels): ScreenText[] {
+export function screenTextOf(script: Script, labels: ControlLabels, light?: LightInfo): ScreenText[] {
   const out: ScreenText[] = [];
+  // 場面の光: 今の時刻が変わったら、次に何かが画面に出る前に1行出す
+  let stage = light?.startStage;
+  let setTime: string | undefined;
+  let lastLight: string | undefined;
+  const push = (t: ScreenText) => {
+    if (light && stage !== undefined) {
+      const now = setTime ?? light.timeOf(stage) ?? light.defaultTime;
+      if (now !== lastLight) {
+        lastLight = now;
+        out.push({ kind: '光', text: now });
+      }
+    }
+    out.push(t);
+  };
   const directive = (d: Directive) => {
     switch (d.kind) {
+      case 'location':
+        stage = d.stageId;
+        setTime = undefined;
+        return;
+      case 'timeOfDay':
+        setTime = d.time;
+        return;
+      case 'shot':
+        push({ kind: 'カット', text: `${d.actor ?? `${d.x},${d.z}`}を映す（${d.zoom ? `${ZOOM_JA[d.zoom]}・` : ''}${seconds(d.ms)}で次へ）` });
+        return;
+      case 'overlay':
+        push({ kind: 'カット', text: `短い画を重ねる（${seconds(d.ms)}。回想の台本 ${d.scriptId}）` });
+        return;
+      case 'cut':
+        push({ kind: 'カット', text: `遠景 ${d.stageId}（${seconds(d.ms)}）` });
+        return;
       case 'together':
         d.directives.forEach(directive);
         return;
       case 'placard':
-        out.push({ kind: '札', text: d.text });
+        push({ kind: '札', text: d.text });
         return;
       case 'nameTag':
-        out.push({ kind: '名札', text: `${d.actor}〔${d.title}〕` });
+        push({ kind: '名札', text: `${d.actor}〔${d.title}〕` });
         return;
       case 'chapterTitle':
-        out.push({ kind: '章の題', text: `${d.title}「${d.subtitle}」` });
+        push({ kind: '章の題', text: `${d.title}「${d.subtitle}」` });
         return;
       case 'walkControl':
-        out.push({ kind: '操作の案内', text: labels.walk });
+        push({ kind: '操作の案内', text: labels.walk });
         return;
       case 'tapControl':
-        out.push({ kind: '操作の案内', text: d.label || labels.tapDefault });
+        push({ kind: '操作の案内', text: d.label || labels.tapDefault });
         return;
       case 'listen':
-        out.push({ kind: '操作の案内', text: d.label || labels.listenDefault });
+        push({ kind: '操作の案内', text: d.label || labels.listenDefault });
         return;
       case 'hold':
-        out.push({ kind: '操作の案内', text: d.label || labels.holdDefault });
+        push({ kind: '操作の案内', text: d.label || labels.holdDefault });
         return;
       default:
         return;
@@ -61,9 +105,9 @@ export function screenTextOf(script: Script, labels: ControlLabels): ScreenText[
     }
     step.directives.forEach(directive);
     const text = plainText(step.text).replace(/\n/g, ' / ');
-    if (step.speaker === null) out.push({ kind: '字幕', text: step.overDark ? `${text}（暗転の上）` : text });
-    else if (step.inscription) out.push({ kind: '物の文字', text: `${step.speaker}「${text}」` });
-    else out.push({ kind: '台詞', text: `${step.speaker}${step.speakerTitle ? `〔${step.speakerTitle}〕` : ''}「${text}」${step.portrait === false ? '（顔なし）' : ''}` });
+    if (step.speaker === null) push({ kind: '字幕', text: step.overDark ? `${text}（暗転の上）` : text });
+    else if (step.inscription) push({ kind: '物の文字', text: `${step.speaker}「${text}」${step.autoMs !== undefined ? `（${seconds(step.autoMs)}で次へ）` : ''}` });
+    else push({ kind: '台詞', text: `${step.speaker}${step.speakerTitle ? `〔${step.speakerTitle}〕` : ''}「${text}」${step.portrait === false ? '（顔なし）' : ''}` });
   }
   return out;
 }

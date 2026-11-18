@@ -167,3 +167,43 @@ describe('画面に出るものだけの書き出し（screenTextOf）', () => {
     expect(formatScreenText(out[1]!)).toBe('札\u3000\u3000\u3000\u3000\u3000過去\u3000谷の外れの堰');
   });
 });
+
+describe('場面の時刻の光（@時刻）', () => {
+  const cat: ScriptCatalog = { ...catalog, times: ['朝', '昼', '夕方', '夜'], locations: { 'stage-home': [] } };
+  it('時刻の名前を読み、舞台の時刻になる。場所を移すと、移った先のマップの時刻に戻る', () => {
+    const s = parseScriptOrThrow('t', '@時刻 夜\n@場所 stage-home\n@時刻 夕方', cat);
+    expect(s.steps[0]).toMatchObject({ kind: 'directive', directive: { kind: 'timeOfDay', time: '夜' } });
+    expect(stageAt(s, 1).time).toBe('夜');
+    expect(stageAt(s, 2).time).toBeUndefined();
+    expect(stageAt(s, 3).time).toBe('夕方');
+  });
+
+  it('ない時刻は、書き間違いとして知らせる', () => {
+    expect(parseScript('t', '@時刻 真夜中', cat).ok).toBe(false);
+  });
+});
+
+describe('書き出しのカットの秒数と場面の光', () => {
+  it('映す・秒を決めた物の文字・重ねる画の秒数と、時刻が変わった所の光を、出る順に並べる', async () => {
+    const { screenTextOf } = await import('./scriptExport');
+    const cat: ScriptCatalog = { ...catalog, times: ['昼', '夕方', '夜'], locations: { 'stage-home': [], 'stage-tower': [] } };
+    const s = parseScriptOrThrow(
+      't',
+      ['@札 今 暦の塔', '@映す 暦盤 近 1.5', '封蝋の印「未来より」 @文字 1.5秒', '@時刻 夜', '@場所 stage-home', '@時刻 夕方', '一行。', '@重ねる h 1.4'].join('\n'),
+      cat,
+    );
+    const labels = { walk: '歩く', tapDefault: '押す', listenDefault: '聞く', holdDefault: '押し続ける' };
+    const light = { startStage: 'stage-tower', timeOf: (id: string) => (id === 'stage-tower' ? '昼' : undefined), defaultTime: '昼' };
+    expect(screenTextOf(s, labels, light)).toEqual([
+      { kind: '光', text: '昼' },
+      { kind: '札', text: '今　暦の塔' },
+      { kind: 'カット', text: '暦盤を映す（近・1.5秒で次へ）' },
+      { kind: '物の文字', text: '封蝋の印「未来より」（1.5秒で次へ）' },
+      { kind: '光', text: '夕方' },
+      { kind: '字幕', text: '一行。' },
+      { kind: 'カット', text: '短い画を重ねる（1.4秒。回想の台本 h）' },
+    ]);
+    // 光の情報を渡さなければ、光は出さない
+    expect(screenTextOf(s, labels).some((t) => t.kind === '光')).toBe(false);
+  });
+});

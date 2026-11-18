@@ -3572,6 +3572,11 @@ body.in-dialogue #hud {
   align-items: center;
 }
 
+/* 物語の段だけを出す時（手ほどきを飛ばした後・見た手ほどきを出さない設定）は、飛ばすボタンを出さない */
+.tutorial-skip[hidden] {
+  display: none;
+}
+
 /* 物に書かれた文字の段（測り棒の札）: 紙の札のように、手書きの字で */
 .tutorial-bubble.inscription {
   background: #efe6cf;

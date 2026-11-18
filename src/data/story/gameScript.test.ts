@@ -3,6 +3,7 @@ import gameScript from '../../../docs/story/game-script-prologue.md?raw';
 import { parseScriptOrThrow, plainText, type Directive, type ScriptStep } from '../../core/script';
 import { hillBattle, weirBattle } from '../battles/prologue';
 import { currentScene, progressAt } from '../../core/story';
+import { applyDirective } from '../../core/dialogue';
 import { mainBook } from './books';
 import { scriptTexts } from './scripts';
 import { scriptCatalog } from './stageDefs';
@@ -358,5 +359,43 @@ describe('場面9の帰り道（発注者の回答）', () => {
     }
     expect(ds).toContainEqual({ kind: 'carry', actor: 'ミオ', item: '薬研', slot: 'hand' });
     expect(ds.some((d) => d.kind === 'enter' && (d.actor === '売り子' || d.actor === 'ユナ'))).toBe(false);
+  });
+});
+
+describe('場面の時刻の光（札の時刻に合う光）', () => {
+  /** 札の文から、その場面の時刻（夕方・夜・朝。時刻を書いていない札は、続く場面の光のまま（undefined）） */
+  const timeOfPlacard = (t: string) => (t.includes('夜') ? '夜' : t.includes('夕方') ? '夕方' : t.includes('朝') ? '朝' : undefined);
+  it('序章の会話の場面で、札が出る時の光は、札の時刻に合う。場面4のユナの部屋は夜、場面9の物置は夕方', () => {
+    const seen: string[] = [];
+    for (const sc of mainBook.chapters[0]!.scenes) {
+      if (sc.kind !== 'dialogue' && sc.kind !== 'interactive') continue;
+      const script = parseScriptOrThrow(sc.scriptId, scriptTexts[sc.scriptId]!, scriptCatalog);
+      let st = { actors: {}, props: {}, dark: false } as import('../../core/dialogue').StageState;
+      for (const step of script.steps) {
+        for (const d of step.kind === 'line' ? step.directives : [step.directive]) {
+          st = applyDirective(st, d);
+          if (d.kind !== 'placard') continue;
+          const where = stages.find((x) => x.id === (st.location ?? sc.stageId))!;
+          const now = st.time ?? where.time ?? '昼';
+          const want = timeOfPlacard(d.text);
+          if (want) expect(now, `${sc.id}: ${d.text}`).toBe(want);
+          seen.push(`${d.text}:${now}`);
+        }
+      }
+    }
+    expect(seen).toContain('トウマの家　ユナの部屋　夜:夜');
+    expect(seen).toContain('トウマの家　奥の部屋:夕方');
+    expect(seen).toContain('都の通り　翌朝:朝');
+    // 戦場の光: 堰は昼、丘は建国の朝
+    expect([weirBattle.time, hillBattle.time]).toEqual(['昼', '朝']);
+  });
+
+  it('場面4の夜のユナの部屋は、星の見える窓とともった灯。場面9の物置は同じ窓のまま（光だけが違う）', () => {
+    const home = blocksOf('prologueHome').find((b) => b.ref === '4-14')!.steps.flatMap(directivesOf);
+    expect(home).toContainEqual({ kind: 'timeOfDay', time: '夜' });
+    expect(home).toContainEqual({ kind: 'propChange', name: '窓', prop: '星の見える窓' });
+    expect(home.some((d) => d.kind === 'propPut' && d.prop === '台のともった灯')).toBe(true);
+    const end = parseScriptOrThrow('prologueEnd', scriptTexts['prologueEnd']!, scriptCatalog).steps.flatMap(directivesOf);
+    expect(end.some((d) => d.kind === 'propChange' && d.name === '窓')).toBe(false);
   });
 });
