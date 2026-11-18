@@ -29,6 +29,8 @@ export const TEXT = {
     'stage-city': '都',
     'stage-weir': '谷の外れの堰',
     'stage-hill': 'アスタルの丘',
+    'stage-far-valley': '遠い谷の家々',
+    'stage-night-sky': '窓の外の夜空',
   } as Readonly<Record<string, string>>,
 
   /** 物語の本の名前（物語の土台） */

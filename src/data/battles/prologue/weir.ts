@@ -74,6 +74,8 @@ export const weirBattle: BattleSite = {
   afterVictory: 'prologueWeirAfter',
   // 隊員の名札に役目を添える（戦士ゴード、弓使いキリ、魔道士フェン、治癒師ノノ）
   roleTags: ['gord', 'kiri', 'fen', 'nono'],
+  // 昼（勝った後の遠い谷の家々は「昼なのに、軒の灯が揺れている」）
+  time: '昼',
   tutorial: [
     { id: 'weir-move', mode: 'main', point: { kind: 'reachToward', x: 4, z: 3 } },
     { id: 'weir-attack', mode: 'afterMove', point: { kind: 'button', button: 'attack' } },

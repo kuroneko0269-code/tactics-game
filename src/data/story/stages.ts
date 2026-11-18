@@ -26,8 +26,10 @@ export interface StageDefinition {
   readonly id: string;
   readonly map: MapDefinition;
   readonly props?: readonly StageProp[];
-  /** 空の色（省くと昼の空。夜空のカットなど） */
+  /** 空の色（省くと時刻の空。夜空のカットなど） */
   readonly sky?: number;
+  /** 場面の時刻の光（朝・昼・夕方・夜。src/data/lighting.ts。省くと昼）。台本の @時刻 で変えられる */
+  readonly time?: string;
   /** 遠景のカット（@遠景）で、カメラを向けるマスと寄り（省くとマップの中央を中くらいに） */
   readonly view?: { readonly x: number; readonly z: number; readonly zoom: 'far' | 'mid' | 'near' };
 }
@@ -80,6 +82,7 @@ export const homeStage: StageDefinition = {
  */
 export const towerStage: StageDefinition = {
   id: 'stage-tower',
+  time: '昼',
   map: stageMap('stage-tower', [
     '5s 5s 5s 5s 5s 5s 5s 5s 5s',
     '0s 0s 0s 0s 0s 0s 0s 0s 0s',
@@ -101,6 +104,7 @@ export const towerStage: StageDefinition = {
  */
 export const hearingStage: StageDefinition = {
   id: 'stage-hearing',
+  time: '昼',
   map: stageMap('stage-hearing', ['4s 4s 4s 4s 4s', '0b 0b 0b 0b 0b', '0b 0b 0b 0b 0b', '0b 0b 0b 0b 0b', '0b 0b 0b 0b 0b']),
   props: [
     { id: '机', kind: '書き物机', x: 2, z: 2 },
@@ -143,6 +147,7 @@ export const cityStage: StageDefinition = {
 export const weirStage: StageDefinition = {
   id: 'stage-weir',
   map: weirBattle.map,
+  time: weirBattle.time ?? '昼',
   props: [
     { id: '積み石1', kind: '積み石', x: 1, z: 3 },
     { id: '積み石2', kind: '積み石', x: 7, z: 4 },
@@ -160,6 +165,7 @@ export const weirStage: StageDefinition = {
 export const hillStage: StageDefinition = {
   id: 'stage-hill',
   map: hillBattle.map,
+  time: hillBattle.time ?? '朝',
   props: (hillBattle.decor ?? []).map((d) => ({ id: d.id, kind: d.kind, x: d.x, z: d.z })),
 };
 
@@ -177,6 +183,7 @@ export const farValleyStage: StageDefinition = {
     { id: '木2', kind: '木', x: 6, z: 1 },
   ],
   view: { x: 3, z: 2, zoom: 'mid' },
+  time: '昼',
 };
 
 /** 夜空（家の窓の外）。星のよく見える空。星の並びがはっきり分かる画（第2章で、ここからひとつ欠ける） */
@@ -189,6 +196,7 @@ export const nightSkyStage: StageDefinition = {
     { id: '家2', kind: '家', x: 4, z: 2 },
   ],
   sky: 0x0c1428,
+  time: '夜',
   view: { x: 2, z: 0, zoom: 'mid' },
 };
 

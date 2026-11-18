@@ -1,3 +1,4 @@
+import { TIMES_OF_DAY } from '../lighting';
 import type { ScriptCatalog } from '../../core/script';
 import { MELODIES, SOUND_EFFECTS, TIMBRES, type SoundEffectId } from '../sounds';
 import { stages } from './stages';
@@ -221,6 +222,8 @@ export const PROP_KINDS: Readonly<Record<string, string>> = {
   広げた指示書: 'scrollOpen',
   // ゲーム脚本の改訂（2026-11-18）で足した物
   窓: 'window',
+  星の見える窓: 'windowNight',
+  台のともった灯: 'benchLampLit',
   /** 遠くの家（マップの外の遠景。堰の下流の村の屋根） */
   遠くの家: 'house',
   壁の工具: 'wallTools',
@@ -295,5 +298,6 @@ export const scriptCatalog: ScriptCatalog = {
   lightColors: Object.keys(LIGHT_COLORS),
   postures: Object.keys(POSTURES),
   voices: Object.keys(VOICES),
+  times: Object.keys(TIMES_OF_DAY),
   locations: Object.fromEntries(stages.map((st) => [st.id, (st.props ?? []).map((p) => ({ name: p.id, prop: p.kind, x: p.x, z: p.z }))])),
 };

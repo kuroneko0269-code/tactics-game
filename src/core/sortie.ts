@@ -71,6 +71,8 @@ export interface BattleSite {
   readonly cast?: Readonly<Record<string, string>>;
   /** ユニットの id → 人物の見た目の名前（src/data/story/looks.ts。物語の相手。省くとジョブの形と陣営の色） */
   readonly looks?: Readonly<Record<string, string>>;
+  /** 戦場の時刻の光（朝・昼・夕方・夜。省くと昼。序章の丘は建国の朝） */
+  readonly time?: string;
   /** 名札に役目（ジョブの名前）を添えるユニットの id（ゲーム脚本の序章: 戦士ゴード・弓使いキリ・魔道士フェン・治癒師ノノ） */
   readonly roleTags?: readonly string[];
   /** 勝った後に、戦闘のマップの上で流す台本の id（帰りの門の光・人物が消える、など。戦闘の結果は変えない） */

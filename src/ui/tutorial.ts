@@ -21,7 +21,7 @@ export interface TutorialScreen {
   /** 毎フレーム呼ぶ（印を、カメラの動きに合わせて置き直す） */
   update(): void;
   /** 今出している段（自動テスト用） */
-  status(): { readonly step: string | null; readonly index: number; readonly done: boolean };
+  status(): { readonly step: string | null; readonly index: number; readonly done: boolean; readonly story: boolean };
   dispose(): void;
 }
 
@@ -31,6 +31,10 @@ export interface TutorialPorts {
   readonly onFinished: () => void;
   /** 段の台本（scriptId）にある、物に書かれた文字（物の呼び名と、文の組み立て）。札として出す */
   readonly inscriptionOf?: (scriptId: string) => { readonly label: string; readonly nodes: Node[] } | undefined;
+  /**
+   * 物語の段（物の文字を出す段。scriptId）だけを出す（見た手ほどきを出さない設定の時）。操作の説明は出さず、飛ばすボタンも出さない
+   */
+  readonly storyOnly?: boolean;
 }
 
 export function createTutorial(root: HTMLElement, steps: readonly TutorialStep[], ports: TutorialPorts): TutorialScreen {
@@ -57,13 +61,25 @@ export function createTutorial(root: HTMLElement, steps: readonly TutorialStep[]
   let showingIndex = -1;
   let target: (() => { x: number; y: number } | undefined) | undefined;
   let done = false;
+  /**
+   * 物語の段だけを出す状態（物の文字の段。測り棒の札はユナを紹介する物語の一部なので、手ほどきを飛ばしても、見た手ほどきを出さない設定でも、必ず一度出す）
+   */
+  let storyMode = ports.storyOnly === true;
+  let finishedReported = storyMode;
+  const isStory = (st: TutorialStep) => st.scriptId !== undefined;
+  const storyLeft = () => steps.some((st, i) => isStory(st) && !shown.has(i));
 
   const finish = () => {
     if (done) return;
-    done = true;
     showing = undefined;
     layer.hidden = true;
-    ports.onFinished();
+    if (!finishedReported) {
+      finishedReported = true;
+      ports.onFinished();
+    }
+    // まだ出していない物語の段があれば、それだけを出す状態で続ける
+    if (storyLeft()) storyMode = true;
+    else done = true;
   };
   skip.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -101,6 +117,8 @@ export function createTutorial(root: HTMLElement, steps: readonly TutorialStep[]
     showing = step;
     const ins = step.scriptId ? ports.inscriptionOf?.(step.scriptId) : undefined;
     bubble.classList.toggle('inscription', ins !== undefined);
+    // 物語の段だけを出す状態では、飛ばすボタンを出さない（読んで、操作を続ければ消える）
+    skip.hidden = storyMode;
     if (ins) {
       // 物に書かれた文字（測り棒の札）: 紙の札のように出す。上に物の呼び名
       label.textContent = ins.label;
@@ -136,7 +154,7 @@ export function createTutorial(root: HTMLElement, steps: readonly TutorialStep[]
         shown.add(showingIndex);
         index = shown.size;
         layer.hidden = true;
-        if (shown.size >= steps.length) return finish();
+        if (shown.size >= steps.length || (storyMode && !storyLeft())) return finish();
       }
       if (showing) return;
       const matches = (st: TutorialStep) =>
@@ -145,15 +163,17 @@ export function createTutorial(root: HTMLElement, steps: readonly TutorialStep[]
         (st.unitId === undefined || st.unitId === info.unitId) &&
         (st.minHeight === undefined || (info.height ?? 0) >= st.minHeight) &&
         (st.tally === undefined || (info.tallies?.[st.tally.id] ?? 0) >= st.tally.atLeast);
-      // その時の様子で決まる段（高さ・回数。測り棒の札・最後の一撃）は、ほかの段より先に、条件が合えばすぐ出す（その時を逃すと出せないため）
+      // その時の様子で決まる段（高さ・回数。測り棒の札・最後の一撃）は、ほかの段より先に、条件が合えばすぐ出す（その時を逃すと出せないため）。
+      // 物語の段だけを出す状態では、物語の段だけを見る
       for (let i = 0; i < steps.length; i++) {
         const st = steps[i]!;
-        if (shown.has(i) || (st.minHeight === undefined && st.tally === undefined)) continue;
+        if (shown.has(i) || (storyMode ? !isStory(st) : st.minHeight === undefined && st.tally === undefined)) continue;
         if (matches(st)) {
           showingIndex = i;
           return show(st, info.reachable);
         }
       }
+      if (storyMode) return;
       for (let i = 0; i < steps.length; i++) {
         if (shown.has(i)) continue;
         const st = steps[i]!;
@@ -168,7 +188,7 @@ export function createTutorial(root: HTMLElement, steps: readonly TutorialStep[]
     update() {
       if (showing) place();
     },
-    status: () => ({ step: showing?.id ?? null, index, done }),
+    status: () => ({ step: showing?.id ?? null, index, done, story: storyMode }),
     dispose() {
       layer.remove();
     },

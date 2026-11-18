@@ -2603,7 +2603,8 @@ async function storyRun(browser, baseUrl, name, core) {
     await reloadAndResume();
     await until(() => window.__tactics.screen() === 'battle' || window.__tactics.dialogue() !== null);
     // 見た手ほどき（堰）は、再開した戦闘で出さない（丘の「最後の一撃は、トウマで」は、まだ見ていない）
-    if (siteName === '堰') check((await T(() => window.__tactics.tutorial())) === null, `${siteName}: 再開した戦闘で、見た手ほどきがまた出ています`);
+    // 見た手ほどきは出さない（物語の段（測り棒の札）だけを待つ状態になる）
+    if (siteName === '堰') check(await T(() => { const t = window.__tactics.tutorial(); return t === null || (t.story && t.step === null); }), `${siteName}: 再開した戦闘で、見た手ほどきがまた出ています`);
     await T(() => window.__tactics.setAutoPlayer(true));
     const expected = core.ai.runAutoBattle(saved.state, 3000, { player: core.data.ai, enemy: core.data.ai }).state;
     let last;
@@ -2705,6 +2706,7 @@ async function storyRun(browser, baseUrl, name, core) {
     await doListen(4300);
     check((await T(() => window.__tactics.history())).overlays > overlaysBefore, '石が終わりの三つの音を鳴らす時に、ユナの指の画が重なっていません');
     check((await placardsShown()).includes('トウマの家　奥の部屋'), '札「トウマの家　奥の部屋」が出ていません');
+    check((await T(() => window.__tactics.time())) === '夕方', '場面9の物置の光が、夕方になっていません');
     await until(() => window.__tactics.screen() === 'story-end', undefined, 60000);
     return 'done';
   };
@@ -2761,6 +2763,10 @@ async function storyRun(browser, baseUrl, name, core) {
    */
   const weirTagByHand = async () => {
     await until(() => window.__tactics.tutorial()?.step === 'weir-move', undefined, 120000);
+    // 手ほどきを始めに飛ばす。物語の段（測り棒の札）は、飛ばした後も必ず一度出る
+    await press(text.tutorial.skip);
+    check((await T(() => window.__tactics.tutorial())).story === true, '手ほどきを飛ばした後に、測り棒の札を待つ状態になっていません');
+    check((await T(() => window.__tactics.settings().seenTutorials)).includes('prologue-weir'), '手ほどきを飛ばしたことが設定に残っていません');
     const playerUnit = () =>
       T(() => {
         const st = window.__tactics.state();
@@ -2815,18 +2821,17 @@ async function storyRun(browser, baseUrl, name, core) {
       label: document.querySelector('.tutorial-label')?.textContent,
       text: document.querySelector('.tutorial-text')?.textContent,
       sign: document.querySelector('.tutorial-text .inscription-signature')?.textContent,
+      skip: document.querySelector('.tutorial-skip')?.hidden === true,
     }));
     check(
-      bubble.on && bubble.label === '測り棒の札' && bubble.text.startsWith('高い所から撃つ矢は、遠くまで届く。兄さんは高い所が好きでしょう。') && bubble.sign === 'ユナ',
-      `キリを崖の上へ動かした時の手ほどきに、測り棒の札（署名「ユナ」）が出ていません（${JSON.stringify(bubble)}）`,
+      bubble.on && bubble.label === '測り棒の札' && bubble.text.startsWith('高い所から撃つ矢は、遠くまで届く。兄さんは高い所が好きでしょう。') && bubble.sign === 'ユナ' && bubble.skip,
+      `手ほどきを飛ばした後、キリを崖の上へ動かした時に、測り棒の札（署名「ユナ」。飛ばすボタンなし）が出ていません（${JSON.stringify(bubble)}）`,
     );
     await screenshot('weir-tag');
-    await press(text.tutorial.skip);
-    check((await T(() => window.__tactics.settings().seenTutorials)).includes('prologue-weir'), '手ほどきを見たことが設定に残っていません');
   };
 
   /**
-   * 短くした版（CI）の序章: 検査全体を6分以内に収めるため、要点だけを確かめ、残りの会話はスキップで進める。
+   * 短くした版（CI）の序章: 検査全体を8分以内に収めるため、要点だけを確かめ、残りの会話はスキップで進める。
    * 冒頭の石の節の印 → 堰の会話（ルビ・物の文字・読み返し・読み込み直しと「これまで」・早送り）→ 堰の戦闘（手ほどき・退場しない番兵・
    * 戦闘の途中での読み込み直しと再開・開発用の決着・勝った後の台本）→ 会話はスキップ → 丘の戦闘（始めの演出・遠くで続く歌・決着）→
    * 場面9の操作（歩かせる・戸・石・耳に当てる（離すと止まり、押し直すと続き））→「第1章は準備中です」
@@ -2860,7 +2865,7 @@ async function storyRun(browser, baseUrl, name, core) {
     );
     await reloadAndResume();
     await until(() => window.__tactics.screen() === 'battle' && window.__tactics.state() !== null);
-    check((await T(() => window.__tactics.tutorial())) === null, '堰: 再開した戦闘で、見た手ほどきがまた出ています');
+    check(await T(() => { const t = window.__tactics.tutorial(); return t === null || (t.story && t.step === null); }), '堰: 再開した戦闘で、見た手ほどきがまた出ています');
     await until(() => ['main', 'busy', 'ended'].includes(window.__tactics.mode()) && !window.__tactics.dialogue());
     await T(() => window.__tactics.finishBattle('player'));
     // 勝った後の台本（台詞はない。崩れる音・遠い谷のカット・帰りの門）
@@ -2906,7 +2911,7 @@ async function storyRun(browser, baseUrl, name, core) {
     check(stats.walks >= 11 && stats.taps === 2 && stats.listens === 1, `場面9の操作が足りません（歩く ${stats.walks}・タップ ${stats.taps}・聞く ${stats.listens}）`);
     check((await T(() => document.querySelector('.story-end-screen .screen-title')?.textContent)) === text.story.nextChapterSoon, '「第1章は準備中です」が出ていません');
     log('場面9（歩かせる・戸をタップ・石をタップ・耳に当てる（離すと止まり、押し直すと節の頭から））・「第1章は準備中です」✔');
-    // はじめから（手ほどきの途中で勝ったことにするのは、全体の版で確かめる。CI の検査全体を6分以内に収めるため）
+    // はじめから（手ほどきの途中で勝ったことにするのは、全体の版で確かめる。CI の検査全体を8分以内に収めるため）
     await restartStory(rosterBefore);
     log('はじめから（確認・部隊と記録が残る・手ほどきが戻る）✔');
     return {};
@@ -3010,7 +3015,11 @@ async function storyRun(browser, baseUrl, name, core) {
         seen.yunaTitle = d.title === 'トウマの妹';
         await screenshot('scene4-okaeri');
       }
-      if (n === 5 && d.text.startsWith('みんなの分')) await screenshot('scene4-room');
+      if (n === 5 && d.text.startsWith('みんなの分')) {
+        // ユナの部屋は夜（灯と窓の星が映える暗さ）
+        seen.night = (await T(() => window.__tactics.time())) === '夜';
+        await screenshot('scene4-room');
+      }
       if (n === 6 && d.speaker === 'ミオ' && d.text.startsWith('時守さん')) seen.mioTitle = d.title === '薬屋の弟子';
       if (n === 5 && d.text.startsWith('この歌、')) await screenshot('scene4-workbench');
       if (n === 6 && d.waiting === 'walk' && !seen.follow) {
@@ -3024,6 +3033,7 @@ async function storyRun(browser, baseUrl, name, core) {
     if (n === 4) check(seen.seal && seen.teo, '封蝋の印「未来より」か、テオの名前と肩書きが出ていません');
     if (n === 5) {
       check(seen.yunaTitle, 'ユナの「おかえり」に、肩書き「トウマの妹」が出ていません');
+      check(seen.night, '場面4のユナの部屋の光が、夜になっていません');
       check(((await soundCounts()).door ?? 0) >= 1, '一度目の鼻歌が、戸の開く音で切られていません');
     }
     if (n === 6) check(seen.mioTitle, 'ミオの肩書き「薬屋の弟子」が出ていません');
@@ -3389,7 +3399,7 @@ async function checkLayouts(browser, baseUrl, name, core) {
 
   // ---- 物語の土台: 題名・会話・読み返し・スキップの確認・操作の場面・対象物のある戦闘・「これまで」 ----
   // 短くした版（CI）では、物語の画面（つづきから・はじめから・場面を選ぶ・勝ったことにする）だけを確かめる
-  // （残りは試しの場面の通しで同じ画面を通る。収まりは全体の自動プレイの4つの画面サイズで確かめる。CI の検査全体を6分以内に収めるため）
+  // （残りは試しの場面の通しで同じ画面を通る。収まりは全体の自動プレイの4つの画面サイズで確かめる。CI の検査全体を8分以内に収めるため）
   if (QUICK) {
     await storyMenuLayouts();
     await context.close();
