@@ -23,7 +23,7 @@ import { computeDamage, heightDamagePercent, weaponFits } from './combat';
 import { damageTaken, enduredDamage, isSilencedFor, mpCostOf } from './effects';
 import { manhattan, relativeSide, type Coord, type RelativeSide } from './geometry';
 import { getTile, type BattleMap } from './map';
-import { isAlive, isKnockedOut, unitAt } from './movement';
+import { isAlive, isBystanderTile, isKnockedOut, unitAt } from './movement';
 
 /** ユニットが持っている魔法の定義。持っていなければエラー */
 export function spellOf(unit: UnitState, spellId: string): SpellDefinition {
@@ -48,9 +48,12 @@ export function inSpellRange(spell: SpellDefinition, from: Coord, c: Coord): boo
   return d >= (spell.minRange ?? 0) && d <= spell.range;
 }
 
-/** from から spell で狙えるマスの一覧（射程の内側。高さは問わない） */
-export function spellRangeTiles(map: BattleMap, spell: SpellDefinition, from: Coord): Coord[] {
-  return map.tiles.filter((t) => inSpellRange(spell, from, t)).map((t) => ({ x: t.x, z: t.z }));
+/**
+ * from から spell で狙えるマスの一覧（射程の内側。高さは問わない）。
+ * 戦わない背景の人々（序章の丘の七つの氏族など）の立つマスは、狙いの中心に選べないので除く
+ */
+export function spellRangeTiles(state: Pick<BattleState, 'map' | 'bystanders'>, spell: SpellDefinition, from: Coord): Coord[] {
+  return state.map.tiles.filter((t) => inSpellRange(spell, from, t) && !isBystanderTile(state, t)).map((t) => ({ x: t.x, z: t.z }));
 }
 
 /**
@@ -229,6 +232,8 @@ export function isValidSpellTarget(
   const center = targetCenter(state, target);
   if (!center || !getTile(state.map, center.x, center.z)) return false;
   if (target.kind === 'tile' && (!Number.isInteger(target.x) || !Number.isInteger(target.z))) return false;
+  // 戦わない背景の人々の立つマスは狙えない（攻撃や魔法の対象にしない）
+  if (target.kind === 'tile' && isBystanderTile(state, center)) return false;
   return inSpellRange(spell, from, center);
 }
 

@@ -23,7 +23,14 @@ export type SceneDefinition = (
   | { readonly kind: 'battle'; readonly id: string; readonly battleId: string; readonly partyId?: string }
   /** 拠点（編成と店。「物語を進める」で次の場面へ） */
   | { readonly kind: 'base'; readonly id: string }
-) & { readonly recap?: readonly string[] };
+) & {
+  readonly recap?: readonly string[];
+  /**
+   * ゲーム脚本の場面の番号（docs/story/game-script-*.md の「場面4」の 4）。確認用の機能の「場面を選ぶ」に出す。
+   * 脚本の1つの場面を、戦闘の前と戦闘の2つに分けた時は、同じ番号を書く
+   */
+  readonly scriptScene?: number;
+};
 
 export interface ChapterDefinition {
   readonly id: string;
@@ -38,11 +45,16 @@ export interface BookDefinition {
   readonly chapters: readonly ChapterDefinition[];
 }
 
-/** 進み具合。finished なら最後まで終えた */
+/**
+ * 進み具合。finished なら最後まで終えた。
+ * checked は、確認用の機能（場面を選ぶ）で進めた時に付く。付いている間の物語の戦闘では、経験値・JP・ゴールド・戦利品を得ない
+ * （「はじめから」で消える）
+ */
 export interface StoryProgress {
   readonly chapter: number;
   readonly scene: number;
   readonly finished: boolean;
+  readonly checked?: true;
 }
 
 export const RECAP_MAX_LINES = 3;
@@ -75,13 +87,37 @@ export function currentScene(book: BookDefinition, progress: StoryProgress): { c
   return chapter && scene ? { chapter, scene } : undefined;
 }
 
+/** 確認用の機能で進めたか（その間の物語の戦闘では、報酬を得ない） */
+export const isChecked = (progress: StoryProgress | undefined): boolean => progress?.checked === true;
+
+/** 本の場面の一覧（確認用の機能の「場面を選ぶ」の並び）。章の番号・場面の番号・定義 */
+export interface SceneEntry {
+  readonly chapter: number;
+  readonly scene: number;
+  readonly chapterId: string;
+  readonly definition: SceneDefinition;
+}
+
+export function sceneEntries(book: BookDefinition): SceneEntry[] {
+  return book.chapters.flatMap((c, ci) => c.scenes.map((s, si) => ({ chapter: ci, scene: si, chapterId: c.id, definition: s })));
+}
+
+/**
+ * 確認用の機能の「場面を選ぶ」: その場面から始める進み具合。選んだ場面より前の出来事は、済んだものとして扱う
+ * （進み具合は場面の番号だけで表すので、その場面を今の場面にすればよい）。checked を付ける。本にない場面なら undefined
+ */
+export function progressAt(book: BookDefinition, chapter: number, scene: number): StoryProgress | undefined {
+  if (!book.chapters[chapter]?.scenes[scene]) return undefined;
+  return { chapter, scene, finished: false, checked: true };
+}
+
 /** 今の場面を終えた: 次の場面へ（章の最後なら次の章の最初、本の最後なら終わり） */
 export function advanceScene(book: BookDefinition, progress: StoryProgress): StoryProgress {
   if (progress.finished) return progress;
   const chapter = book.chapters[progress.chapter];
   if (!chapter) return { ...progress, finished: true };
   if (progress.scene + 1 < chapter.scenes.length) return { ...progress, scene: progress.scene + 1 };
-  if (progress.chapter + 1 < book.chapters.length) return { chapter: progress.chapter + 1, scene: 0, finished: false };
+  if (progress.chapter + 1 < book.chapters.length) return { ...progress, chapter: progress.chapter + 1, scene: 0 };
   return { ...progress, finished: true };
 }
 
@@ -113,9 +149,10 @@ export function chapterStartRecap(book: BookDefinition, progress: StoryProgress)
 /** 保存してあった進み具合を、今の本の定義に合わせる（章や場面が減っていたら、その章の最初から） */
 export function normalizeProgress(book: BookDefinition, progress: StoryProgress | undefined): StoryProgress {
   if (!progress || !Number.isInteger(progress.chapter) || !Number.isInteger(progress.scene)) return STORY_START;
-  if (progress.finished) return { chapter: progress.chapter, scene: progress.scene, finished: true };
+  const checked = progress.checked ? { checked: true as const } : {};
+  if (progress.finished) return { chapter: progress.chapter, scene: progress.scene, finished: true, ...checked };
   const chapter = book.chapters[progress.chapter];
   if (!chapter) return STORY_START;
-  if (!chapter.scenes[progress.scene]) return { chapter: progress.chapter, scene: 0, finished: false };
-  return { chapter: progress.chapter, scene: progress.scene, finished: false };
+  if (!chapter.scenes[progress.scene]) return { chapter: progress.chapter, scene: 0, finished: false, ...checked };
+  return { chapter: progress.chapter, scene: progress.scene, finished: false, ...checked };
 }

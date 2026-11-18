@@ -351,7 +351,7 @@ function damageSpellChoice(
     const danger = (threat.get(keyOf(state, pos)) ?? 0) > 0 || reserved.has(keyOf(state, pos)) ? 1 : 0;
     if (safeOnly && danger) continue;
     for (const spell of spells) {
-      for (const center of spellRangeTiles(state.map, spell, pos)) {
+      for (const center of spellRangeTiles(state, spell, pos)) {
         const preview = previewSpellAt(state, unit, spell, center, self);
         let net = 0;
         let priority = 0;
@@ -482,7 +482,7 @@ export function chooseProtectSpell(
     const self = { ...unit, x: pos.x, z: pos.z };
     const danger = (threat.get(keyOf(state, pos)) ?? 0) > 0 ? 1 : 0;
     for (const spell of spells) {
-      for (const center of spellRangeTiles(state.map, spell, pos)) {
+      for (const center of spellRangeTiles(state, spell, pos)) {
         const preview = previewSpellAt(state, unit, spell, center, self);
         let allies = 0;
         let enemies = 0;
@@ -570,7 +570,7 @@ export function chooseStatusSpell(state: BattleState, unit: UnitState, canMove: 
         const reach = threat.get(keyOf(state, pos)) ?? 0;
         if (reach > (config.sealMaxDanger ?? 0)) continue;
         const self = { ...unit, x: pos.x, z: pos.z };
-        for (const center of spellRangeTiles(state.map, spell, pos)) {
+        for (const center of spellRangeTiles(state, spell, pos)) {
           let good = 0;
           let bad = 0;
           for (const r of previewSpellAt(state, unit, spell, center, self).results) {
@@ -781,7 +781,7 @@ export function chooseHealSpell(
     const self = { ...unit, x: pos.x, z: pos.z };
     const danger = (threat.get(keyOf(state, pos)) ?? 0) > 0 || reserved.has(keyOf(state, pos)) ? 1 : 0;
     for (const spell of spells) {
-      for (const center of spellRangeTiles(state.map, spell, pos)) {
+      for (const center of spellRangeTiles(state, spell, pos)) {
         const preview = previewSpellAt(state, unit, spell, center, self);
         let hurt = 0;
         let enemies = 0;

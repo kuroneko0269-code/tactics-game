@@ -43,11 +43,11 @@ export function canReach(map: BattleMap, profile: AttackProfile, from: Coord, to
   return distance >= profile.minRange && distance <= profile.maxRange + extra;
 }
 
-/** from にいる unit が攻撃できるマスの一覧（表示用） */
+/** from にいる unit が攻撃できるマスの一覧（表示用）。戦わない背景の人々の立つマスは、攻撃の対象にならないので除く */
 export function attackRangeTiles(state: BattleState, unit: UnitState, from: Coord): Coord[] {
   const result: Coord[] = [];
   for (const tile of state.map.tiles) {
-    if (canReach(state.map, unit.attack, from, tile)) result.push({ x: tile.x, z: tile.z });
+    if (canReach(state.map, unit.attack, from, tile) && !isBystanderTile(state, tile)) result.push({ x: tile.x, z: tile.z });
   }
   return result;
 }

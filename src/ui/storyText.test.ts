@@ -53,3 +53,16 @@ describe('戦闘の台本の人物', () => {
     }
   });
 });
+
+describe('場面を選ぶ（確認用の機能）の場面の札', () => {
+  it('本編のすべての章と場面に名前がある。札は「序章 場面4 家・夕食と工房の夜」の形', async () => {
+    const { books } = await import('../data/story/books');
+    for (const b of books) {
+      for (const c of b.chapters) {
+        expect(TEXT.story.chapters[c.id], c.id).toBeDefined();
+        for (const s of c.scenes) expect(TEXT.story.scenes[s.id], s.id).toBeDefined();
+      }
+    }
+    expect(TEXT.story.sceneLabel('序章', 4, TEXT.story.scenes.home!)).toBe('序章 場面4 家・夕食と工房の夜');
+  });
+});

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { startBattle } from '../../../core/battle';
+import { forceVictory, startBattle } from '../../../core/battle';
+import { attackRangeTiles } from '../../../core/combat';
+import { isValidSpellTarget, spellRangeTiles } from '../../../core/magic';
 import { runAutoBattle } from '../../../core/ai';
 import { judgeOutcome } from '../../../core/scenario';
 import { buildSortie } from '../../../core/sortie';
@@ -61,4 +63,45 @@ describe('序章の戦闘の決まり（戦闘で人は死なない決まり）'
       expect(attack && attack.type === 'attacked' && attack.attackerId).toBe('touma');
     }
   }, 60000);
+});
+
+describe('確認用の機能の「勝ったことにする」（forceVictory）', () => {
+  it('堰: 合わせ目がすべて壊れ、西の谷に水が流れた様子で、味方の勝ちになる（経験値と JP は入らない）', () => {
+    const s = start(weirBattle);
+    const r = forceVictory(s);
+    expect(r.state.winner).toBe('player');
+    expect(r.state.turn).toBeNull();
+    expect(r.state.units.filter((u) => u.object).every((u) => u.retired && u.hp === 0)).toBe(true);
+    expect(r.state.map.tiles.some((t) => t.x === 0 && t.terrain === 'water')).toBe(true);
+    // 番兵は膝をつかない（戦っていない）。味方の経験値と JP は始めのまま
+    expect(r.state.units.filter((u) => u.team === 'player').map((u) => u.progress)).toEqual(s.units.filter((u) => u.team === 'player').map((u) => u.progress));
+    expect(JSON.parse(JSON.stringify(r.state))).toEqual(r.state);
+  });
+
+  it('丘: 誓いの剣に4回当てたことになり、味方の勝ちになる。ガレスの HP は減らない', () => {
+    const s = start(hillBattle);
+    const r = forceVictory(s);
+    expect(r.state.winner).toBe('player');
+    expect(r.state.scenario.tallies?.['oath-sword']).toBe(4);
+    expect(r.state.units.find((u) => u.id === 'hill-gareth')!.hp).toBe(s.units.find((u) => u.id === 'hill-gareth')!.hp);
+  });
+});
+
+describe('丘の七つの氏族（戦わない背景の人々）は、攻撃や魔法の対象にならない', () => {
+  it('攻撃の届くマス・魔法で狙えるマスに、氏族の立つマスは入らない。マスを狙う魔法でも狙えない', () => {
+    const s = start(hillBattle);
+    const clans = (s.bystanders ?? []).map((b) => `${b.x},${b.z}`);
+    expect(clans).toHaveLength(8);
+    const fire = spells.find((x) => x.id === 'fire')!;
+    for (const u of s.units.filter((x) => x.team === 'player')) {
+      // 氏族の隣へ置いて確かめる
+      for (const b of s.bystanders ?? []) {
+        const from = { x: b.x === 0 ? 1 : b.x === 8 ? 7 : b.x, z: b.z + (b.x === 1 || b.x === 7 ? 1 : 0) };
+        const placed = { ...u, ...from };
+        expect(attackRangeTiles(s, placed, from).map((t) => `${t.x},${t.z}`)).not.toContain(`${b.x},${b.z}`);
+        expect(spellRangeTiles(s, fire, from).map((t) => `${t.x},${t.z}`)).not.toContain(`${b.x},${b.z}`);
+        expect(isValidSpellTarget(s, fire, placed, { kind: 'tile', x: b.x, z: b.z })).toBe(false);
+      }
+    }
+  });
 });

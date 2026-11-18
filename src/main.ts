@@ -1,6 +1,6 @@
 import './ui/style.css';
 import * as THREE from 'three';
-import { startBattle } from './core/battle';
+import { forceVictory, startBattle } from './core/battle';
 import type { ActionResult, BattleState } from './core/battleTypes';
 import {
   applyBattleResult,
@@ -63,7 +63,7 @@ import { parseScriptOrThrow, type Directive, type Script } from './core/script';
 import { createPortraitRenderer } from './render/portrait';
 import { createSpeakerMark } from './render/speakerMark';
 import { createVoiceMarks, type VoiceKind } from './render/voiceMark';
-import { advanceScene, currentScene, normalizeProgress, recapFor, STORY_START, type BookDefinition, type StoryProgress } from './core/story';
+import { advanceScene, currentScene, isChecked, normalizeProgress, progressAt, recapFor, sceneEntries, STORY_START, type BookDefinition, type StoryProgress } from './core/story';
 import { books } from './data/story/books';
 import { scriptTexts } from './data/story/scripts';
 import { ACTOR_LOOKS as ACTOR_LOOK_IDS, GESTURES, LIGHT_COLORS, POSTURES, PROP_KINDS, scriptCatalog, VOICES } from './data/story/stageDefs';
@@ -74,7 +74,8 @@ import { LISTEN, melodyTimes, SOUND_EFFECTS } from './data/sounds';
 import { prologueBattles } from './data/battles/prologue';
 import { createSceneView, type SceneView } from './render/sceneView';
 import { facingToward, runDialogue, type DialogueRun, type DialogueSound, type StagePort } from './ui/dialogue';
-import { showRecapScreen, showStoryBattleLost, showStoryEndScreen, showTitleScreen } from './ui/titleScreen';
+import { showRecapScreen, showSceneSelect, showStoryBattleLost, showStoryEndScreen, showStoryMenu, showTitleScreen } from './ui/titleScreen';
+import { createCheckBadge } from './ui/checkBadge';
 import { createSoundSystem } from './ui/sound';
 import { createSoundMark, showSettingsSheet } from './ui/settingsSheet';
 import { createTutorial, type TutorialScreen } from './ui/tutorial';
@@ -92,7 +93,7 @@ import { chapterStartRecap } from './core/story';
  * 途中の戦闘があれば、拠点で「戦闘を再開」と「撤退する」だけを出す（再開するまで、編成と店は使えない。部隊と戦闘の食い違いを防ぐため）。
  * 戦闘に勝つと、戦場の段階ごとの報酬（ゴールドと戦利品の抽選）を部隊に入れる（フェーズ2-4）。
  */
-type ScreenName = 'title' | 'base' | 'roster' | 'shop' | 'deploy' | 'battle' | 'result' | 'scene' | 'recap' | 'story-end';
+type ScreenName = 'title' | 'base' | 'roster' | 'shop' | 'deploy' | 'battle' | 'result' | 'scene' | 'recap' | 'story-end' | 'story-menu' | 'scene-select';
 
 /** 物語の戦闘の戦場（場面の battleId で引く） */
 const storySites: readonly BattleSite[] = prologueBattles;
@@ -149,10 +150,19 @@ function main(): void {
   let settings: GameSettings = settingsStore.load();
   const sound = createSoundSystem();
   sound.setVolume(settings.volume, settings.muted);
+  /** 確認用の機能の印と「勝ったことにする」（設定で入にした時だけ） */
+  const checkBadge = createCheckBadge(document.getElementById('app') ?? document.body);
+  checkBadge.setEnabled(settings.checkTools);
+  /** 物語の戦闘で、まだ決着していない間（確認用の機能の「勝ったことにする」を出す） */
+  let liveStoryBattle: { readonly bookId: string } | null = null;
+  const refreshCheckWin = () =>
+    checkBadge.setWin(settings.checkTools && liveStoryBattle && battle && (screen === 'deploy' || screen === 'battle') ? () => void checkWinBattle() : null);
   const updateSettings = (next: GameSettings) => {
     settings = next;
     settingsStore.save(next);
     sound.setVolume(next.volume, next.muted);
+    checkBadge.setEnabled(next.checkTools);
+    refreshCheckWin();
   };
   // ブラウザは最初のタップがあるまで音を鳴らせないので、最初のタップで音の仕組みを起こす
   const unlockSound = () => sound.unlock();
@@ -170,8 +180,11 @@ function main(): void {
     { capture: true },
   );
   const soundMark = createSoundMark(document.getElementById('app') ?? document.body);
+  /** 開発中だけ: これまでに鳴らした旋律・見せた場所・言葉にしない声の数（自動プレイが、短い印を見逃さずに確かめるため） */
+  const devHistory = { melodies: new Set<string>(), stages: new Set<string>(), voices: 0 };
   sound.onMelodyChange(() => {
     const m = sound.melody();
+    if (m) devHistory.melodies.add(`${m.melody}/${m.timbre}`);
     soundMark.show(m ? TEXT.sound.melodyMark(m.mark ?? TEXT.sound.timbres[m.timbre] ?? m.timbre) : null);
   });
   /** 会話から使う音の口 */
@@ -268,9 +281,12 @@ function main(): void {
       screenEl.hidden = true;
       screenEl.innerHTML = '';
     }
+    refreshCheckWin();
   };
 
   const endBattle = () => {
+    liveStoryBattle = null;
+    refreshCheckWin();
     sound.stopAmbient();
     if (!battle) return;
     battle.tutorial?.dispose();
@@ -554,6 +570,8 @@ function main(): void {
     // 戦闘中の会話の途中で閉じていたら、その会話をもう一度出してから続ける（物語の土台）
     const pending = s.dialogue ? [{ type: 'dialogue' as const, scriptId: s.dialogue }] : [];
     battle = createActiveBattle({ state: s.state, events: pending }, onFinished, (st) => saveBattle(s.origin, st));
+    if (s.origin.kind === 'story') liveStoryBattle = { bookId: s.origin.bookId };
+    refreshCheckWin();
     // 再開した戦闘の地形が、マップの定義から変わっていれば（地形の変化の後）、見た目を合わせる
     void battle.view.updateMap(s.state.map);
     currentFinish = onFinished;
@@ -608,6 +626,8 @@ function main(): void {
     const shell = createBattleShell(begin(setup));
     const active: ActiveBattle = { ...shell };
     battle = active;
+    if (origin.kind === 'story') liveStoryBattle = { bookId: origin.bookId };
+    refreshCheckWin();
     active.deploy = createDeployController(setup, {
       preview: begin,
       view: { sync: (st) => shell.view.sync(st), setMarks: (m) => setMarks(shell.view, m), setOverlays: (t) => setOverlays(shell.view, t) },
@@ -776,6 +796,7 @@ function main(): void {
     const id = VOICES[voice];
     if (!id) return;
     sound.effect(id);
+    devHistory.voices++;
     voiceMarks.show(headOf, VOICE_KINDS[id] ?? 'call', 1.5);
   };
   /** 遠景のカット（@遠景）で見せている舞台（カットの間だけある） */
@@ -1139,19 +1160,121 @@ function main(): void {
     storyBaseNext = null;
     setScreen('title');
     showTitleScreen(screenEl, {
-      story: () => ({ available: bookOf('main').chapters.length > 0, inProgress: story.main !== undefined && !story.main.finished }),
-      onStory: () => playBook('main', false),
+      story: () => ({ available: bookOf('main').chapters.length > 0 }),
+      onStory: () => openStoryMenu('main'),
       onPlay: () => showBase(),
       onSettings: () => showSettingsSheet(screenEl, () => settings, updateSettings),
     });
   };
 
+  /** 場面の札（例: 序章 場面4 家・夕食と工房の夜） */
+  const sceneLabelOf = (book: BookDefinition, chapter: number, scene: number) => {
+    const c = book.chapters[chapter];
+    const sc = c?.scenes[scene];
+    if (!c || !sc) return '';
+    return TEXT.story.sceneLabel(TEXT.story.chapters[c.id] ?? c.id, sc.scriptScene, TEXT.story.scenes[sc.id] ?? sc.id);
+  };
+
   /**
-   * 物語の本を始める・続ける。続きからの時は、まず「これまで」を出す。途中の戦闘があれば、それを再開する
+   * 題名の画面の「物語」: 進み具合がなければ（確認用の機能が切なら）、そのまま最初から始める。
+   * 進み具合があれば「つづきから」「はじめから」（確認つき）を選ぶ画面を出す。確認用の機能が入なら「場面を選ぶ」も出す
+   */
+  const openStoryMenu = (bookId: string) => {
+    const book = bookOf(bookId);
+    const progress = story[bookId];
+    if (!progress && !settings.checkTools) return playBook(bookId, true);
+    endBattle();
+    setScreen('story-menu');
+    const p = progress ? normalizeProgress(book, progress) : undefined;
+    showStoryMenu(screenEl, {
+      hasProgress: p !== undefined,
+      ...(p ? { continueSub: p.finished ? TEXT.story.nextChapterSoon : sceneLabelOf(book, p.chapter, p.scene) } : {}),
+      checkTools: settings.checkTools,
+      onContinue: () => playBook(bookId, false),
+      onRestart: () => restartBook(bookId),
+      onSceneSelect: () => openSceneSelect(bookId),
+      onBack: showTitle,
+    });
+  };
+
+  /**
+   * 「はじめから」: 物語の進み具合だけを消して、最初から始める。育てた部隊・装備・ゴールド・訓練と遺跡の記録は消さない。
+   * 一度見た手ほどき（物語の戦闘の手ほどきと、会話の操作の手引き）は、もう一度出るように戻す
+   */
+  const restartBook = (bookId: string) => {
+    const storyIds = new Set(storySites.map((x) => x.id));
+    if (settings.seenTutorials.some((id) => storyIds.has(id))) updateSettings({ ...settings, seenTutorials: settings.seenTutorials.filter((id) => !storyIds.has(id)) });
+    seenHints = [];
+    playBook(bookId, true);
+  };
+
+  /** 確認用の機能の「場面を選ぶ」: 章のタブと、場面の一覧 */
+  const openSceneSelect = (bookId: string) => {
+    const book = bookOf(bookId);
+    endBattle();
+    setScreen('scene-select');
+    const entries = sceneEntries(book);
+    showSceneSelect(
+      screenEl,
+      book.chapters.map((c, ci) => ({
+        id: c.id,
+        label: TEXT.story.chapters[c.id] ?? c.id,
+        scenes: entries.filter((e) => e.chapter === ci).map((e) => ({ label: sceneLabelOf(book, e.chapter, e.scene), onSelect: () => startAtScene(bookId, e.chapter, e.scene) })),
+      })),
+      () => openStoryMenu(bookId),
+      story[bookId]?.chapter ?? 0,
+    );
+  };
+
+  /** 選んだ場面から始める（それより前の出来事は済んだことにする。この後の物語の戦闘では、報酬を得ない） */
+  const startAtScene = (bookId: string, chapter: number, scene: number) => {
+    const p = progressAt(bookOf(bookId), chapter, scene);
+    if (!p) return;
+    if (suspended?.origin.kind === 'story' && suspended.origin.bookId === bookId) suspended = null;
+    story = { ...story, [bookId]: p };
+    persist();
+    runScene(bookId, true);
+  };
+
+  /**
+   * 確認用の機能の「勝ったことにする」: 物語の戦闘を、味方の勝ちで終える。戦闘の前の手ほどきと演出も打ち切る。
+   * 勝った後の台本は、勝った時の様子（壊す物が壊れ、水が流れた後など）の上で流す。経験値・JP・ゴールド・戦利品は得ない
+   */
+  const checkWinBattle = async () => {
+    const b = battle;
+    const live = liveStoryBattle;
+    if (!b || !live) return;
+    const state = b.controller?.state ?? b.deploy?.state;
+    if (!state || state.winner) return;
+    liveStoryBattle = null;
+    refreshCheckWin();
+    b.tutorial?.dispose();
+    b.tutorial = undefined;
+    b.controller?.dispose();
+    b.deploy = undefined;
+    currentFinish = undefined;
+    const run = dialogueRun;
+    if (run) {
+      run.abort();
+      await run.done.catch(() => undefined);
+    }
+    hudEl.innerHTML = '';
+    const won = forceVictory(state).state;
+    if (screen === 'deploy') setScreen('battle');
+    setMarks(b.view, []);
+    setOverlays(b.view, []);
+    b.view.sync(won);
+    void b.view.updateMap(won.map);
+    finishStoryBattle(live.bookId, won, true);
+  };
+
+  /**
+   * 物語の本を始める・続ける。続きからの時は、まず「これまで」を出す。途中の戦闘があれば、それを再開する。
+   * 最後まで終えた本の「つづきから」は、終わりの画面（序章の後は「第1章は準備中です」）を出す
    */
   const playBook = (bookId: string, fresh: boolean) => {
     const book = bookOf(bookId);
-    if (fresh || !story[bookId] || story[bookId]!.finished) {
+    if (fresh || !story[bookId]) {
       // 最初から: この本の途中の戦闘は捨てる
       if (suspended?.origin.kind === 'story' && suspended.origin.bookId === bookId) suspended = null;
       story = { ...story, [bookId]: STORY_START };
@@ -1233,6 +1356,7 @@ function main(): void {
     if (!stageDef) throw new Error(`会話の場面のマップ ${stageId} が見つかりません`);
     sceneView?.dispose();
     currentStageId = stageDef.id;
+    devHistory.stages.add(stageDef.id);
     useMap(stageDef.map);
     applySky(stageDef);
     rig.reset();
@@ -1300,11 +1424,14 @@ function main(): void {
    * 物語の戦闘が終わった: 経験値と JP（勝てばゴールドと戦利品）を部隊に入れ、勝てば次の場面へ。負ければやり直すかタイトルへ。
    * 章のために決めた部隊で戦った時（序章など）は、部隊に何も入れず、結果の画面も出さない（勝てば台本の後に次の場面へ）
    */
-  const finishStoryBattle = (bookId: string, state: BattleState) => {
+  const finishStoryBattle = (bookId: string, state: BattleState, checked = false) => {
+    liveStoryBattle = null;
+    refreshCheckWin();
     const origin = suspended?.origin;
     const target = origin?.kind === 'story' ? siteOf(origin) : storySites.find((x) => x.id === storyBattleScene(bookId)?.battleId);
     const won = state.winner === 'player';
-    if (storyBattleScene(bookId)?.partyId) {
+    // 確認用の機能で進めた時（勝ったことにした・場面を選んで始めた）は、章のために決めた部隊の時と同じく、部隊に何も入れない
+    if (storyBattleScene(bookId)?.partyId || checked || isChecked(story[bookId])) {
       // 勝った時は、台本を流し終えるまで途中の戦闘を残す（台本の途中で閉じても、もう一度流せるように）
       if (!won) {
         suspended = null;
@@ -1444,6 +1571,8 @@ function main(): void {
       settings: () => settings,
       /** 物語の進み具合 */
       story: () => story,
+      /** これまでに鳴らした旋律（旋律/音色）・見せた会話用マップ・言葉にしない声の数（読み込み直すと消える） */
+      history: () => ({ melodies: [...devHistory.melodies], stages: [...devHistory.stages], voices: devHistory.voices }),
       /** 暗転しているか */
       dark: () => fadeEl.classList.contains('dark'),
       /** 話者の印が見えているか・顔の枠に写している人物（会話の見せ方） */

@@ -42,7 +42,15 @@ export const TEXT = {
     sub: '（仮・開発中）',
     story: '物語',
     storyHelp: '序章（約10分の会話と2つの戦闘）',
-    storyContinue: '物語の続きから',
+    /** 物語を選んだ後の画面（進み具合がある時と、確認用の機能が入の時） */
+    storyMenuTitle: '物語',
+    continue: 'つづきから',
+    restart: 'はじめから',
+    restartHelp: '部隊・装備・ゴールド・記録は残ります',
+    confirmRestart:
+      '物語の進み具合を消して、最初から始めます。育てた部隊・装備・ゴールド・訓練と遺跡の記録は残ります。一度見た手ほどきも、もう一度出ます。',
+    confirmRestartYes: 'はじめから始める',
+    back: '戻る',
     play: '訓練と遺跡',
     playHelp: '訓練戦と、はじまりの遺跡（部隊は物語と共通）',
     toTitle: 'タイトルへ',
@@ -62,6 +70,39 @@ export const TEXT = {
     battleLost: '敗北……',
     lostNote: 'この戦闘を始めからやり直せます',
     baseNote: '編成と店を使えます。準備ができたら「物語を進める」',
+    /** 章の名前（章の id で引く） */
+    chapters: { prologue: '序章' } as Readonly<Record<string, string>>,
+    /** 場面の名前（ゲーム脚本の場面の名前。場面の id で引く。脚本の1つの場面を2つに分けたものは「・戦闘の前」「・戦闘」を添える） */
+    scenes: {
+      open: '冒頭の先出し',
+      'weir-intro': '堰・戦闘の前',
+      weir: '堰・戦闘',
+      tower: '暦の塔・門と報告の部屋',
+      hall: '暦の塔・円卓の広間',
+      home: '家・夕食と工房の夜',
+      city: '都と橋',
+      gate: '塔の門',
+      'hill-intro': '建国の丘・戦闘の前',
+      hill: '建国の丘・戦闘',
+      return: '塔へ帰る',
+      end: '家までの道と物置',
+    } as Readonly<Record<string, string>>,
+    /** 場面の札（例: 序章 場面4 家・夕食と工房の夜） */
+    sceneLabel: (chapter: string, n: number | undefined, name: string) => `${chapter}${n === undefined ? '' : ` 場面${n}`} ${name}`,
+  },
+
+  /** 確認用の機能（発注者と物語の作者が、場面を手早く確かめるための機能。設定で入にした時だけ使える） */
+  check: {
+    badge: '確認用の機能: 入',
+    sceneSelect: '場面を選ぶ',
+    sceneSelectHelp: '選んだ場面から始めます',
+    sceneSelectTitle: '場面を選ぶ',
+    sceneSelectNote: '経験値・JP・ゴールド・戦利品は得ません',
+    winBattle: '勝ったことにする',
+    winTitle: '勝ったことにしますか？',
+    winNote: '戦闘の前の手ほどきと演出も飛ばして、勝った後の場面へ進みます。経験値・JP・ゴールド・戦利品は得ません。',
+    winYes: '勝ったことにして進む',
+    winNo: 'やめる',
   },
 
   /** 会話の枠（物語の土台） */
@@ -81,7 +122,7 @@ export const TEXT = {
     /** 物をタップする操作（戸を開ける・石を拾う） */
     tapHint: '光っている所を押します。',
     /** 耳に当てて聞く操作（押している間だけ鳴る） */
-    listenHint: '押している間だけ、音が聞こえます。指を離すと止まり、押し直すと続きから聞こえます。',
+    listenHint: '押している間だけ、音が聞こえます。指を離すと止まり、押し直すと節の頭から聞こえます。',
     listenDefault: '耳に当てる',
     /** 章の題の画面で、次へ進むための案内 */
     titleNext: 'タップで進む',
@@ -122,6 +163,9 @@ export const TEXT = {
     tutorialOn: '見た手ほどきは出さない: はい',
     tutorialOff: '見た手ほどきは出さない: いいえ',
     tutorialNote: '「いいえ」にすると、手ほどきのある戦闘で毎回出します',
+    checkOn: '確認用の機能: 入',
+    checkOff: '確認用の機能: 切',
+    checkNote: '入にすると、物語の場面を選ぶ・物語の戦闘を勝ったことにする、が使えます（確かめるための機能）',
     close: '閉じる',
   },
 

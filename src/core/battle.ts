@@ -1127,6 +1127,33 @@ function changeTerrain(state: BattleState, changes: readonly TileChange[], event
   return { ...state, map: { ...state.map, tiles } };
 }
 
+/**
+ * 確認用の機能の「勝ったことにする」（物語の確認用）: 今の状態から、味方の勝ちで決着した状態を作る。
+ * 勝利条件の物を壊したことにし（壊れて消える）、数える条件は規定の回数に届いたことにする。
+ * それで起きるはずのマップ上のイベント（堰が切れて水が流れる、など）を起こしてから、勝ちで決着させる
+ * （勝った後の台本が、勝った時の様子の上で流れるように）。経験値と JP は入れない（行動していないため）。
+ */
+export function forceVictory(state: BattleState): ActionResult {
+  const events: BattleEvent[] = [];
+  let next: BattleState = state;
+  for (const c of state.scenario.objectives.victory) {
+    if (c.kind === 'destroyObjects') {
+      for (const id of c.unitIds) {
+        const u = next.units.find((x) => x.id === id);
+        if (u && !u.retired) next = defeat(next, id, events);
+      }
+    } else if (c.kind === 'hitUnit') {
+      next = { ...next, scenario: { ...next.scenario, tallies: { ...next.scenario.tallies, [c.id]: Math.max(c.times, next.scenario.tallies?.[c.id] ?? 0) } } };
+    }
+  }
+  next = runStateEvents(next, events);
+  if (!next.winner) {
+    events.push({ type: 'battleEnded', winner: 'player', reason: state.scenario.objectives.victory[0]?.kind ?? 'defeatAll' });
+    next = { ...next, winner: 'player', turn: null };
+  }
+  return { state: next, events };
+}
+
 /** 状態で決まるきっかけ（HP が一定以下・撃破）のイベントを、起きなくなるまで起こす */
 function runStateEvents(state: BattleState, events: BattleEvent[]): BattleState {
   let next = state;

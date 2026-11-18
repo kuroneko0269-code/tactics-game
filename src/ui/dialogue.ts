@@ -1,6 +1,6 @@
-import { advance, applyDirective, applyStep, backlog, isFinished, nextStop, skipToEnd, walkPath, type StageState } from '../core/dialogue';
+import { advance, applyDirective, applyStep, backlog, isFinished, lineBeforeControl, nextStop, skipToEnd, walkPath, type StageState } from '../core/dialogue';
 import type { Coord, Direction } from '../core/geometry';
-import { listenPhase, listenTotal, type ListenTimeline } from '../core/listen';
+import { listenPhase, listenRestart, listenTotal, type ListenTimeline } from '../core/listen';
 import type { Directive, RubySegment, Script } from '../core/script';
 import { el, showSheet } from './dom';
 import { plateStyle } from './speakerStyle';
@@ -117,6 +117,8 @@ export interface DialogueRun {
   advance(): boolean;
   /** 今の舞台の様子（自動テスト用） */
   stage(): StageState;
+  /** 会話を打ち切る（スキップと同じく、会話の終わりの様子にそろえて終える。確認用の機能の「勝ったことにする」で使う） */
+  abort(): void;
 }
 
 const FAST_LINE_MS = 280;
@@ -223,11 +225,15 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       };
     });
 
+  const setFast = (on: boolean) => {
+    fast = on;
+    fastButton.setAttribute('aria-pressed', String(fast));
+  };
   fastButton.addEventListener('click', (e) => {
     e.stopPropagation();
-    fast = !fast;
-    fastButton.setAttribute('aria-pressed', String(fast));
-    if (fast && waiting === 'line') wake();
+    setFast(!fast);
+    // 操作の直前の台詞は、早送りでも待つ（読む前に操作へ進まないように）
+    if (fast && waiting === 'line' && !lineBeforeControl(script, index)) wake();
   });
   logButton.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -490,7 +496,7 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
     });
 
   /**
-   * 耳に当てて聞く操作。押している間だけ時間が進み、貝殻の音から旋律へ移る。離すと止まり、押し直すと続きから。
+   * 耳に当てて聞く操作。押している間だけ時間が進み、貝殻の音から旋律へ移る。離すと止まり、押し直すと節の頭から（貝殻の音の間なら続きから）。
    * 旋律を鳴りきると次へ（余韻は切らない）
    */
   const listenStep = (melody: string, timbre: string, label: string) =>
@@ -535,6 +541,8 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       const down = (e: Event) => {
         e.preventDefault();
         if (since !== undefined) return;
+        // 押し直した時は、旋律がもう始まっていれば節の頭から鳴らし直す（終わりの三つの音まで、途切れずに一度聞かせるため）
+        if (timeline) listenMs = listenRestart(timeline, listenMs);
         since = performance.now();
         listening = true;
         button.classList.add('holding');
@@ -606,6 +614,7 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
         const d = step.directive;
         if (d.kind === 'hold') {
           hideLine(true);
+          setFast(false);
           waiting = 'hold';
           await holdStep(d.steps, d.label);
         } else if (d.kind === 'chapterTitle') {
@@ -614,15 +623,18 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
           await chapterTitle(d.title, d.subtitle);
         } else if (d.kind === 'tapControl') {
           hideLine(true);
+          setFast(false);
           waiting = 'tap';
           await tapStep(d.target, d.label);
         } else if (d.kind === 'listen') {
           hideLine(true);
+          setFast(false);
           waiting = 'listen';
           await listenStep(d.melody, d.timbre, d.label);
         } else if (d.kind === 'walkControl') {
           // 歩かせる間は台詞の枠を隠す（横向きの低い画面で、枠が光るマスを覆わないように）。スキップのボタンは残す
           hideLine(true);
+          setFast(false);
           waiting = 'walk';
           await walkStep(d.actor, d.path);
           if (!skipped) port.sync(applyDirective(stage, d));
@@ -642,7 +654,8 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       if (skipped) break;
       showLine(step);
       waiting = 'line';
-      if (fast || deps.autoAdvance?.()) await wait(fast ? FAST_LINE_MS : 30);
+      // 早送りは操作の場面で止まる。操作の直前の台詞（場面9の母の「だれ？」など）は、早送りでもタップを待つ
+      if (deps.autoAdvance?.() || (fast && !lineBeforeControl(script, index))) await wait(fast ? FAST_LINE_MS : 30);
       else await new Promise<void>((resolve) => (release = resolve));
       index = advance(script, nextStop(script, index));
     }
@@ -731,6 +744,11 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       walkTap?.(candidates);
     },
     stage: () => stage,
+    abort() {
+      skipped = true;
+      walkTap = undefined;
+      wake();
+    },
     advance() {
       if (sheetOpen || waiting !== 'line') return false;
       wake();
