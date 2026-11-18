@@ -69,6 +69,8 @@ export const SOUND_EFFECTS: Readonly<Record<string, SoundEffectId>> = {
   ねじ: 'windUp',
   /** 誓いの剣に当たった時の、鐘のような音 */
   鐘: 'bell',
+  /** 戸の開く音（序章の場面4: ユナの鼻歌を切る） */
+  戸の開く音: 'door',
 };
 
 export type SoundEffectId =
@@ -89,6 +91,7 @@ export type SoundEffectId =
   | 'waterMid'
   | 'windUp'
   | 'bell'
+  | 'door'
   /** 言葉にしない声（叫び・呼び込み・笑い）。台本の @声 で鳴らす */
   | 'voiceShout'
   | 'voiceCall'

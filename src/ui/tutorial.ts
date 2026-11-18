@@ -27,6 +27,8 @@ export interface TutorialPorts {
   readonly tileScreen: (x: number, z: number) => { x: number; y: number };
   readonly unitScreen: (id: string) => { x: number; y: number } | undefined;
   readonly onFinished: () => void;
+  /** 段の台本（scriptId）にある、物に書かれた文字（物の呼び名と、文の組み立て）。札として出す */
+  readonly inscriptionOf?: (scriptId: string) => { readonly label: string; readonly nodes: Node[] } | undefined;
 }
 
 export function createTutorial(root: HTMLElement, steps: readonly TutorialStep[], ports: TutorialPorts): TutorialScreen {
@@ -95,7 +97,16 @@ export function createTutorial(root: HTMLElement, steps: readonly TutorialStep[]
 
   const show = (step: TutorialStep, reachable: readonly Coord[]) => {
     showing = step;
-    text.textContent = TEXT.tutorial.steps[step.id] ?? step.id;
+    const ins = step.scriptId ? ports.inscriptionOf?.(step.scriptId) : undefined;
+    bubble.classList.toggle('inscription', ins !== undefined);
+    if (ins) {
+      // 物に書かれた文字（測り棒の札）: 紙の札のように出す。上に物の呼び名
+      label.textContent = ins.label;
+      text.replaceChildren(...ins.nodes);
+    } else {
+      label.textContent = TEXT.tutorial.label;
+      text.textContent = TEXT.tutorial.steps[step.id] ?? step.id;
+    }
     target = pointFor(step, reachable);
     layer.hidden = false;
     layer.dataset.step = step.id;

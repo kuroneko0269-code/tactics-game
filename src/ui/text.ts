@@ -79,7 +79,7 @@ export const TEXT = {
       weir: '堰・戦闘',
       tower: '暦の塔・門と報告の部屋',
       hall: '暦の塔・円卓の広間',
-      home: '家・夕食と工房の夜',
+      home: '家・夕食とユナの部屋の夜',
       city: '都と橋',
       gate: '塔の門',
       'hill-intro': '建国の丘・戦闘の前',
@@ -87,7 +87,7 @@ export const TEXT = {
       return: '塔へ帰る',
       end: '家までの道と物置',
     } as Readonly<Record<string, string>>,
-    /** 場面の札（例: 序章 場面4 家・夕食と工房の夜） */
+    /** 場面の札（例: 序章 場面4 家・夕食とユナの部屋の夜） */
     sceneLabel: (chapter: string, n: number | undefined, name: string) => `${chapter}${n === undefined ? '' : ` 場面${n}`} ${name}`,
   },
 
@@ -181,8 +181,7 @@ export const TEXT = {
       'weir-facing': '最後に向きを選んで「手番を終える」。背中から攻撃されると、大きな痛手になります。',
       'weir-gord': 'ゴードは前へ。番兵を引きつけます。',
       'weir-kiri': 'キリは崖の上へ。光っているマスから登れます。',
-      /** 崖の上に立った時、測り棒の札の文字をもう一度出す（ゲーム脚本の序章 1-9） */
-      'weir-high': '測り棒の札「高い所から撃つ矢は、遠くまで届く。兄さんは高い所が好きでしょう。」',
+      /** キリが崖の上に立った時は、測り棒の札（台本 prologueWeirTag の物の文字）を出す。札の文は台本が正（ここには書かない） */
       'weir-fen': 'フェンの「攻撃魔法」の「炎」で、合わせ目を割ります。唱えてから発動するまで、少し時間がかかります。',
       'hill-finisher': '最後の一撃は、トウマで',
     } as Readonly<Record<string, string>>,
@@ -884,6 +883,8 @@ export const TEXT = {
   miss: 'ミス',
   turnOrder: '行動順',
   turnNumber: (n: number) => `${n}手番目`,
+  /** 名札に役目を添えた名前（ゲーム脚本の序章の戦闘: 戦士ゴード） */
+  roleName: (role: string, name: string) => `${role}${name}`,
   mp: 'MP',
   stats: {
     magic: '魔力',

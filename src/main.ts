@@ -73,7 +73,7 @@ import { DEFAULT_LOOK, LOOKS } from './data/story/looks';
 import { LISTEN, melodyTimes, SOUND_EFFECTS } from './data/sounds';
 import { prologueBattles } from './data/battles/prologue';
 import { createSceneView, type SceneView } from './render/sceneView';
-import { facingToward, runDialogue, type DialogueRun, type DialogueSound, type StagePort } from './ui/dialogue';
+import { facingToward, inscriptionNodes, runDialogue, type DialogueRun, type DialogueSound, type StagePort } from './ui/dialogue';
 import { showRecapScreen, showSceneSelect, showStoryBattleLost, showStoryEndScreen, showStoryMenu, showTitleScreen } from './ui/titleScreen';
 import { createCheckBadge } from './ui/checkBadge';
 import { createSoundSystem } from './ui/sound';
@@ -181,7 +181,7 @@ function main(): void {
   );
   const soundMark = createSoundMark(document.getElementById('app') ?? document.body);
   /** 開発中だけ: これまでに鳴らした旋律・見せた場所・言葉にしない声の数（自動プレイが、短い印を見逃さずに確かめるため） */
-  const devHistory = { melodies: new Set<string>(), stages: new Set<string>(), voices: 0 };
+  const devHistory = { melodies: new Set<string>(), stages: new Set<string>(), voices: 0, overlays: 0, placards: [] as string[], nameTags: [] as string[] };
   sound.onMelodyChange(() => {
     const m = sound.melody();
     if (m) devHistory.melodies.add(`${m.melody}/${m.timbre}`);
@@ -192,6 +192,7 @@ function main(): void {
     playMelody: (melody, timbre, mark) => sound.playMelody(melody, timbre, mark),
     stopMelody: () => sound.stopMelody(),
     waitMelody: (remaining) => sound.waitMelody(remaining),
+    cutMelody: (remaining) => sound.cutMelody(remaining),
     stopAll: () => {
       sound.stopMelody();
       sound.stopAmbient();
@@ -679,6 +680,7 @@ function main(): void {
         initialHeight: rig.heightLevel,
         facingScreen: (unitId) => view.facingScreen(unitId),
         expToNext: (level) => (level >= progressionRules.maxLevel ? undefined : expToNext(level, progressionRules)),
+        ...(currentSite?.roleTags ? { roleTags: currentSite.roleTags } : {}),
       },
       start.state.scenario.objectives.victory.flatMap((c) => (c.kind === 'defeatUnit' ? [c.unitId] : [])),
     );
@@ -724,6 +726,10 @@ function main(): void {
             },
             onFinished: () => {
               if (!settings.seenTutorials.includes(site.id)) updateSettings({ ...settings, seenTutorials: [...settings.seenTutorials, site.id] });
+            },
+            inscriptionOf: (scriptId) => {
+              const line = scriptOf(scriptId).steps.find((x) => x.kind === 'line' && x.inscription);
+              return line && line.kind === 'line' && line.speaker ? { label: line.speaker, nodes: inscriptionNodes(line.text) } : undefined;
             },
           })
         : undefined;
@@ -841,6 +847,81 @@ function main(): void {
     rig.reset();
     await setDark(false, fade);
   };
+  /** 重ねている短い画（@重ねる）の舞台・カメラ（重ねている間だけある） */
+  let overlayShow: { scene: THREE.Scene; rig: ReturnType<typeof createCameraRig>; view: SceneView } | undefined;
+  /**
+   * 短い画を重ねる（@重ねる。序章の場面9: 石が鳴る時のユナの指。第1章以降の回想）。今の画の写しを画面の上に置き、
+   * その下で回想の台本（scriptId）の舞台を別のシーンと別のカメラで描く。写しを薄くして回想を透かして見せ、ms の後に戻す。
+   * 今の舞台とカメラには触れないので、元の画にそのまま戻る
+   */
+  const showOverlay = async (scriptId: string, ms: number, fast: boolean) => {
+    const script = scriptOf(scriptId);
+    const flat = script.steps.flatMap((x) => (x.kind === 'line' ? x.directives : [x.directive]));
+    const loc = flat.find((d) => d.kind === 'location');
+    const def = loc && loc.kind === 'location' ? stages.find((st) => st.id === loc.stageId) : undefined;
+    if (!def) return;
+    // 今の画の写し（描いた直後に読み取る）
+    stage.renderer.render(stage.scene, rig.camera);
+    const shot = document.createElement('img');
+    shot.className = 'overlay-snapshot';
+    shot.src = stage.renderer.domElement.toDataURL('image/jpeg', 0.85);
+    shot.alt = '';
+    const tint = document.createElement('div');
+    tint.className = 'overlay-tint';
+    tint.style.opacity = '0';
+    stageEl.append(shot, tint);
+    // 回想の舞台（別のシーン・別のカメラ）
+    const scene = new THREE.Scene();
+    scene.background = def.sky !== undefined ? new THREE.Color(def.sky) : defaultSky.clone();
+    scene.add(new THREE.HemisphereLight(0xfff0d8, 0x5a4a3a, 1.5));
+    const sun = new THREE.DirectionalLight(0xffe8c8, 1.8);
+    sun.position.set(6, 12, 4);
+    scene.add(sun);
+    const map = createMapView(createMap(def.map));
+    scene.add(map.group);
+    const oRig = createCameraRig(rigOptions(map, def.map));
+    oRig.resize(stage.renderer.domElement.clientWidth, stage.renderer.domElement.clientHeight);
+    const view = createSceneView({ ...sceneViewOptions(), scene, mapView: map, camera: () => oRig.camera });
+    // 準備（最初の仕草の前まで）は、そのままの様子にそろえる。カメラはすぐに向ける
+    let st: StageState = { actors: {}, props: {}, dark: false };
+    const firstMotion = flat.findIndex((d) => d.kind === 'gesture' || d.kind === 'wait');
+    const setup = firstMotion < 0 ? flat : flat.slice(0, firstMotion);
+    const motions = firstMotion < 0 ? [] : flat.slice(firstMotion);
+    for (const d of setup) st = applyDirective(st, d);
+    view.sync(st);
+    for (const d of setup) {
+      if (d.kind !== 'camera') continue;
+      const point = d.actor ? (view.actorPoint(d.actor) ?? view.propPoint(d.actor)) : map.tileTop(d.x ?? 0, d.z ?? 0);
+      if (point) void oRig.lookAt(point, d.zoom ? SCENE_ZOOM[d.zoom] : undefined, 0.01);
+    }
+    overlayShow = { scene, rig: oRig, view };
+    const total = fast ? Math.min(ms, 300) : ms;
+    const fade = Math.min(180, Math.floor(total / 4));
+    await new Promise((r) => requestAnimationFrame(() => r(undefined)));
+    shot.style.transitionDuration = `${fade}ms`;
+    tint.style.transitionDuration = `${fade}ms`;
+    shot.style.opacity = '0.38';
+    tint.style.opacity = '1';
+    devHistory.overlays++;
+    const started = performance.now();
+    view.setSpeed(fast ? 4 : 1);
+    for (const d of motions) {
+      if (d.kind === 'gesture') {
+        const g = GESTURES[d.gesture];
+        if (g) await view.gesture(d.actor, g);
+      } else if (d.kind === 'wait') await new Promise((r) => window.setTimeout(r, fast ? 0 : d.ms));
+    }
+    const rest = total - fade - (performance.now() - started);
+    if (rest > 0) await new Promise((r) => window.setTimeout(r, rest));
+    shot.style.opacity = '1';
+    tint.style.opacity = '0';
+    await new Promise((r) => window.setTimeout(r, fade));
+    overlayShow = undefined;
+    view.dispose();
+    map.dispose();
+    shot.remove();
+    tint.remove();
+  };
   /** 話者の強調: 頭上に印を出し、カメラを少しだけ寄せる（null で印を消し、カメラを戻す） */
   const highlightSpeaker = (headOf: (() => THREE.Vector3 | undefined) | null) => {
     speakerMark.setTarget(headOf);
@@ -886,6 +967,8 @@ function main(): void {
         const look = speakerLook(name);
         return { body: look.body, accent: look.accent };
       },
+      overlay: showOverlay,
+      onNotice: (kind, t) => (kind === 'placard' ? devHistory.placards : devHistory.nameTags).push(t),
       ...(import.meta.env.DEV ? { autoAdvance: () => devAutoDialogue } : {}),
     });
     dialogueRun = run;
@@ -1167,7 +1250,7 @@ function main(): void {
     });
   };
 
-  /** 場面の札（例: 序章 場面4 家・夕食と工房の夜） */
+  /** 場面の札（例: 序章 場面4 家・夕食とユナの部屋の夜） */
   const sceneLabelOf = (book: BookDefinition, chapter: number, scene: number) => {
     const c = book.chapters[chapter];
     const sc = c?.scenes[scene];
@@ -1572,7 +1655,7 @@ function main(): void {
       /** 物語の進み具合 */
       story: () => story,
       /** これまでに鳴らした旋律（旋律/音色）・見せた会話用マップ・言葉にしない声の数（読み込み直すと消える） */
-      history: () => ({ melodies: [...devHistory.melodies], stages: [...devHistory.stages], voices: devHistory.voices }),
+      history: () => ({ melodies: [...devHistory.melodies], stages: [...devHistory.stages], voices: devHistory.voices, overlays: devHistory.overlays, placards: [...devHistory.placards], nameTags: [...devHistory.nameTags] }),
       /** 暗転しているか */
       dark: () => fadeEl.classList.contains('dark'),
       /** 話者の印が見えているか・顔の枠に写している人物（会話の見せ方） */
@@ -1662,7 +1745,12 @@ function main(): void {
     cutView?.update(dt, elapsed);
     speakerMark.update(elapsed);
     voiceMarks.update(dt, elapsed);
-    stage.renderer.render(stage.scene, rig.camera);
+    if (overlayShow) {
+      // 短い画を重ねている間は、回想の舞台を描く（今の画の写しを、その上に薄く置いている）
+      overlayShow.rig.update(dt);
+      overlayShow.view.update(dt, elapsed);
+      stage.renderer.render(overlayShow.scene, overlayShow.rig.camera);
+    } else stage.renderer.render(stage.scene, rig.camera);
     if (battle) {
       battle.labels.setPositions(battle.view.unitAnchors());
       battle.hud.update();

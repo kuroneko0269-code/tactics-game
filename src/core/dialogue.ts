@@ -195,6 +195,11 @@ export function applyDirective(stage: StageState, d: Directive): StageState {
     case 'cut':
     case 'tapControl':
     case 'listen':
+    case 'placard':
+    case 'nameTag':
+    case 'shot':
+    case 'overlay':
+    case 'melodyCut':
       return stage;
   }
 }
@@ -202,7 +207,9 @@ export function applyDirective(stage: StageState, d: Directive): StageState {
 /** 手順の指示（台詞の前の指示を含む）を行った後の舞台 */
 export function applyStep(stage: StageState, step: ScriptStep): StageState {
   if (step.kind === 'directive') return applyDirective(stage, step.directive);
-  return step.directives.reduce(applyDirective, stage);
+  const after = step.directives.reduce(applyDirective, stage);
+  // 暗転の上の字幕: 字幕を出す時に暗くなっている
+  return step.overDark && !after.dark ? { ...after, dark: true } : after;
 }
 
 /** index 番目の手順の手前までを行った舞台（index が手順の数なら、最後まで行った舞台） */
@@ -268,6 +275,10 @@ export function castOf(script: Script): string[] {
   }
   return [...names];
 }
+
+/** 台本に出てくる、重ねる短い画（回想の台本）の名前 */
+export const overlaysOf = (script: Script) =>
+  script.steps.flatMap((s) => (s.kind === 'line' ? s.directives : [s.directive])).flatMap((d) => (d.kind === 'overlay' ? [d.scriptId] : []));
 
 /** 台本の台詞と語りを、1行ずつの文にしたもの（テストと確認用） */
 export const linesOf = (script: Script) =>

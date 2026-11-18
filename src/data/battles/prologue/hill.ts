@@ -97,6 +97,8 @@ export const hillBattle: BattleSite = {
   },
   looks: { 'hill-gareth': 'garethOath', touma: 'toumaLamp', 'hill-sentry-1': 'sentinel', 'hill-sentry-2': 'sentinel' },
   afterVictory: 'prologueHillAfter',
+  // 隊員の名札に役目を添える（戦士ゴード、弓使いキリ、魔道士フェン、治癒師ノノ）
+  roleTags: ['gord', 'kiri', 'fen', 'nono'],
   // 歌は戦闘中も遠くで続く
   ambient: { melody: '月を呼ぶ節', timbre: '歌声', level: 35 },
   tutorial: [{ id: 'hill-finisher', mode: 'main', tally: { id: 'oath-sword', atLeast: 3 }, point: { kind: 'unit', unitId: 'hill-gareth' } }],

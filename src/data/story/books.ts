@@ -41,7 +41,7 @@ export const mainBook: BookDefinition = {
           stageId: 'stage-tower',
           recap: ['任務から帰ったトウマに、ハルドは「良い仕事だ」と言った。', '塔の広間では、明日の指示書が広げられる。'],
         },
-        // 場面4: 家・夕食と工房の夜
+        // 場面4: 家・夕食とユナの部屋の夜
         {
           kind: 'dialogue',
           id: 'home', scriptScene: 4,

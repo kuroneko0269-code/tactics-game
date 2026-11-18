@@ -72,16 +72,18 @@ export const weirBattle: BattleSite = {
   cast: { 番兵: 'weir-guard-2', 番兵A: 'weir-guard-1', 番兵B: 'weir-guard-3', 男たち: 'weir-worker-1', 男: 'weir-worker-2' },
   looks: { 'weir-guard-1': 'guard', 'weir-guard-2': 'guard', 'weir-guard-3': 'guardBow' },
   afterVictory: 'prologueWeirAfter',
+  // 隊員の名札に役目を添える（戦士ゴード、弓使いキリ、魔道士フェン、治癒師ノノ）
+  roleTags: ['gord', 'kiri', 'fen', 'nono'],
   tutorial: [
     { id: 'weir-move', mode: 'main', point: { kind: 'reachToward', x: 4, z: 3 } },
     { id: 'weir-attack', mode: 'afterMove', point: { kind: 'button', button: 'attack' } },
     { id: 'weir-target', mode: 'targeting' },
     { id: 'weir-confirm', mode: 'confirm', point: { kind: 'button', button: 'confirm' } },
     { id: 'weir-facing', mode: 'facing', point: { kind: 'button', button: 'endTurn' } },
-    // ゴードを前へ、キリを崖の上へ、フェンの火で合わせ目を割る。崖の上に立った時、札の文字をもう一度出す
+    // ゴードを前へ、キリを崖の上へ、フェンの火で合わせ目を割る。キリが崖の上に立った時、測り棒の札（署名「ユナ」。台本 prologueWeirTag）を出す
     { id: 'weir-gord', mode: 'main', unitId: 'gord', point: { kind: 'reachToward', x: 4, z: 3 } },
     { id: 'weir-kiri', mode: 'main', unitId: 'kiri', point: { kind: 'reachToward', x: 8, z: 3 } },
-    { id: 'weir-high', mode: 'afterMove', unitId: 'kiri', minHeight: 3 },
+    { id: 'weir-high', mode: 'afterMove', unitId: 'kiri', minHeight: 3, scriptId: 'prologueWeirTag' },
     { id: 'weir-fen', mode: 'main', unitId: 'fen', point: { kind: 'button', button: 'ability' } },
   ],
 };

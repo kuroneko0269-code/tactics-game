@@ -21,6 +21,11 @@ export interface SoundSystem {
    * 0 なら終わるまで。鳴っていないか、もう過ぎていればすぐ）
    */
   waitMelody(remaining: number): Promise<void>;
+  /**
+   * 鳴っている旋律を、終わりから remaining 個目の音が鳴りはじめる手前で切る（0 ならすぐ。余韻も残さず切る）。切った時に解決する。
+   * 序章の場面4: 鼻歌が、終わりの三つの音の手前で戸の開く音に切られる
+   */
+  cutMelody(remaining: number): Promise<void>;
   /** 効果音 */
   effect(id: SoundEffectId): void;
   /** 今鳴っている旋律（自動テストと、画面の印に使う） */
@@ -90,6 +95,9 @@ export function createSoundSystem(): SoundSystem {
         timers: number[];
         voices: { stop: (at: number) => void }[];
         waiters: { remaining: number; resolve: () => void }[];
+        /** 鳴らしはじめた時刻（performance.now()）と、各音の始まり（ミリ秒） */
+        startedAt: number;
+        starts: number[];
       }
     | undefined;
 
@@ -283,6 +291,12 @@ export function createSoundSystem(): SoundSystem {
       case 'bell':
         [880, 1318, 2217].forEach((f, i) => stone(ac, out, f, t, 1.4 - i * 0.3, 0.16 - i * 0.04));
         return;
+      case 'door':
+        // 木の戸が開く: 掛け金の音と、きしむ音
+        blip(ac, out, 180, 120, t, 0.08, 'triangle', 0.3);
+        filteredNoise(ac, out, t, 0.06, 'bandpass', 1800, 0.25);
+        blip(ac, out, 420, 300, t + 0.1, 0.45, 'sawtooth', 0.05);
+        return;
       case 'windUp':
         for (let i = 0; i < 6; i++) blip(ac, out, 2600, 2400, t + i * 0.09, 0.02, 'square', 0.04);
         return;
@@ -302,13 +316,13 @@ export function createSoundSystem(): SoundSystem {
     }
   };
 
-  const clearMelody = () => {
+  const clearMelody = (hard = false) => {
     if (!current) return;
     for (const timer of current.timers) window.clearTimeout(timer);
     const now = ctx?.currentTime ?? 0;
     for (const v of current.voices) {
       try {
-        v.stop(now + 0.05);
+        v.stop(now + (hard ? 0.012 : 0.05));
       } catch {
         // すでに止まっていれば何もしない
       }
@@ -352,6 +366,8 @@ export function createSoundSystem(): SoundSystem {
         timers: [],
         voices: [],
         waiters: [],
+        startedAt: performance.now(),
+        starts: notes.map((n) => Math.round(n.start * 1000)),
       };
       current = playing;
       const ac = ctx && ctx.state === 'running' ? ctx : undefined;
@@ -395,6 +411,30 @@ export function createSoundSystem(): SoundSystem {
     waitMelody(remaining) {
       if (!current || reached(current.index, current.total, remaining)) return Promise.resolve();
       return new Promise<void>((resolve) => current!.waiters.push({ remaining, resolve }));
+    },
+    cutMelody(remaining) {
+      const c = current;
+      if (!c) return Promise.resolve();
+      const cut = () => {
+        if (current !== c) return;
+        clearMelody(true);
+        notify();
+      };
+      const target = remaining > 0 ? c.starts[c.total - remaining] : undefined;
+      const delay = target === undefined ? 0 : target - (performance.now() - c.startedAt) - 40;
+      if (delay <= 0) {
+        cut();
+        return Promise.resolve();
+      }
+      return new Promise<void>((resolve) => {
+        const timer = window.setTimeout(() => {
+          cut();
+          resolve();
+        }, delay);
+        c.timers.push(timer);
+        // ほかの理由で止まった時（スキップなど）も解決する
+        c.waiters.push({ remaining: -1, resolve });
+      });
     },
     effect(id) {
       recentEffects.unshift(id);
@@ -476,6 +516,8 @@ export function createSoundSystem(): SoundSystem {
         timers: state.timers,
         voices: state.voices,
         waiters: [],
+        startedAt: performance.now() - Math.max(0, elapsedMs - timeline.shellMs),
+        starts: [...timeline.noteStarts],
       };
       current = playing;
       notify();

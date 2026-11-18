@@ -6,6 +6,7 @@ import { currentScene, progressAt } from '../../core/story';
 import { mainBook } from './books';
 import { scriptTexts } from './scripts';
 import { scriptCatalog } from './stageDefs';
+import { stages } from './stages';
 
 /**
  * 序章の台本が、ゲーム脚本（docs/story/game-script-prologue.md）の表の行と1対1で対応しているか。
@@ -26,7 +27,7 @@ function readRows(md: string): Row[] {
   for (const line of md.split('\n')) {
     const h = /^## 場面(\d+)/.exec(line);
     if (h) scene = Number(h[1]);
-    const m = /^\| (\d+) \| (台詞|動き|カメラ|物|音|字幕|操作|戦闘) \| (.*) \|$/.exec(line);
+    const m = /^\| (\d+) \| (札|台詞|動き|カメラ|物|音|字幕|操作|戦闘) \| (.*) \|$/.exec(line);
     if (m && scene >= 0) rows.push({ scene, row: Number(m[1]), kind: m[2]!, content: m[3]! });
   }
   return rows;
@@ -35,7 +36,7 @@ function readRows(md: string): Row[] {
 /** 脚本の場面 → その場面を作る台本 */
 const SCENE_SCRIPTS: Readonly<Record<number, readonly string[]>> = {
   0: ['prologueOpen'],
-  1: ['prologueWeirIntro', 'prologueWeirCrack1', 'prologueWeirCrack2', 'prologueWeirCrack3', 'prologueWeirAfter'],
+  1: ['prologueWeirIntro', 'prologueWeirTag', 'prologueWeirCrack1', 'prologueWeirCrack2', 'prologueWeirCrack3', 'prologueWeirAfter'],
   2: ['prologueTower'],
   3: ['prologueHall'],
   4: ['prologueHome'],
@@ -45,10 +46,10 @@ const SCENE_SCRIPTS: Readonly<Record<number, readonly string[]>> = {
   8: ['prologueReturn'],
   9: ['prologueEnd'],
 };
-/** 戦闘の途中の行（戦場の定義で確かめる） */
-const BATTLE_ROWS = ['1-8', '1-9', '1-11', '7-9', '7-11'];
+/** 戦闘の途中の行（戦場の定義で確かめる）。1-11（測り棒の札）は、手ほどきの段が出す台本 prologueWeirTag に書く */
+const BATTLE_ROWS = ['1-9', '1-10', '1-13', '7-10', '7-12'];
 /** 戦闘中に何度も起きる行（合わせ目が割れるたび・剣に当たるたび）。同じ印を、いくつかの台本に書く */
-const REPEATED_ROWS = ['1-10', '7-10'];
+const REPEATED_ROWS = ['1-12', '7-11'];
 
 interface Block {
   readonly scriptId: string;
@@ -75,11 +76,17 @@ function blocksOf(scriptId: string): Block[] {
 
 const rows = readRows(gameScript);
 const refOf = (r: Row) => `${r.scene}-${r.row}`;
-/** 脚本の台詞の行の話者と文（「（声のみ）」と【…】の注を除く） */
+/** 脚本の台詞の行の話者・肩書きと文（「（声のみ）」と【…】の注を除く。初めて出る人物は 話者〔肩書き〕） */
 const speechOf = (r: Row) => {
   const m = /^(.+?)「(.*)」/.exec(r.content.replace(/【.*?】/g, '').trim());
   if (!m) throw new Error(`台詞を読めません: ${r.content}`);
-  return { speaker: m[1]!.replace('（声のみ）', ''), voiceOnly: m[1]!.includes('（声のみ）'), text: m[2]! };
+  const who = /^(.+?)(?:〔(.+)〕)?$/.exec(m[1]!.replace('（声のみ）', ''))!;
+  return { speaker: who[1]!, title: who[2], voiceOnly: m[1]!.includes('（声のみ）'), text: m[2]! };
+};
+/** 字幕の行の文と、暗転の上に出すか（「暗転の上に出す。「…」」の形） */
+const captionOf = (r: Row) => {
+  const m = /^暗転の上に出す。「(.*)」$/.exec(r.content);
+  return m ? { text: m[1]!, overDark: true } : { text: r.content, overDark: false };
 };
 const allBlocks = Object.values(SCENE_SCRIPTS).flat().flatMap(blocksOf);
 const lineSteps = (b: Block) => b.steps.flatMap((s) => (s.kind === 'line' ? [s] : []));
@@ -124,17 +131,69 @@ describe('序章の台本とゲーム脚本の対応', () => {
       const lines = lineSteps(block).filter((l) => !l.inscription);
       expect(lines, refOf(r)).toHaveLength(1);
       const line = lines[0]!;
-      expect({ speaker: line.speaker, text: plainText(line.text) }, refOf(r)).toEqual({ speaker: want.speaker, text: want.text });
+      expect({ speaker: line.speaker, text: plainText(line.text), title: line.speakerTitle }, refOf(r)).toEqual({ speaker: want.speaker, text: want.text, title: want.title });
       if (want.voiceOnly) expect(line.portrait, refOf(r)).toBe(false);
     }
   });
 
-  it('字幕の行は、脚本の文のまま（「 / 」は字幕の改行）', () => {
+  it('字幕の行は、脚本の文のまま（「 / 」は字幕の改行）。「暗転の上に出す」字幕は、暗転の上に出す', () => {
     for (const r of rows.filter((x) => x.kind === '字幕')) {
       const block = allBlocks.find((b) => b.ref === refOf(r))!;
       const narr = lineSteps(block).filter((l) => l.speaker === null);
       expect(narr, refOf(r)).toHaveLength(1);
-      expect(plainText(narr[0]!.text).replace('\n', ' / '), refOf(r)).toBe(r.content);
+      const want = captionOf(r);
+      expect(plainText(narr[0]!.text).replace('\n', ' / '), refOf(r)).toBe(want.text);
+      expect(narr[0]!.overDark === true, refOf(r)).toBe(want.overDark);
+    }
+  });
+
+  it('札の行は、場所と時の札（@札）として、脚本の文のまま出す。札は字幕の行に数えない', () => {
+    const placards = rows.filter((x) => x.kind === '札');
+    expect(placards.length).toBeGreaterThanOrEqual(14);
+    for (const r of placards) {
+      const block = allBlocks.find((b) => b.ref === refOf(r))!;
+      const ps = block.steps.flatMap(directivesOf).filter((d) => d.kind === 'placard');
+      expect(ps.map((d) => (d.kind === 'placard' ? d.text : '')), refOf(r)).toEqual([r.content]);
+      expect(lineSteps(block), refOf(r)).toEqual([]);
+    }
+    // 台本の札は、すべて脚本の札の行にある。時守のいる時代の札には「今」か「過去」が付く（トウマの家と都の通りは、家族と都の人々の場所）
+    const all = allBlocks.flatMap((b) => b.steps.flatMap(directivesOf)).filter((d) => d.kind === 'placard');
+    expect(all.length).toBe(placards.length);
+    for (const d of all) if (d.kind === 'placard' && /堰|丘/.test(d.text)) expect(d.era).toBe('過去');
+  });
+
+  it('場面の頭の字幕は、暗転の上に出してから画を見せる（場面1: 人物が見える前に、時と前提の字幕）', () => {
+    const intro = parseScriptOrThrow('prologueWeirIntro', scriptTexts['prologueWeirIntro']!, scriptCatalog);
+    const firstLine = intro.steps.findIndex((x) => x.kind === 'line');
+    const fadeIn = intro.steps.findIndex((x) => x.kind === 'directive' && x.directive.kind === 'fadeIn');
+    const dark = intro.steps.findIndex((x) => x.kind === 'directive' && x.directive.kind === 'fadeOut');
+    expect(dark).toBeGreaterThanOrEqual(0);
+    expect(dark).toBeLessThan(firstLine);
+    expect(fadeIn).toBeGreaterThan(firstLine);
+  });
+
+  it('初めて出る人物の肩書きは、その人物が初めて話す台詞にだけ付く（台詞のないガレスは名札で出す）', () => {
+    const titled = allBlocks.flatMap(lineSteps).filter((l) => l.speakerTitle);
+    expect(titled.map((l) => `${l.speaker}〔${l.speakerTitle}〕`)).toEqual(['トウマ〔時守〕', 'イェルマ〔塔の長の補佐〕', 'ハルド〔塔の監督官〕', 'テオ〔若い時守〕', 'ユナ〔トウマの妹〕', 'ミオ〔薬屋の弟子〕']);
+    const spoken = allBlocks.flatMap(lineSteps).filter((l) => !l.inscription && l.speaker !== null);
+    for (const l of titled) expect(spoken.find((x) => x.speaker === l.speaker), l.speaker!).toBe(l);
+    // 名札に「名前〔肩書き〕」と書かれた行は、@名札 で出す
+    for (const r of rows.filter((x) => x.content.includes('名札に「'))) {
+      const m = /名札に「(.+?)〔(.+?)〕」/.exec(r.content)!;
+      const block = allBlocks.find((b) => b.ref === refOf(r))!;
+      expect(block.steps.flatMap(directivesOf).filter((d) => d.kind === 'nameTag'), refOf(r)).toEqual([{ kind: 'nameTag', actor: m[1], title: m[2] }]);
+    }
+  });
+
+  it('秒数の書かれたカットは、その秒で次へ移る（映す・秒を決めた物の文字）', () => {
+    const timed = rows.filter((x) => /([\d.]+)秒で次へ）/.test(x.content));
+    expect(timed.map(refOf)).toEqual(['3-2', '3-3', '3-11', '3-15']);
+    for (const r of timed) {
+      const sec = Number(/([\d.]+)秒で次へ）/.exec(r.content)![1]);
+      const block = allBlocks.find((b) => b.ref === refOf(r))!;
+      const shots = block.steps.flatMap(directivesOf).flatMap((d) => (d.kind === 'shot' ? [d.ms] : []));
+      const ins = lineSteps(block).flatMap((l) => (l.inscription && l.autoMs !== undefined ? [l.autoMs] : []));
+      expect([...shots, ...ins], refOf(r)).toEqual([sec * 1000]);
     }
   });
 
@@ -150,9 +209,9 @@ describe('序章の台本とゲーム脚本の対応', () => {
   it('動き・カメラ・物・音の行は、それを見せる指示を持つ（文で説明しない: 台詞も語りも足さない）', () => {
     const show: Record<string, readonly Directive['kind'][]> = {
       動き: ['gesture', 'walk', 'face', 'posture', 'enter', 'exit', 'give', 'propRemove', 'propChange', 'propMove', 'strike', 'pushBack', 'light'],
-      カメラ: ['camera', 'location', 'cut'],
-      物: ['propPut', 'propRemove', 'propChange', 'give', 'carry', 'camera'],
-      音: ['sound', 'melody', 'melodyWait', 'melodyStop', 'voice', 'listen', 'fadeOut'],
+      カメラ: ['camera', 'shot', 'location', 'cut', 'overlay'],
+      物: ['propPut', 'propRemove', 'propChange', 'give', 'carry', 'camera', 'shot'],
+      音: ['sound', 'melody', 'melodyWait', 'melodyStop', 'melodyCut', 'voice', 'listen', 'fadeOut'],
     };
     for (const r of rows) {
       const kinds = show[r.kind];
@@ -173,7 +232,7 @@ describe('序章の台本とゲーム脚本の対応', () => {
 
   it('脚本の台詞と字幕は、すべて台本にある。台本に、脚本にない台詞と語りはない', () => {
     const want = rows.filter((r) => r.kind === '台詞').map((r) => `${speechOf(r).speaker}:${speechOf(r).text}`);
-    const wantNarr = rows.filter((r) => r.kind === '字幕').map((r) => r.content);
+    const wantNarr = rows.filter((r) => r.kind === '字幕').map((r) => captionOf(r).text);
     const lines = allBlocks.flatMap(lineSteps).filter((l) => !l.inscription);
     // 最初の印より前（場面の準備）にも、台詞は書かない
     const all = Object.values(SCENE_SCRIPTS)
@@ -184,44 +243,83 @@ describe('序章の台本とゲーム脚本の対応', () => {
     expect(lines.filter((l) => l.speaker === null).map((l) => plainText(l.text).replace('\n', ' / '))).toEqual(wantNarr);
   });
 
-  it('「外」の印（ゲームとして足した演出）は、操作の場面と章の題だけで、台詞も語りも持たない', () => {
-    for (const b of allBlocks.filter((x) => x.ref === '外')) {
+  it('「外」の印（ゲームとして足した演出）は、章の題だけで、台詞も語りも持たない（操作の場面は、改訂した脚本の「操作」の行）', () => {
+    const outside = allBlocks.filter((x) => x.ref === '外');
+    expect(outside).toHaveLength(1);
+    for (const b of outside) {
       const ds = b.steps.flatMap(directivesOf).filter((d) => d.kind !== 'cue');
       expect(lineSteps(b), b.scriptId).toEqual([]);
-      for (const d of ds) expect(['walkControl', 'tapControl', 'chapterTitle'], `${b.scriptId}: ${d.kind}`).toContain(d.kind);
+      for (const d of ds) expect(['chapterTitle'], `${b.scriptId}: ${d.kind}`).toContain(d.kind);
+    }
+    // 操作の場面（歩かせる・タップ・聞く）は、脚本の「操作」の行の組にある
+    for (const b of allBlocks) {
+      const ops = b.steps.flatMap(directivesOf).filter((d) => ['walkControl', 'tapControl', 'listen'].includes(d.kind));
+      if (ops.length === 0) continue;
+      const row = rows.find((r) => refOf(r) === b.ref);
+      // 歩かせる操作の続き（見知らぬ男の礼の後、戸の前まで）は、「戸の前で立ち止まる」動きの行に書く
+      expect(row && (row.kind === '操作' || b.ref === '9-6'), `${b.scriptId}: ${b.ref}`).toBe(true);
     }
   });
 
+  it('場面9で石が鳴る時、終わりの三つの音でユナの指（場面4の作業台）を重ねる。場面4のユナの部屋と場面9の物置は、同じ窓と同じ構図', () => {
+    const end = blocksOf('prologueEnd');
+    const b23 = end.find((b) => b.ref === '9-23')!;
+    const ds = b23.steps.flatMap(directivesOf);
+    expect(ds.filter((d) => d.kind === 'melodyWait')).toEqual([{ kind: 'melodyWait', remaining: 3 }]);
+    expect(ds.filter((d) => d.kind === 'overlay').map((d) => (d.kind === 'overlay' ? d.scriptId : ''))).toEqual(['prologueYunaHands']);
+    // 重ねる画: ユナの指が三度叩く（顔は映さない: 後ろから手もとへ寄る）
+    const hands = parseScriptOrThrow('prologueYunaHands', scriptTexts['prologueYunaHands']!, scriptCatalog).steps.flatMap(directivesOf);
+    expect(hands).toContainEqual({ kind: 'gesture', actor: 'ユナ', gesture: '三度叩く' });
+    expect(hands).toContainEqual({ kind: 'enter', actor: 'ユナ', x: 7, z: 2, facing: 'north' });
+    // 同じ部屋（家のマップ）・同じ窓（マップに置いた物）・同じ構図（同じカメラの指示）
+    const room4 = blocksOf('prologueHome').find((b) => b.ref === '4-15')!.steps.flatMap(directivesOf).find((d) => d.kind === 'camera');
+    const room9 = end.find((b) => b.ref === '9-17')!.steps.flatMap(directivesOf).find((d) => d.kind === 'camera');
+    expect(room9).toEqual(room4);
+    const homeStageDef = stages.find((st) => st.id === 'stage-home')!;
+    expect(homeStageDef.props?.find((p) => p.kind === '窓')).toBeDefined();
+    // 場面4の鼻歌は二度: 一度目は終わりの三つの音の手前で戸の開く音に切られ、二度目は終わりの三つの音まで歌う
+    const home = blocksOf('prologueHome');
+    const first = home.find((b) => b.ref === '4-2')!.steps.flatMap(directivesOf);
+    expect(first).toContainEqual({ kind: 'melody', melody: 'ユナの鼻歌', timbre: '鼻歌' });
+    expect(first).toContainEqual({ kind: 'melodyCut', sound: '戸の開く音', remaining: 3 });
+    const second = [...home.find((b) => b.ref === '4-24')!.steps, ...home.find((b) => b.ref === '4-25')!.steps].flatMap(directivesOf);
+    expect(second).toContainEqual({ kind: 'melody', melody: 'ユナの鼻歌', timbre: '鼻歌' });
+    expect(second).toContainEqual({ kind: 'melodyWait', remaining: 0 });
+    expect(second.some((d) => d.kind === 'melodyCut')).toBe(false);
+  });
+
   it('戦闘の途中の行は、戦場の定義にある（勝ち方・手ほどき・膝をつく・音）', () => {
-    // 1-8: 合わせ目を3か所壊すと勝ち。番兵は退場しない（1-11: 膝をついたまま残る）
+    // 1-9: 合わせ目を3か所壊すと勝ち。番兵は退場しない（1-13: 膝をついたまま残る）。隊員の名札に役目を添える
+    expect(weirBattle.roleTags).toEqual(['gord', 'kiri', 'fen', 'nono']);
+    expect(hillBattle.roleTags).toEqual(['gord', 'kiri', 'fen', 'nono']);
     expect(weirBattle.objectives?.victory[0]).toMatchObject({ kind: 'destroyObjects', unitIds: ['weir-seam-1', 'weir-seam-2', 'weir-seam-3'] });
     const guards = weirBattle.tiers[0]!.units.filter((u) => u.id.startsWith('weir-guard'));
     expect(guards.length).toBe(3);
     for (const g of guards) expect(g.noRetire).toBe(true);
-    // 1-9: 手ほどき（ゴードを前へ、キリを崖の上へ、フェンの火）。崖の上に立った時、札の文字をもう一度出す
+    // 1-10: 手ほどき（ゴードを前へ、キリを崖の上へ、フェンの火）。キリを崖の上へ動かすと、測り棒の札（1-11。台本 prologueWeirTag）を出す
     const steps = weirBattle.tutorial ?? [];
     expect(steps.find((s) => s.unitId === 'gord')).toBeDefined();
     expect(steps.find((s) => s.unitId === 'kiri' && s.mode === 'main')).toBeDefined();
-    expect(steps.find((s) => s.id === 'weir-high')).toMatchObject({ unitId: 'kiri', minHeight: 3 });
+    expect(steps.find((s) => s.id === 'weir-high')).toMatchObject({ unitId: 'kiri', minHeight: 3, scriptId: 'prologueWeirTag' });
     expect(steps.find((s) => s.unitId === 'fen')).toBeDefined();
-    // 1-10: 合わせ目が割れるたびの音
+    // 1-12: 合わせ目が割れるたびの音
     const crack = (weirBattle.events ?? []).filter((e) => e.trigger.kind === 'objectsBroken').flatMap((e) => e.effects.flatMap((x) => (x.kind === 'dialogue' ? [x.scriptId] : [])));
     expect(crack).toEqual(['prologueWeirCrack1', 'prologueWeirCrack2', 'prologueWeirCrack3']);
-    // 7-9: 誓いの剣に4回当てると折れる。最後の一撃はトウマだけ。ガレスの HP は尽きない。衛士は膝をつく
+    // 7-10: 誓いの剣に4回当てると折れる。最後の一撃はトウマだけ。ガレスの HP は尽きない。衛士は膝をつく
     expect(hillBattle.objectives?.victory[0]).toMatchObject({ kind: 'hitUnit', unitId: 'hill-gareth', times: 4, finisherId: 'touma' });
     expect(hillBattle.tiers[0]!.units.find((u) => u.id === 'hill-gareth')?.minHp).toBe(1);
     expect(hillBattle.tiers[0]!.units.filter((u) => u.id.startsWith('hill-sentry') && u.noRetire)).toHaveLength(2);
-    // 7-10: 剣に当たるたびに鐘のような音。歌は戦闘中も遠くで続く
+    // 7-11: 剣に当たるたびに鐘のような音。歌は戦闘中も遠くで続く
     const bells = (hillBattle.events ?? []).filter((e) => e.trigger.kind === 'tally');
     expect(bells).toHaveLength(3);
     expect(hillBattle.ambient).toMatchObject({ melody: '月を呼ぶ節' });
-    // 7-11: 3回目が当たった後、案内「最後の一撃は、トウマで」
+    // 7-12: 3回目が当たった後、案内「最後の一撃は、トウマで」
     expect(hillBattle.tutorial?.[0]).toMatchObject({ id: 'hill-finisher', tally: { id: 'oath-sword', atLeast: 3 } });
   });
 });
 
 describe('場面を選ぶ（確認用の機能）の番号と、序章のすべての場面からの始まり', () => {
-  /** 脚本の場面の見出し（## 場面4（全角の空白）家・夕食と工房の夜）→ 番号と名前 */
+  /** 脚本の場面の見出し（## 場面4（全角の空白）家・夕食とユナの部屋の夜）→ 番号と名前 */
   const headings = [...gameScript.matchAll(/^## 場面(\d+)\s+(.+)$/gm)].map((m) => ({ n: Number(m[1]), name: m[2]!.replace(/（.*）$/, '').trim() }));
   const scenes = mainBook.chapters[0]!.scenes;
 
