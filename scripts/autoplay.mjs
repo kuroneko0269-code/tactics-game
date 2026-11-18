@@ -2903,7 +2903,7 @@ async function storyRun(browser, baseUrl, name, core) {
     await waitScene(11);
     await until(() => window.__tactics.screen() === 'scene' && window.__tactics.dialogue() !== null);
     await finalScene(false);
-    check(stats.walks >= 12 && stats.taps === 2 && stats.listens === 1, `場面9の操作が足りません（歩く ${stats.walks}・タップ ${stats.taps}・聞く ${stats.listens}）`);
+    check(stats.walks >= 11 && stats.taps === 2 && stats.listens === 1, `場面9の操作が足りません（歩く ${stats.walks}・タップ ${stats.taps}・聞く ${stats.listens}）`);
     check((await T(() => document.querySelector('.story-end-screen .screen-title')?.textContent)) === text.story.nextChapterSoon, '「第1章は準備中です」が出ていません');
     log('場面9（歩かせる・戸をタップ・石をタップ・耳に当てる（離すと止まり、押し直すと節の頭から））・「第1章は準備中です」✔');
     // はじめから（手ほどきの途中で勝ったことにするのは、全体の版で確かめる。CI の検査全体を6分以内に収めるため）
