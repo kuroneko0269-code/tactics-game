@@ -78,7 +78,8 @@ export function screenTextOf(script: Script, labels: ControlLabels, light?: Ligh
   /** 操作の場面の文字の案内を出すか（@文字の案内 なし で出さない） */
   let controlText = true;
   const push = (t: ScreenText) => {
-    if (light && stage !== undefined && t.kind !== '脚本') {
+    // 脚本の行の印と、場所を移す行では、光を出さない（場所を移した直後は暗転の中で、続く @時刻 で光が決まるため）
+    if (light && stage !== undefined && t.kind !== '脚本' && t.kind !== '場所') {
       const now = setTime ?? light.timeOf(stage) ?? light.defaultTime;
       if (now !== lastLight) {
         lastLight = now;
