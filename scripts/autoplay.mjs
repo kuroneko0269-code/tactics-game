@@ -2972,7 +2972,8 @@ async function storyRun(browser, baseUrl, name, core) {
   await settle();
   await press(text.dialogue.fast);
   await drive();
-  check(stats.voices > 0, '番兵の叫び（言葉にしない声）の印が出ていません');
+  // 短い印は、画面を見る間隔によっては見逃すので、これまでの記録（開発用）でも確かめる
+  check(stats.voices > 0 || (await T(() => window.__tactics.history())).voices > 0, '番兵の叫び（言葉にしない声）の印が出ていません');
   log('冒頭（札・肩書き・母の「だれ？」・暗転）・章の題・堰の会話（暗転の上の前提の字幕・札・ルビ・声の印・読み返し・早送り）・会話の途中での読み込み直しと「これまで」✔');
   // 場面1の戦闘。手ほどきを手で進め、キリを崖の上へ動かして測り棒の札（署名「ユナ」）を確かめる。退場しない番兵・名札の役目
   await waitScene(2);
@@ -3488,7 +3489,16 @@ async function checkLayouts(browser, baseUrl, name, core) {
   // 勝った後の台本（戦闘のマップの上。台詞はなく、音と動きと遠景のカット）
   await page.evaluate(() => window.__tactics.finishBattle('player'));
   await until(() => window.__tactics.dialogue() !== null);
+  // キリが崖の上に立たないまま勝ったので、勝った直後に測り棒の札（物の文字）が出る。読んでタップで進める
+  await until(() => window.__tactics.dialogue()?.waiting === 'line' || window.__tactics.story().main?.scene === 3, undefined, 60000);
   await inspect('after-victory');
+  for (let guard = 0; guard < 400 && (await page.evaluate(() => window.__tactics.story().main?.scene)) !== 3; guard++) {
+    const d = await page.evaluate(() => window.__tactics.dialogue());
+    if (d?.waiting === 'line') {
+      await page.locator(d.inscription ? '.dialogue-inscription' : d.caption ? '.dialogue-caption' : '.dialogue-body').click();
+      await until((i) => window.__tactics.dialogue()?.index !== i, d.index);
+    } else await page.waitForTimeout(100);
+  }
   // 塔の会話（台詞）と、「これまで」（読み込み直して続きから）
   await until(() => window.__tactics.story().main?.scene === 3 && window.__tactics.dialogue() !== null, undefined, 120000);
   await lineReady();
