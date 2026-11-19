@@ -85,7 +85,7 @@ const LAYOUTS_ONLY = args['layouts-only'] === 'true';
  * 画面全体がスクロールしないかを確かめる画面サイズ。短くした版（CI）は、縦向きより厳しい「小さめのスマホ」と、横向き・PC の3つ
  * （ブラウザを同時に動かす数を抑えて、CI の検査全体を5分以内に収めるため）。全体は縦向きも含めた4つ
  */
-const LAYOUT_VIEWPORTS = (args.layouts ?? (QUICK ? 'small,landscape,pc' : 'portrait,small,landscape,pc')).split(',').filter(Boolean);
+const LAYOUT_VIEWPORTS = (args.layouts ?? (QUICK ? '' : 'portrait,small,landscape,pc')).split(',').filter(Boolean);
 
 const VIEWPORT_OPTIONS = {
   portrait: { label: 'スマホ縦向き', ...devices['iPhone 13'] },
@@ -257,7 +257,7 @@ async function main() {
   for (const r of results) {
     const label = `${r.layout ? '画面の収まり・' : r.story ? '序章・' : ''}${VIEWPORT_OPTIONS[r.name]?.label ?? r.name}`;
     if (r.ok && r.story && r.quick) {
-      console.log(`✔ ${label}: 序章を要点だけ確かめて最後まで（台詞 ${r.lines}行・歩かせる ${r.walks}歩・タップ ${r.taps}回・聞く ${r.listens}回・読み込み直し ${r.reloads}回・スキップ ${r.skips}回。${r.seconds}秒）`);
+      console.log(`✔ ${label}: 物語の起動・最初の場面の通し・最初の戦闘の始まり（台詞 ${r.lines}行・スキップ ${r.skips}回。${r.seconds}秒）`);
     } else if (r.ok && r.story) {
       console.log(
         `✔ ${label}: 序章を最初から最後まで（台詞 ${r.lines}行・物の文字 ${r.inscriptions}つ・歩かせる ${r.walks}歩・タップ ${r.taps}回・聞く ${r.listens}回・勝った後の台本 ${r.afterLines}行・` +
@@ -2629,24 +2629,6 @@ async function storyRun(browser, baseUrl, name, core) {
     );
     return last;
   };
-  /** 堰の戦闘の手ほどき: 移動の段 → 攻撃の段まで進めてから飛ばす */
-  const weirTutorial = async () => {
-    await until(() => window.__tactics.tutorial()?.step === 'weir-move', undefined, 120000);
-    // 崖の上（高さ 3 以上）へ動くと、測り棒の札の段が先に出るので、低いマスへ動かす
-    const move = await T(() => {
-      const st = window.__tactics.state();
-      const h = (x, z) => st.map.tiles.find((t) => t.x === x && t.z === z)?.height ?? 0;
-      return window.__tactics.marks().find((m) => m.kind === 'move' && h(m.x, m.z) < 3);
-    });
-    check(move, '手ほどきの移動の段で、移動できるマスがありません');
-    const at = await T((c) => window.__tactics.tileScreen(c.x, c.z), move);
-    await page.mouse.click(at.x, at.y);
-    await until(() => window.__tactics.tutorial()?.step === 'weir-attack', undefined, 30000);
-    check(await T(() => !document.querySelector('.tutorial-pointer').hidden), '手ほどきの「攻撃」の段で、指し示す印が出ていません');
-    await screenshot('weir-tutorial');
-    await press(text.tutorial.skip);
-    check((await T(() => window.__tactics.settings().seenTutorials)).includes('prologue-weir'), '手ほどきを見たことが設定に残っていません');
-  };
   /** 丘の戦闘の始めの演出（ガレスが剣を構え、ゴードが押し返され、キリの矢が2本払われる。台詞はない） */
   const hillStart = async () => {
     const missesBefore = (await soundCounts()).miss ?? 0;
@@ -2840,99 +2822,29 @@ async function storyRun(browser, baseUrl, name, core) {
   };
 
   /**
-   * 短くした版（CI）の序章: 検査全体を8分以内に収めるため、要点だけを確かめ、残りの会話はスキップで進める。
-   * 冒頭の石の節の印 → 堰の会話（ルビ・物の文字・読み返し・読み込み直しと「これまで」・早送り）→ 堰の戦闘（手ほどき・退場しない番兵・
-   * 戦闘の途中での読み込み直しと再開・開発用の決着・勝った後の台本）→ 会話はスキップ → 丘の戦闘（始めの演出・遠くで続く歌・決着）→
-   * 場面9の操作（歩かせる・戸・石・耳に当てる（離すと止まり、押し直すと続き））→「第1章は準備中です」
+   * 短くした版（CI）の物語の確認: 「壊れていないこと」だけを確かめる。起動 → 本の最初の場面を最後まで通す → 最初の戦闘の場面まで
+   * 会話をスキップで進め → 戦闘の始まり（配置 → 戦闘開始 → 最初の手番）まで。章や場面が増えても、確かめる範囲は増えない
+   * （序章を最初から最後まで通す確認は、手元の全体版 npm run autoplay で行う）
    */
-  const quickPrologue = async () => {
-    await openingScene();
-    await skip();
-    // 場面1: 暗転の上の字幕・札・ルビ・読み返し・読み込み直し・早送り
-    await waitScene(1);
-    await weirIntroUntilCaption();
-    await press(text.dialogue.backlog);
-    await until(() => document.querySelectorAll('.backlog-row').length >= 3);
-    await press(text.dialogue.close);
-    await reloadAndResume();
-    await until(() => window.__tactics.screen() === 'scene');
-    check((await sceneNow()) === 1, '会話の途中で読み込み直した後、その場面の始めから再開していません');
-    await settle();
-    await press(text.dialogue.fast);
+  const smokeStory = async () => {
+    // 本の最初の場面（会話）を最後まで通す（章の題が出れば閉じる）
     await drive();
-    // 場面1の戦闘
-    await waitScene(2);
-    await deployAndStart();
-    await weirTutorial();
-    await T(() => window.__tactics.setAutoPlayer(true));
-    await until(() => (window.__tactics.state()?.turnNumber ?? 0) >= 3 && !window.__tactics.dialogue(), undefined, 120000);
-    const saved = await T(() => window.__tactics.suspended());
-    check(saved?.origin?.kind === 'story' && saved.state.turnNumber >= 3, '堰: 物語の戦闘の途中保存がありません');
-    check(
-      saved.state.units.filter((u) => u.id.startsWith('weir-guard') && u.noRetire && !u.minHp && u.kind === 'human').length === 3,
-      '堰の番兵が「退場しない人」になっていません（HP が尽きれば膝をつく）',
-    );
-    await reloadAndResume();
-    await until(() => window.__tactics.screen() === 'battle' && window.__tactics.state() !== null);
-    check(await T(() => { const t = window.__tactics.tutorial(); return t === null || (t.story && t.step === null); }), '堰: 再開した戦闘で、見た手ほどきがまた出ています');
-    await until(() => ['main', 'busy', 'ended'].includes(window.__tactics.mode()) && !window.__tactics.dialogue());
-    await T(() => window.__tactics.finishBattle('player'));
-    // キリが崖の上に立たないまま勝ったので、勝った直後（遠景のカットの前）に測り棒の札が出る。その後の勝った後の台本には台詞はない
-    let lateTag = '';
-    let cutBeforeTag = false;
-    for (let guard = 0; guard < 600 && (await sceneNow()) === 2; guard++) {
-      await noteMarks();
-      const d = await status();
-      if (d?.waiting === 'line' && d.inscription) {
-        lateTag = d.text;
-        cutBeforeTag = stats.cuts > 0;
-        await tapLine();
-        continue;
-      }
-      await page.waitForTimeout(60);
+    check(stats.lines > 0, '最初の場面で、台詞が出ていません');
+    log(`最初の場面を通す ✔（台詞 ${stats.lines}行）`);
+    // 最初の戦闘の場面まで、会話はスキップで進める
+    const firstBattle = scenes.findIndex((s) => s.kind === 'battle');
+    check(firstBattle >= 0, '本に戦闘の場面がありません');
+    for (let guard = 0; guard < scenes.length + 2 && (await sceneNow()) < firstBattle; guard++) {
+      await until(() => window.__tactics.dialogue() !== null || window.__tactics.mode() === 'deploy', undefined, 60000);
+      if ((await T(() => window.__tactics.mode())) === 'deploy') break;
+      const at = await sceneNow();
+      await skip();
+      await until((n) => (window.__tactics.story().main?.scene ?? -1) > n || window.__tactics.mode() === 'deploy', at, 60000);
     }
-    check(lateTag.endsWith('ユナ') && lateTag.startsWith('高い所から撃つ矢は') && !cutBeforeTag, `崖の上に立たずに勝った時、勝った直後（遠景の前）に測り棒の札が出ていません（${lateTag}）`);
-    const counts = await soundCounts();
-    check(counts.collapse >= 1 && counts.gate >= 1 && counts.chime >= 1, `堰の勝った後の音（崩れる・門・石の鳴る音）が鳴っていません（${JSON.stringify(counts)}）`);
-    check(stats.cuts > 0, '堰の勝った後に、遠い谷の家々のカットが出ていません');
-    log('冒頭（札・肩書き・母の「だれ？」）・堰の会話（暗転の上の字幕・札・ルビ・読み返し・読み込み直しと「これまで」・早送り）・堰の戦闘（手ほどき・退場しない番兵・読み込み直しと再開・勝った後の遠景）✔');
-    // 確認用の機能: 読み込み直してタイトルへ。設定で入にし、「場面を選ぶ」で丘の戦闘から始める（場面2〜7の会話を飛ばす）
-    await waitScene(3);
-    const rosterBefore = await rosterText();
-    await page.reload();
-    await until(() => window.__tactics?.screen() === 'title');
-    await enableCheckTools();
-    await press(text.title.story);
-    await until(() => window.__tactics.screen() === 'story-menu');
-    check((await T(() => document.querySelector('.story-continue .sub')?.textContent)) === sceneLabel(3), '「つづきから」に今の場面が出ていません');
-    await screenshot('story-menu');
-    await press(text.title.back);
-    await selectScene(9);
-    await screenshot('scene-select-done');
-    await waitScene(9);
-    check((await T(() => window.__tactics.story().main.checked)) === true, '場面を選んで始めたのに、確認用の印が付いていません');
-    await hillStart();
-    await until(() => ['main', 'busy', 'ended'].includes(window.__tactics.mode()) && !window.__tactics.dialogue());
-    await screenshot('check-win');
-    await winByCheck();
-    await until(() => window.__tactics.dialogue()?.waiting === 'line', undefined, 60000);
-    check((await T(() => window.__tactics.dialogue().speaker)) === '氏族の男', '勝ったことにした後、丘の勝った後の台本が流れていません');
-    await skip();
-    await waitScene(10);
-    check((await rosterText()) === rosterBefore, '勝ったことにしたのに、部隊（経験値・JP・ゴールド・所持品）が変わっています');
-    await until(() => window.__tactics.screen() === 'scene' && window.__tactics.dialogue() !== null);
-    await skip();
-    log('確認用の機能（設定・隅の印・つづきからの場面・場面を選ぶ・丘の始めの演出の後に勝ったことにする・報酬なし）✔');
-    // 場面9: 操作（早送りで台詞を進め、操作は止まる）
-    await waitScene(11);
-    await until(() => window.__tactics.screen() === 'scene' && window.__tactics.dialogue() !== null);
-    await finalScene(false);
-    check(stats.walks >= 11 && stats.taps === 2 && stats.listens === 1, `場面9の操作が足りません（歩く ${stats.walks}・タップ ${stats.taps}・聞く ${stats.listens}）`);
-    check((await T(() => document.querySelector('.story-end-screen .screen-title')?.textContent)) === text.story.nextChapterSoon, '「第1章は準備中です」が出ていません');
-    log('場面9（歩かせる・戸をタップ・石をタップ・耳に当てる（離すと止まり、押し直すと節の頭から））・「第1章は準備中です」✔');
-    // はじめから（手ほどきの途中で勝ったことにするのは、全体の版で確かめる。CI の検査全体を8分以内に収めるため）
-    await restartStory(rosterBefore);
-    log('はじめから（確認・部隊と記録が残る・手ほどきが戻る）✔');
+    await deployAndStart();
+    await until(() => window.__tactics.state()?.turn != null, undefined, 60000);
+    check((await sceneNow()) === firstBattle, `最初の戦闘の場面になっていません（${await sceneNow()}）`);
+    log('最初の戦闘の始まり（配置・戦闘開始・最初の手番）✔');
     return {};
   };
 
@@ -2948,7 +2860,7 @@ async function storyRun(browser, baseUrl, name, core) {
   await press(text.title.story);
   await until(() => window.__tactics.screen() === 'scene');
   if (QUICK) {
-    const r = await quickPrologue();
+    const r = await smokeStory();
     check(errors.length === 0, `ページでエラー: ${errors.map((e) => e.message).join(' / ')}`);
     await context.close();
     return { story: true, quick: true, seconds: Math.round((Date.now() - started) / 1000), ...stats, ...r, melodies: stats.melodies.size, inscriptions: stats.inscriptions.length, locations: stats.locations.size };

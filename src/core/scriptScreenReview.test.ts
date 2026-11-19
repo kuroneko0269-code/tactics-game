@@ -68,3 +68,20 @@ describe('白の中へ落ちる退場（@退場 名前 落ちる）', () => {
     expect(out.map((x) => x.text)).toContain('ガレスが光にさらわれ、白く光りながら足もとの下へ落ちて消える');
   });
 });
+
+describe('書き出しの言い回し（物を消す・片付ける）', () => {
+  it('「椀*」は「椀をすべて消す」、「*」は「物をすべて消す」、1つなら「石を消す」。人物がいれば「片付ける」', () => {
+    const out = screenTextOf(
+      parseScriptOrThrow('t', '@置く 椀1 椀 1,1\n@置く 石1 石 2,2\n@消す 椀*\n@消す 石1\n@消す *\n@片付ける 椀* 母', catalog),
+      labels,
+      undefined,
+      { all: true },
+    );
+    const texts = out.filter((x) => x.kind === '物').map((x) => x.text);
+    expect(texts).toContain('椀をすべて消す');
+    expect(texts).toContain('石1を消す');
+    expect(texts).toContain('物をすべて消す');
+    expect(texts).toContain('母が椀をすべて片付ける');
+    expect(texts.some((t) => t.includes('をすべてを'))).toBe(false);
+  });
+});
