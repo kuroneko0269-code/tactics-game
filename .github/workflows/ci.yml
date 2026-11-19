@@ -35,7 +35,7 @@ jobs:
       - name: 自動プレイ用のブラウザ（Chromium）を用意
         run: npx playwright install --with-deps --only-shell chromium
       # CI では短くした自動プレイ（npm run autoplay:ci）。1戦を最後まで戦う全体の自動プレイは、手元で npm run autoplay
-      - name: 自動プレイ（短くした版。スマホ縦向き・横向きの操作と、3つの画面サイズでの画面の収まり）
+      - name: 自動プレイ（短くした版。壊れていないことの確認。スマホ縦向き・横向きの操作と、物語の起動・最初の場面・最初の戦闘の始まり）
         run: npm run autoplay:ci
       - name: 自動プレイが失敗した時の画面写真を保存
         if: failure()

@@ -200,7 +200,12 @@ export function screenTextOf(script: Script, labels: ControlLabels, light?: Ligh
         extra('物', `${pre}${d.prop}（${d.name}）を${d.x},${d.z}に置く`);
         return;
       case 'propRemove':
-        extra('物', `${pre}${d.actor ? `${d.actor}が` : ''}${d.name.endsWith('*') ? `${d.name.slice(0, -1)}をすべて` : d.name}${d.actor ? 'を片付ける' : 'を消す'}`);
+        {
+          // 「椀*」は「椀をすべて消す」、「*」だけは「物をすべて消す」（「をすべてを消す」と重ならないように）
+          const all = d.name.endsWith('*');
+          const what = all ? `${d.name.slice(0, -1) || '物'}をすべて` : `${d.name}を`;
+          extra('物', `${pre}${d.actor ? `${d.actor}が` : ''}${what}${d.actor ? '片付ける' : '消す'}`);
+        }
         return;
       case 'propChange':
         extra('物', `${pre}${d.name}を「${d.prop}」に変える`);
