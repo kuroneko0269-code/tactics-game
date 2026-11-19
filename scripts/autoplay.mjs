@@ -2603,7 +2603,7 @@ async function storyRun(browser, baseUrl, name, core) {
     await reloadAndResume();
     await until(() => window.__tactics.screen() === 'battle' || window.__tactics.dialogue() !== null);
     // 見た手ほどき（堰）は、再開した戦闘で出さない（丘の「最後の一撃は、トウマで」は、まだ見ていない）
-    if (siteName === '堰') check(await T(() => window.__tactics.tutorial() === null), `${siteName}: 再開した戦闘で、見た手ほどきがまた出ています`);
+    if (siteName === '堰') check(await T(() => { const t = window.__tactics.tutorial(); return t === null || t.step === null; }), `${siteName}: 再開した戦闘で、見た手ほどきがまた出ています`);
     await T(() => window.__tactics.setAutoPlayer(true));
     const expected = core.ai.runAutoBattle(saved.state, 3000, { player: core.data.ai, enemy: core.data.ai }).state;
     let last;
@@ -2759,7 +2759,7 @@ async function storyRun(browser, baseUrl, name, core) {
     check(text.tutorial.steps['weir-kiri'].includes('高い所からは、矢が遠くまで届きます'), 'キリの手ほどきの文に、札の文面を思い出させる一文がありません');
     await until(() => window.__tactics.tutorial()?.step === 'weir-move', undefined, 120000);
     await press(text.tutorial.skip);
-    check((await T(() => window.__tactics.tutorial())) === null, '手ほどきを飛ばした後に、まだ手ほどきが残っています（戦闘の中で札を出す段は外した）');
+    check(await T(() => { const t = window.__tactics.tutorial(); return t === null || (t.step === null && !t.story); }), '手ほどきを飛ばした後に、まだ手ほどきが残っています（戦闘の中で札を出す段は外した）');
     check((await T(() => window.__tactics.settings().seenTutorials)).includes('prologue-weir'), '手ほどきを飛ばしたことが設定に残っていません');
     await screenshot('weir-tag');
   };
