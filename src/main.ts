@@ -187,7 +187,7 @@ function main(): void {
   );
   const soundMark = createSoundMark(document.getElementById('app') ?? document.body);
   /** 開発中だけ: これまでに鳴らした旋律・見せた場所・言葉にしない声の数（自動プレイが、短い印を見逃さずに確かめるため） */
-  const devHistory = { melodies: new Set<string>(), stages: new Set<string>(), voices: 0, overlays: 0, placards: [] as string[], nameTags: [] as string[] };
+  const devHistory = { melodies: new Set<string>(), stages: new Set<string>(), voices: 0, overlays: 0, placards: [] as string[], nameTags: [] as string[], objectLabels: [] as string[] };
   sound.onMelodyChange(() => {
     const m = sound.melody();
     if (m) devHistory.melodies.add(`${m.melody}/${m.timbre}`);
@@ -250,7 +250,14 @@ function main(): void {
   // マップの見た目は戦場の定義から作る（拠点や編成の画面でも、最後に出したマップを背景に出す）
   const rigOptions = (view: MapView, def: MapDefinition) => {
     const m = createMap(def);
-    return { target: view.center, radius: view.radius, heightRange: view.heightRange, halfExtent: { x: m.width / 2, z: m.depth / 2 } };
+    // マップの外のカメラを向けてよいマス（下流の村など）まで、カメラを動かせる範囲を広げる
+    const lookouts = [...storySites, ...stages].filter((s) => s.map.id === def.id).flatMap((s) => s.lookouts ?? []);
+    const half = { x: m.width / 2, z: m.depth / 2 };
+    for (const p of lookouts) {
+      half.x = Math.max(half.x, Math.abs(p.x - (m.width - 1) / 2) + 0.5);
+      half.z = Math.max(half.z, Math.abs(p.z - (m.depth - 1) / 2) + 0.5);
+    }
+    return { target: view.center, radius: view.radius, heightRange: view.heightRange, halfExtent: half };
   };
   let mapView = createMapView(createMap(site.map));
   let mapId = site.map.id;
@@ -994,7 +1001,7 @@ function main(): void {
         return { body: look.body, accent: look.accent };
       },
       overlay: showOverlay,
-      onNotice: (kind, t) => (kind === 'placard' ? devHistory.placards : devHistory.nameTags).push(t),
+      onNotice: (kind, t) => (kind === 'placard' ? devHistory.placards : kind === 'nameTag' ? devHistory.nameTags : devHistory.objectLabels).push(t),
       ...(import.meta.env.DEV ? { autoAdvance: () => devAutoDialogue } : {}),
     });
     dialogueRun = run;
@@ -1134,7 +1141,21 @@ function main(): void {
       if (c) void rig.focusOn([mapView.tileTop(c.x, c.z), mapView.tileTop(c.x, c.z).add(new THREE.Vector3(0, 1, 0))]);
       return c;
     },
+    screenOf: (name) => worldToScreen(tileOfName(name) ?? view.propTop(name) ?? view.actorHead(name)),
     };
+  };
+  /** 「x,z」と書いた名前なら、そのマスの上面の少し上（物の名前の札を、マップのマスに出す。堰など） */
+  const tileOfName = (name: string) => {
+    const m = /^(-?\d+),(-?\d+)$/.exec(name);
+    return m ? mapView.tileTop(Number(m[1]), Number(m[2])).add(new THREE.Vector3(0, 0.5, 0)) : undefined;
+  };
+  /** 3D の位置を、画面の座標にする（物の名前の札を出す所。カメラの後ろなら undefined） */
+  const worldToScreen = (world: THREE.Vector3 | undefined) => {
+    if (!world) return undefined;
+    const p = world.clone().project(rig.camera);
+    if (p.z > 1) return undefined;
+    const rect = stage.renderer.domElement.getBoundingClientRect();
+    return { x: rect.left + ((p.x + 1) / 2) * rect.width, y: rect.top + ((1 - p.y) / 2) * rect.height };
   };
 
   /**
@@ -1150,6 +1171,10 @@ function main(): void {
   };
   const battlePort: StagePort = {
     sync: () => {},
+    screenOf: (name) => {
+      const id = battleActorId(name);
+      return worldToScreen(tileOfName(name) ?? (id ? battle?.view.actorHead(id) : battle?.view.propPoint(name)));
+    },
     highlight: (speaker) => {
       const id = speaker ? battleActorId(speaker) : undefined;
       const view = battle?.view;
@@ -1190,7 +1215,7 @@ function main(): void {
         }
         case 'exit': {
           const id = battleActorId(d.actor);
-          if (id) await view.vanish(id);
+          if (id) await view.vanish(id, d.fall === true);
           return;
         }
         // 攻撃の動きと押し返し（序章の丘の始めの演出。見た目だけで、戦闘の状態は変えない）
@@ -1236,6 +1261,8 @@ function main(): void {
           return view.putProp(d.name, PROP_KINDS[d.prop] ?? 'box', d);
         case 'propRemove':
           return view.removeProp(d.name);
+        case 'propChange':
+          return view.changeProp(d.name, PROP_KINDS[d.prop] ?? 'box');
         case 'carry':
         case 'release': {
           const id = battleActorId(d.actor);
@@ -1437,6 +1464,8 @@ function main(): void {
     }
     const scene = now.scene;
     if (scene.kind === 'dialogue' || scene.kind === 'interactive') {
+      // 暗転の上の字幕から始まる場面は、舞台を見せる前から暗くしておく（人物が並んだ画を、字幕の前に一瞬見せないため）
+      if (startsDark(scriptOf(scene.scriptId))) void setDark(true, 0);
       const { view, initial } = openScene(scene.stageId);
       const token = sceneToken;
       void playScript(scene.scriptId, scenePort(view), initial).then(() => {
@@ -1510,6 +1539,15 @@ function main(): void {
     };
     return { view, initial };
   }
+
+  /** 台本が、最初の台詞より前に、すぐの暗転（@暗転 0）をするか */
+  const startsDark = (s: Script) => {
+    for (const st of s.steps) {
+      if (st.kind === 'line') return false;
+      if (st.directive.kind === 'fadeOut' && st.directive.ms === 0) return true;
+    }
+    return false;
+  };
 
   /** 今の場面を終えた: 進み具合を進めて保存し、次の場面へ */
   const completeScene = (bookId: string) => {
@@ -1705,7 +1743,7 @@ function main(): void {
       time: () => currentTime.name,
       /** 押す場所の上の揺れる目印が出ているか（会話の場面） */
       beacon: () => sceneView?.beaconVisible() ?? false,
-      history: () => ({ melodies: [...devHistory.melodies], stages: [...devHistory.stages], voices: devHistory.voices, overlays: devHistory.overlays, placards: [...devHistory.placards], nameTags: [...devHistory.nameTags] }),
+      history: () => ({ melodies: [...devHistory.melodies], stages: [...devHistory.stages], voices: devHistory.voices, overlays: devHistory.overlays, placards: [...devHistory.placards], nameTags: [...devHistory.nameTags], objectLabels: [...devHistory.objectLabels] }),
       /** 暗転しているか */
       dark: () => fadeEl.classList.contains('dark'),
       /** 話者の印が見えているか・顔の枠に写している人物（会話の見せ方） */

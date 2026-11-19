@@ -32,6 +32,8 @@ export interface StageDefinition {
   readonly time?: string;
   /** 遠景のカット（@遠景）で、カメラを向けるマスと寄り（省くとマップの中央を中くらいに） */
   readonly view?: { readonly x: number; readonly z: number; readonly zoom: 'far' | 'mid' | 'near' };
+  /** マップの外で、台本のカメラを向けてよいマス（堰の下流の村など）。カメラを動かせる範囲が、ここまで広がる */
+  readonly lookouts?: readonly { readonly x: number; readonly z: number }[];
 }
 
 /** 室内（仮）: 5×5 の床と、奥の壁（高さ 4） */
@@ -61,6 +63,8 @@ export const yardStage: StageDefinition = {
  */
 export const homeStage: StageDefinition = {
   id: 'stage-home',
+  // 室内: 家のまわりは暗い（家が空に浮いて見えないように）
+  sky: 0x2e2420,
   map: stageMap('stage-home', [
     '4s 4s 4s 4s 4s 4s 4s 4s',
     '0b 0b 0b 0b 0b 2s 0b 0b',
@@ -83,6 +87,8 @@ export const homeStage: StageDefinition = {
 export const towerStage: StageDefinition = {
   id: 'stage-tower',
   time: '昼',
+  // 室内: 部屋のまわりは空ではなく、暗い塔の中（部屋が空に浮いて見えないように）
+  sky: 0x24222a,
   map: stageMap('stage-tower', [
     '5s 5s 5s 5s 5s 5s 5s 5s 5s',
     '0s 0s 0s 0s 0s 0s 0s 0s 0s',
@@ -105,6 +111,7 @@ export const towerStage: StageDefinition = {
 export const hearingStage: StageDefinition = {
   id: 'stage-hearing',
   time: '昼',
+  sky: 0x24222a,
   map: stageMap('stage-hearing', ['4s 4s 4s 4s 4s', '0b 0b 0b 0b 0b', '0b 0b 0b 0b 0b', '0b 0b 0b 0b 0b', '0b 0b 0b 0b 0b']),
   props: [
     { id: '机', kind: '書き物机', x: 2, z: 2 },
@@ -151,11 +158,10 @@ export const weirStage: StageDefinition = {
   props: [
     { id: '積み石1', kind: '積み石', x: 1, z: 3 },
     { id: '積み石2', kind: '積み石', x: 7, z: 4 },
-    // 下流の遠くに、村の屋根が三つ（百年後に沈む村。マップの外の手前）
-    { id: '村1', kind: '遠くの家', x: 2, z: 11 },
-    { id: '村2', kind: '遠くの家', x: 4, z: 12 },
-    { id: '村3', kind: '遠くの家', x: 6, z: 11 },
+    // マップの外の土地と、下流の三つの村（百年後に沈む村。堰から川筋をたどった先）。戦闘と同じ置き物
+    ...(weirBattle.decor ?? []).map((d) => ({ id: d.id, kind: d.kind, x: d.x, z: d.z })),
   ],
+  ...(weirBattle.lookouts ? { lookouts: weirBattle.lookouts } : {}),
 };
 
 /**
@@ -181,8 +187,11 @@ export const farValleyStage: StageDefinition = {
     { id: '家々3', kind: '遠い谷の家々', x: 5, z: 2 },
     { id: '木1', kind: '木', x: 0, z: 1 },
     { id: '木2', kind: '木', x: 6, z: 1 },
+    // 地面と奥の山並み（谷が浮いて見えないように。下流の村々とは別の、山あいの谷）
+    { id: 'まわり', kind: '遠い谷のまわり', x: 3, z: 4 },
   ],
-  view: { x: 3, z: 2, zoom: 'mid' },
+  // 引きの画（奥の山並みまで入れて、山あいの遠い谷だと分かるように）
+  view: { x: 3, z: 1, zoom: 'far' },
   time: '昼',
 };
 

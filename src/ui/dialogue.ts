@@ -29,6 +29,8 @@ export interface StagePort {
   highlight?(speaker: string | null): void;
   /** 物をタップする操作: その物を光らせる（null で消す）。物のあるマス */
   setTapTarget?(name: string | null): Coord | undefined;
+  /** 物か人物の、今の画面座標（物の名前の札を出す所）。見えなければ undefined */
+  screenOf?(name: string): { readonly x: number; readonly y: number } | undefined;
 }
 
 /** 顔の枠（話者の人形を別のカメラで写した canvas と、写す人物の切り替え） */
@@ -58,7 +60,7 @@ export interface DialogueDeps {
   /** 短い画を重ねる（@重ねる。回想の台本を ms の間だけ、今の場面の上に重ねる）。省くと待つだけ */
   readonly overlay?: (scriptId: string, ms: number, fast: boolean) => Promise<void>;
   /** 札・名札を出した時に知らせる（自動テストの記録用） */
-  readonly onNotice?: (kind: 'placard' | 'nameTag', text: string) => void;
+  readonly onNotice?: (kind: 'placard' | 'nameTag' | 'objectLabel', text: string) => void;
 }
 
 /** 会話から使う音の口 */
@@ -113,10 +115,14 @@ export interface DialogueStatus {
   readonly nameTag: string;
   /** 短い画を重ねているか */
   readonly overlay: boolean;
+  /** 出している物の名前の札（出していなければ空） */
+  readonly objectLabel: string;
   /** 耳に当てて聞く操作: 押していた時間の合計・全体の長さ・今押しているか */
   readonly listenMs: number;
   readonly listenTotal: number;
   readonly listening: boolean;
+  /** 今進めている脚本の行の印（@脚本 場面-行。例 1-5。印がまだなければ空）。画面写真を脚本の行と並べるため */
+  readonly cue: string;
 }
 
 export interface DialogueRun {
@@ -239,7 +245,10 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
   const nameTagName = el('span', 'dialogue-nametag-name');
   const nameTagTitle = el('span', 'dialogue-nametag-title');
   nameTag.append(nameTagName, nameTagTitle);
-  root.append(caption, inscription, control, placard, nameTag, box);
+  // 物の名前の札（物の上に、名前だけを短く出す）
+  const objectLabel = el('div', 'dialogue-objlabel');
+  objectLabel.hidden = true;
+  root.append(caption, inscription, control, placard, nameTag, objectLabel, box);
 
   let index = 0;
   let stage: StageState = deps.initial ?? { actors: {}, props: {}, dark: false };
@@ -269,6 +278,9 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
   let overlayOn = false;
   let placardTimer: number | undefined;
   let nameTagTimer: number | undefined;
+  let objectLabelShown = '';
+  let objectLabelTimer: number | undefined;
+  let objectLabelFrame: number | undefined;
   /** 今待っているもの（タップ・操作）を解決する関数 */
   let release: (() => void) | undefined;
   let walkTap: ((c: readonly Coord[]) => void) | undefined;
@@ -691,6 +703,18 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       release = finish;
     });
 
+  const currentCue = () => {
+    for (let i = Math.min(index, script.steps.length - 1); i >= 0; i--) {
+      const st = script.steps[i]!;
+      if (st.kind === 'directive' && st.directive.kind === 'cue') return st.directive.ref;
+      if (st.kind === 'line') {
+        const c = st.directives.find((d) => d.kind === 'cue');
+        if (c && c.kind === 'cue') return c.ref;
+      }
+    }
+    return '';
+  };
+
   const done = (async () => {
     port.sync(stage);
     for (;;) {
@@ -778,6 +802,7 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
     setSpeakerView(null, null);
     window.clearTimeout(placardTimer);
     window.clearTimeout(nameTagTimer);
+    hideObjectLabel();
     waiting = 'none';
     root.innerHTML = '';
     root.hidden = true;
@@ -821,6 +846,35 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       nameTag.hidden = true;
       nameTagShown = '';
     }, fast ? 1500 : 3200);
+  }
+
+  /** 物の名前の札を、物（か、それを持つ人物）の上に出し、ms の後に消す（待たない）。物が動いても追う */
+  function showObjectLabel(target: string, textOf: string, ms: number) {
+    hideObjectLabel();
+    objectLabel.textContent = textOf;
+    objectLabel.hidden = false;
+    objectLabelShown = textOf;
+    deps.onNotice?.('objectLabel', textOf);
+    const follow = () => {
+      const p = port.screenOf?.(target);
+      const rootBox = root.getBoundingClientRect();
+      // 物が画面の外なら、画面の縁に寄せて出す（カメラが物へ向かう途中は、物のある方の縁に見える）
+      if (p) {
+        objectLabel.classList.remove('free');
+        objectLabel.style.left = `${Math.round(Math.min(Math.max(p.x - rootBox.left, 80), rootBox.width - 80))}px`;
+        objectLabel.style.top = `${Math.round(Math.min(Math.max(p.y - rootBox.top, 90), rootBox.height - 230))}px`;
+      } else objectLabel.classList.add('free');
+      objectLabelFrame = window.requestAnimationFrame(follow);
+    };
+    follow();
+    objectLabelTimer = window.setTimeout(hideObjectLabel, fast ? Math.min(ms, 1400) : ms);
+  }
+  function hideObjectLabel() {
+    window.clearTimeout(objectLabelTimer);
+    if (objectLabelFrame !== undefined) window.cancelAnimationFrame(objectLabelFrame);
+    objectLabelFrame = undefined;
+    objectLabel.hidden = true;
+    objectLabelShown = '';
   }
 
   /** 聞き終えるのを待つ（聞く操作を始めた後の、台詞・操作・台本の終わりの前） */
@@ -876,6 +930,7 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       return;
     }
     if (d.kind === 'nameTag') return showNameTag(d.actor, d.title);
+    if (d.kind === 'objectLabel') return showObjectLabel(d.target, d.text, d.ms);
     if (d.kind === 'shot') {
       // 映す: 動く時間を含めて、ちょうど ms の間だけ映す（早送りなら短く）
       const total = fast ? Math.min(d.ms, 300) : d.ms;
@@ -939,6 +994,11 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       });
       return;
     }
+    // 待たないカメラ: 動かしはじめたら次へ進む（字幕を読ませながら、カメラをたどらせる）
+    if (d.kind === 'camera' && d.flow) {
+      void port.run(d, before, fast);
+      return;
+    }
     await port.run(d, before, fast);
   }
 
@@ -964,9 +1024,11 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       placard: placardShown,
       nameTag: nameTagShown,
       overlay: overlayOn,
+      objectLabel: objectLabelShown,
       listenMs: Math.floor(listenNow()),
       listenTotal: listenAll,
       listening,
+      cue: currentCue(),
     }),
     onTap(candidates) {
       walkTap?.(candidates);

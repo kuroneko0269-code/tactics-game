@@ -91,6 +91,18 @@ const captionOf = (r: Row) => {
 };
 const allBlocks = Object.values(SCENE_SCRIPTS).flat().flatMap(blocksOf);
 const lineSteps = (b: Block) => b.steps.flatMap((s) => (s.kind === 'line' ? [s] : []));
+/**
+ * 台詞と字幕は、意味の切れ目で2つ以上の枠に分けてよい（序章の演出の直し。発注者の指示）。言葉は足さず削らない:
+ * 分けた枠をつなぐと、脚本の文になる（分けた所の句点「。」だけは、あってもなくてもよい）
+ */
+const joined = (texts: readonly string[]) => texts.join('').replace(/。/g, '');
+const sameWords = (a: string) => a.replace(/。/g, '');
+
+/**
+ * 物の名前の札（@物の札）に出してよい文。名前だけにする（働きや意味を書くと、序章で伏せる事柄に触れるため）。
+ * 足す時は、物語の作者に確かめてから、ここに足す（一覧は docs/story/prologue-screen-review.md）
+ */
+const OBJECT_LABELS = ['堰', '下流の村', '測り棒', '蜜菓子の包み', '暦盤', '守り袋', '指示書', '隊の道具', '灯', '誓いの剣', '石'];
 
 describe('序章の台本とゲーム脚本の対応', () => {
   it('脚本の表は10場面で、行を読める', () => {
@@ -130,10 +142,13 @@ describe('序章の台本とゲーム脚本の対応', () => {
       const want = speechOf(r);
       const block = allBlocks.find((b) => b.ref === refOf(r))!;
       const lines = lineSteps(block).filter((l) => !l.inscription);
-      expect(lines, refOf(r)).toHaveLength(1);
+      expect(lines.length, refOf(r)).toBeGreaterThanOrEqual(1);
       const line = lines[0]!;
-      expect({ speaker: line.speaker, text: plainText(line.text), title: line.speakerTitle }, refOf(r)).toEqual({ speaker: want.speaker, text: want.text, title: want.title });
-      if (want.voiceOnly) expect(line.portrait, refOf(r)).toBe(false);
+      // 分けた枠は、同じ話者。肩書きは最初の枠だけ
+      for (const l of lines) expect(l.speaker, refOf(r)).toBe(want.speaker);
+      for (const l of lines.slice(1)) expect(l.speakerTitle, refOf(r)).toBeUndefined();
+      expect({ text: joined(lines.map((l) => plainText(l.text))), title: line.speakerTitle }, refOf(r)).toEqual({ text: sameWords(want.text), title: want.title });
+      if (want.voiceOnly) for (const l of lines) expect(l.portrait, refOf(r)).toBe(false);
     }
   });
 
@@ -141,10 +156,10 @@ describe('序章の台本とゲーム脚本の対応', () => {
     for (const r of rows.filter((x) => x.kind === '字幕')) {
       const block = allBlocks.find((b) => b.ref === refOf(r))!;
       const narr = lineSteps(block).filter((l) => l.speaker === null);
-      expect(narr, refOf(r)).toHaveLength(1);
+      expect(narr.length, refOf(r)).toBeGreaterThanOrEqual(1);
       const want = captionOf(r);
-      expect(plainText(narr[0]!.text).replace('\n', ' / '), refOf(r)).toBe(want.text);
-      expect(narr[0]!.overDark === true, refOf(r)).toBe(want.overDark);
+      expect(joined(narr.map((n) => plainText(n.text).replace('\n', ' / '))), refOf(r)).toBe(sameWords(want.text));
+      for (const n of narr) expect(n.overDark === true, refOf(r)).toBe(want.overDark);
     }
   });
 
@@ -240,8 +255,24 @@ describe('序章の台本とゲーム脚本の対応', () => {
       .flat()
       .flatMap((id) => parseScriptOrThrow(id, scriptTexts[id]!, scriptCatalog).steps.flatMap((s) => (s.kind === 'line' && !s.inscription ? [s] : [])));
     expect(all.length).toBe(lines.length);
-    expect(lines.filter((l) => l.speaker !== null).map((l) => `${l.speaker}:${plainText(l.text)}`)).toEqual(want);
-    expect(lines.filter((l) => l.speaker === null).map((l) => plainText(l.text).replace('\n', ' / '))).toEqual(wantNarr);
+    // 分けた枠は、脚本の行ごとにつないで比べる
+    const perRow = (speech: boolean) =>
+      allBlocks.flatMap((b) => {
+        const ls = lineSteps(b).filter((l) => !l.inscription && (l.speaker !== null) === speech);
+        if (ls.length === 0) return [];
+        return [speech ? `${ls[0]!.speaker}:${joined(ls.map((l) => plainText(l.text)))}` : joined(ls.map((l) => plainText(l.text).replace('\n', ' / ')))];
+      });
+    expect(perRow(true)).toEqual(want.map(sameWords));
+    expect(perRow(false)).toEqual(wantNarr.map(sameWords));
+  });
+
+  it('物の名前の札は、決めた名前だけを出す（働きや意味を書かない）', () => {
+    const labels = Object.values(SCENE_SCRIPTS)
+      .flat()
+      .flatMap((id) => parseScriptOrThrow(id, scriptTexts[id]!, scriptCatalog).steps.flatMap(directivesOf))
+      .flatMap((d) => (d.kind === 'objectLabel' ? [d.text] : []));
+    expect(labels.length).toBeGreaterThan(0);
+    for (const t of labels) expect(OBJECT_LABELS, t).toContain(t);
   });
 
   it('「外」の印（ゲームとして足した演出）は、章の題だけで、台詞も語りも持たない（操作の場面は、改訂した脚本の「操作」の行）', () => {

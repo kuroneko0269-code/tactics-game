@@ -3471,7 +3471,8 @@ async function checkLayouts(browser, baseUrl, name, core) {
   await lineReady();
   await inspect('dialogue-narration');
   while (!(await page.evaluate(() => window.__tactics.dialogue().text.includes('堰は')))) await tapLine();
-  check(await page.evaluate(() => window.__tactics.dialogue().placard === '過去　谷の外れの堰'), '場所と時の札が出ていません');
+  // 札は約4秒で消える（堰の字幕の間に、カメラが下流の村まで下りる間に消えることがある）ので、出した記録で確かめる
+  check(await page.evaluate(() => window.__tactics.dialogue().placard === '過去　谷の外れの堰' || window.__tactics.history().placards.includes('過去　谷の外れの堰')), '場所と時の札が出ていません');
   await inspect('placard');
   await press(text.dialogue.backlog);
   await inspect('dialogue-backlog');

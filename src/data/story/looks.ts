@@ -72,8 +72,8 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
   yuna: { body: 0xd8ccb0, accent: 0x8a6a3a, hair: 0x15151a, hairStyle: 'tied', scale: 0.88, width: 0.9, legs: 0x5a4a3a, items: [{ model: 'pouch', slot: 'waist' }] },
   /** テオ: 十七歳、小柄、柔らかい茶髪、時守の濃紺に白い襟 */
   teo: { body: NAVY, accent: 0xf4f1e8, hair: 0x8a6a4a, hairStyle: 'messy', scale: 0.9, width: 0.9, robe: true },
-  /** イェルマ: 背の高い女、銀の長い髪、塔の白と灰 */
-  yelma: { body: 0xe4e4e8, accent: 0x8a8a96, hair: 0xc8c8d8, hairStyle: 'long', scale: 1.1, robe: true, legs: 0xc8c8d0 },
+  /** イェルマ: 背の高い女、銀の長い髪、塔の白と灰（像に見えないよう、帯は濃い青、髪は服より暗い銀。序章の演出の直し） */
+  yelma: { body: 0xd8dce6, accent: 0x5a6a9a, hair: 0x9a9aa8, hairStyle: 'long', scale: 1.1, robe: true, legs: 0x8a90a4 },
   /** ハルド: がっしり、刈り込んだ灰茶の髪、時守の濃紺に銀の留め具 */
   hald: { body: NAVY, accent: 0xc0c8d8, hair: 0x7a6a5a, hairStyle: 'cropped', width: 1.16, scale: 1.04, robe: true },
   /** トウマ（ユナの灯を受け取った後）: 腰に真鍮の灯 */
