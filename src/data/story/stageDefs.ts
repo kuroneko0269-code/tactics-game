@@ -242,13 +242,17 @@ export const PROP_KINDS: Readonly<Record<string, string>> = {
   机の上の包み二つ: 'deskParcels',
   机の上の包み一つ: 'deskParcel',
   水の流れる谷: 'wetChannel',
+  水の来た土地: 'weirLandFlood',
+  灯のともる村1: 'village1Lamps',
+  灯のともる村2: 'village2Lamps',
+  灯のともる村3: 'village3Lamps',
   遠い谷のまわり: 'farValleyLand',
 };
 
 /**
  * マップの外に置いてよい物（遠景）。足もとに地面の板を持つか、地面そのもの（浮いて見えないように。序章の演出の直し）
  */
-export const OUTSIDE_PROP_KINDS: readonly string[] = ['群衆', '遠くの家', '堰のまわりの土地', '下流の村1', '下流の村2', '下流の村3', '涸れた谷', '水の流れる谷', '遠い谷のまわり'];
+export const OUTSIDE_PROP_KINDS: readonly string[] = ['群衆', '遠くの家', '堰のまわりの土地', '下流の村1', '下流の村2', '下流の村3', '涸れた谷', '水の流れる谷', '遠い谷のまわり', '水の来た土地', '灯のともる村1', '灯のともる村2', '灯のともる村3'];
 
 /**
  * 人物の見た目（台本に書く名前 → 見た目の id。見た目は looks.ts）。

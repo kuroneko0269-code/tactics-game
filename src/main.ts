@@ -14,6 +14,7 @@ import {
   type Roster,
 } from './core/progression';
 import { createMap, type MapDefinition } from './core/map';
+import { DIRECTION_VECTORS } from './core/geometry';
 import {
   clearCount,
   clearRewardItems,
@@ -917,6 +918,9 @@ function main(): void {
     sun.position.set(6, 12, 4);
     scene.add(hemi, sun);
     applyLighting(scene, { hemi, sun }, timeLight(tod && tod.kind === 'timeOfDay' ? tod.time : def.time), def.sky);
+    // 一瞬の画なので、夜の画でも手もとが見える明るさにする（暗くてユナの手が見分けられないと言われたため。初見の検査）
+    hemi.intensity *= 1.8;
+    sun.intensity *= 1.5;
     const map = createMapView(createMap(def.map));
     scene.add(map.group);
     const oRig = createCameraRig(rigOptions(map, def.map));
@@ -940,7 +944,7 @@ function main(): void {
     await new Promise((r) => requestAnimationFrame(() => r(undefined)));
     shot.style.transitionDuration = `${fade}ms`;
     tint.style.transitionDuration = `${fade}ms`;
-    shot.style.opacity = '0.38';
+    shot.style.opacity = '0.28';
     tint.style.opacity = '1';
     devHistory.overlays++;
     const started = performance.now();
@@ -1181,6 +1185,8 @@ function main(): void {
    * 台本の人物の名前は、戦場の cast（名前 → id）か、部隊の人物の名前で、ユニットの id に直す。
    * 動きは見せ方だけで、戦闘の状態は変えない（歩く・退場も見た目だけ。戦闘の後の台本で使う）
    */
+  /** 台本の @攻撃 で、だれがだれに打ちかかったか（「トウマの後ろ」の向きを決めるため） */
+  const lastStruck = new Map<string, string>();
   const battleActorId = (name: string): string | undefined => {
     const fromCast = currentSite?.cast?.[name];
     if (fromCast) return fromCast;
@@ -1242,7 +1248,10 @@ function main(): void {
         case 'strike': {
           const a = battleActorId(d.actor);
           const b = battleActorId(d.target);
-          if (a && b) await view.strikeActor(a, b, d.outcome, () => sound.effect(d.outcome === 'hit' ? 'hit' : 'miss'));
+          if (a && b) {
+            lastStruck.set(a, b);
+            await view.strikeActor(a, b, d.outcome, () => sound.effect(d.outcome === 'hit' ? 'hit' : 'miss'));
+          }
           return;
         }
         case 'pushBack': {
@@ -1252,8 +1261,24 @@ function main(): void {
           return;
         }
         case 'light': {
-          const actor = d.actor ? battleActorId(d.actor) : undefined;
           const color = LIGHT_COLORS[d.color] ?? 0xffffff;
+          // 「トウマの後ろ」: その人物の背中側の隣のマス（序章の丘: トウマの背後で帰りの門が開く。人物の上に立てると、だれが光に入ったか分からなくなるため）
+          const behind = d.actor ? /^(.+)の後ろ$/.exec(d.actor) : null;
+          if (behind) {
+            const bid = battleActorId(behind[1]!);
+            const units = battle?.controller?.state.units ?? [];
+            const u = bid ? units.find((x) => x.id === bid) : undefined;
+            if (u) {
+              // 背中側: 台本で最後に打ちかかった相手の反対側（見た目の向き）。なければ戦闘の状態の向きの反対側
+              const foe = units.find((x) => x.id === (bid ? lastStruck.get(bid) : undefined));
+              const dx = foe ? foe.x - u.x : 0;
+              const dz = foe ? foe.z - u.z : 0;
+              const v = foe && (dx !== 0 || dz !== 0) ? (Math.abs(dx) >= Math.abs(dz) ? { x: Math.sign(dx), z: 0 } : { x: 0, z: Math.sign(dz) }) : DIRECTION_VECTORS[u.facing];
+              await view.setLight(d.name, { x: u.x - v.x, z: u.z - v.z, color });
+              return;
+            }
+          }
+          const actor = d.actor ? battleActorId(d.actor) : undefined;
           await view.setLight(d.name, actor ? { actor, color } : { ...(d.x !== undefined ? { x: d.x, z: d.z } : {}), color });
           return;
         }

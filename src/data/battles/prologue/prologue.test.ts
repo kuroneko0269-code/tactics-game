@@ -66,13 +66,15 @@ describe('序章の戦闘の決まり（戦闘で人は死なない決まり）'
 });
 
 describe('確認用の機能の「勝ったことにする」（forceVictory）', () => {
-  it('堰: 合わせ目がすべて壊れ、西の谷に水が流れた様子で、味方の勝ちになる（経験値と JP は入らない）', () => {
+  it('堰: 合わせ目がすべて壊れ、堰の下の川筋に水が流れた様子で、味方の勝ちになる（経験値と JP は入らない）', () => {
     const s = start(weirBattle);
     const r = forceVictory(s);
     expect(r.state.winner).toBe('player');
     expect(r.state.turn).toBeNull();
     expect(r.state.units.filter((u) => u.object).every((u) => u.retired && u.hp === 0)).toBe(true);
-    expect(r.state.map.tiles.some((t) => t.x === 0 && t.terrain === 'water')).toBe(true);
+    // 水は堰の真ん中から川筋を下流へ（西の涸れた谷は涸れたまま。2026-11-19 物語の作者の訂正）
+    expect(r.state.map.tiles.filter((t) => t.x === 4 && t.z >= 2 && t.terrain === 'water').length).toBe(7);
+    expect(r.state.map.tiles.some((t) => t.x === 0 && t.terrain === 'water')).toBe(false);
     // 番兵は膝をつかない（戦っていない）。味方の経験値と JP は始めのまま
     expect(r.state.units.filter((u) => u.team === 'player').map((u) => u.progress)).toEqual(s.units.filter((u) => u.team === 'player').map((u) => u.progress));
     expect(JSON.parse(JSON.stringify(r.state))).toEqual(r.state);

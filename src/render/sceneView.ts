@@ -386,7 +386,8 @@ export function createSceneView(options: {
       for (const a of actors.values()) a.puppet.update(elapsed);
       for (const p of props.values()) p.model.update(elapsed);
       // タップを待っている物は、ゆっくり明滅する
-      if (tapTarget) props.get(tapTarget)?.model.setGlow(new THREE.Color(0xffe8a0), 0.45 + Math.sin(elapsed * 4) * 0.3);
+      // 押す物は、形が分かる程度に弱く光らせる（強く光ると、戸が光る板に見えるため。初見の検査）。押す所は上の揺れる目印で示す
+      if (tapTarget) props.get(tapTarget)?.model.setGlow(new THREE.Color(0xffe8a0), 0.18 + Math.sin(elapsed * 4) * 0.1);
       if (beacon.visible) {
         beacon.position.copy(beaconBase).add(new THREE.Vector3(0, Math.abs(Math.sin(elapsed * 3)) * 0.18, 0));
         beacon.rotation.y = elapsed * 1.5;

@@ -141,7 +141,7 @@ export interface DialogueRun {
 
 const FAST_LINE_MS = 280;
 /** その前に、出ている台詞の枠を閉じる指示（場面の切り替え・人物が消える・光が立つ） */
-const CLOSES_LINE: ReadonlySet<Directive['kind']> = new Set(['fadeOut', 'location', 'cut', 'overlay', 'exit', 'light', 'chapterTitle']);
+const CLOSES_LINE: ReadonlySet<Directive['kind']> = new Set(['fadeOut', 'location', 'cut', 'overlay', 'exit', 'light', 'chapterTitle', 'melody']);
 /** 聞く操作で、押されないまま手の絵を目立たせるまでの時間 */
 const LISTEN_IDLE_MS = 3500;
 
@@ -777,6 +777,8 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       if (skipped) break;
       // 暗転の上の字幕: 暗くなっていなければ、暗転してから出す
       if (step.overDark && !stage.dark) {
+        // 暗くなる前に、前の台詞の枠を閉じる（暗い画に台詞の枠だけが残らないように。初見の検査）
+        if (!box.hidden && !box.classList.contains('tools-only')) hideLine(true);
         await deps.setDark(true, fast ? 150 : 600);
         stage = { ...stage, dark: true };
       }

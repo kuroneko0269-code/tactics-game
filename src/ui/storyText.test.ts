@@ -51,7 +51,8 @@ describe('戦闘の台本の人物', () => {
           for (const d of step.kind === 'line' ? step.directives : [step.directive]) {
             const actor = 'actor' in d ? d.actor : undefined;
             if (actor && d.kind !== 'light') expect(names.has(actor), `${id} ${step.line}行目 ${actor}`).toBe(true);
-            if (d.kind === 'light' && d.actor) expect(names.has(d.actor), `${id} ${step.line}行目 ${d.actor}`).toBe(true);
+            // 「トウマの後ろ」は、その人物の背中側の隣のマス（序章の丘の帰りの門）
+            if (d.kind === 'light' && d.actor) expect(names.has(d.actor.replace(/の後ろ$/, '')), `${id} ${step.line}行目 ${d.actor}`).toBe(true);
           }
         }
       }

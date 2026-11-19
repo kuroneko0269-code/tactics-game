@@ -2897,16 +2897,14 @@ async function storyRun(browser, baseUrl, name, core) {
     '堰の番兵が「退場しない人」になっていません',
   );
   await press(text.buttons.wait).catch(() => {});
-  const cutsBefore = stats.cuts;
   const weir = await autoBattle('堰', 8, 3);
   check(weir.units.filter((u) => u.team === 'neutral').every((u) => u.retired), '堰の合わせ目が壊れていません');
   check(weir.units.filter((u) => u.id.startsWith('weir-guard')).every((u) => !u.retired), '退場しないはずの番兵が退場しています');
-  check(weir.map.tiles.filter((t) => t.terrain === 'water' && t.x === 0).length > 0, '西の谷に水が流れていません');
+  check(weir.map.tiles.filter((t) => t.terrain === 'water' && t.x === 4 && t.z >= 5).length > 0 && !weir.map.tiles.some((t) => t.terrain === 'water' && t.x === 0), '堰の下の川筋に水が流れていないか、西の谷に水が流れています');
   const counts = await soundCounts();
   check(counts.crack >= 3 && counts.waterSoft >= 1 && counts.waterMid >= 1, `合わせ目が割れるたびの音（石の割れる音・水の音）が鳴っていません（${JSON.stringify(counts)}）`);
   check(counts.collapse >= 1 && counts.gate >= 1 && counts.chime >= 1, `堰の勝った後の音（崩れる・門・石の鳴る音）が鳴っていません（${JSON.stringify(counts)}）`);
-  check(stats.cuts > cutsBefore, '堰の勝った後に、遠い谷の家々のカットが出ていません');
-  log('堰の戦闘（手ほどき・退場しない番兵・合わせ目3つと割れる音・水が別の谷へ・戦闘の途中での読み込み直しと core との一致・遠い谷のカット）✔');
+  log('堰の戦闘（手ほどき・退場しない番兵・合わせ目3つと割れる音・水が下流の川筋へ・戦闘の途中での読み込み直しと core との一致）✔');
   // 場面2〜7（戦闘の前）: 塔の門と報告の部屋・円卓の広間・家・都・塔の門・丘
   for (const n of [3, 4, 5, 6, 7, 8]) {
     await waitSceneAtLeast(n).catch(async (e) => {

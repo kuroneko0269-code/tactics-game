@@ -9,10 +9,11 @@ import { enemyUnit, kit } from '../enemyUnits';
  * （膝をついたまま最後まで残り、勝った後、崩れる堰を呆然と見る。戦闘で人は死なない決まり）。
  * 番兵をすべて退けても勝ちにはならない（堰を崩すまで続く）。
  * 東の崖の上（高さ 3〜4）から弓で撃ち下ろせる（札の「高い所から撃つ矢は、遠くまで届く」）。
- * 合わせ目を3つ壊すと勝利。3つ目を壊すと、西の涸れた谷に水が流れはじめる（水が別の谷へ）。
+ * 合わせ目を3つ壊すと勝利。3つ目を壊すと、堰の真ん中が切れて、水が堰の下の川筋を下流の谷へ流れ込む
+ * （下流の村の人々は、今のうちに別の場所へ移る。塔はこれを「助かった」と言い、村の人々から見れば「追われた」。2026-11-19 物語の作者の訂正）。
  * 初めて遊ぶ人が、説明を読まなくても勝てる強さにする（番兵は弱い。味方が倒れることはまずない）。
  * 堰の下から南へ、土の川床が続き（マップの中ほど）、マップの外の南に下流の三つの村がある（置き物の decor）。
- * 西の涸れた谷は、マップの外で西へ折れて、遠くの別の谷へ続く。勝った後、この谷に水が流れる（@変える 西の谷 水の流れる谷）。
+ * 西の涸れた谷は、マップの外で西へ折れる。水の逃げ先ではない（勝った後も涸れたまま）。
  */
 const map = stageMap('prologue-weir', [
   '0d 2w 2w 2w 2w 2w 2w 2w 4s',
@@ -27,17 +28,16 @@ const map = stageMap('prologue-weir', [
 ]);
 
 const seams = ['weir-seam-1', 'weir-seam-2', 'weir-seam-3'];
-/** 水が流れこむ、西の涸れた谷 */
-const westValley = map.heights.flatMap((row, z) => row.flatMap((h, x) => (x === 0 && h === 0 ? [{ x, z, terrain: 'water' as const }] : [])));
 /**
- * 崩れた堰の形（3つ目の合わせ目を壊した時）: 西の端（x=1・2）が切れて水が西の谷へ落ち、残りは一段低い瓦礫の土になる
+ * 崩れた堰の形（3つ目の合わせ目を壊した時）: 真ん中（x=4）が切れて湖の水が流れ出し、残りは一段低い瓦礫の土になる
  * （崩れる音がしても堰の形が残って見えないように。序章の演出の直し）
  */
 const brokenWeir = [
-  { x: 1, z: 2, height: 0, terrain: 'water' as const },
-  { x: 2, z: 2, height: 0, terrain: 'water' as const },
-  ...[3, 4, 5, 6, 7].map((x) => ({ x, z: 2, height: 2, terrain: 'dirt' as const })),
+  { x: 4, z: 2, height: 2, terrain: 'water' as const },
+  ...[1, 2, 3, 5, 6, 7].map((x) => ({ x, z: 2, height: 2, terrain: 'dirt' as const })),
 ];
+/** 堰の下の川筋（土の川床）。堰が切れると、ここを水が下流の谷へ流れる（高さは変えない） */
+const downstream = map.terrain.flatMap((row, z) => [...row].flatMap((t, x) => (z >= 3 && t === 'd' && x >= 3 && x <= 5 && (x === 4 || z >= 5) ? [{ x, z, terrain: 'water' as const }] : [])));
 
 export const weirBattle: BattleSite = {
   id: 'prologue-weir',
@@ -74,7 +74,7 @@ export const weirBattle: BattleSite = {
     {
       id: 'weir-last-seam',
       trigger: { kind: 'objectsBroken', unitIds: seams, count: 3 },
-      effects: [{ kind: 'terrain', tiles: [...brokenWeir, ...westValley] }, { kind: 'dialogue', scriptId: 'prologueWeirCrack3' }],
+      effects: [{ kind: 'terrain', tiles: [...brokenWeir, ...downstream] }, { kind: 'dialogue', scriptId: 'prologueWeirCrack3' }],
     },
   ],
   // 堰を積む男たち（戦わない）。東の崖の上から見ている
@@ -100,7 +100,7 @@ export const weirBattle: BattleSite = {
   ],
   // 隊員の名札に役目を添える（戦士ゴード、弓使いキリ、魔道士フェン、治癒師ノノ）
   roleTags: ['gord', 'kiri', 'fen', 'nono'],
-  // 昼（勝った後の遠い谷の家々は「昼なのに、軒の灯が揺れている」）
+  // 昼（勝った後の下流の谷の家々は「昼なのに、軒の灯が揺れている」）
   time: '昼',
   tutorial: [
     { id: 'weir-move', mode: 'main', point: { kind: 'reachToward', x: 4, z: 3 } },

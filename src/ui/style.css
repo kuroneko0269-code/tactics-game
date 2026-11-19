@@ -3006,7 +3006,9 @@ body.in-dialogue #hud {
   text-shadow:
     0 0 6px rgba(0, 0, 0, 0.95),
     0 1px 2px rgba(0, 0, 0, 0.95);
-  background: radial-gradient(ellipse at center, rgba(5, 8, 14, 0.7) 0%, rgba(5, 8, 14, 0) 76%);
+  /* 後ろの人物や物と重なっても読めるよう、角の丸い半透明の板にする（初見の検査） */
+  background: rgba(5, 8, 14, 0.58);
+  border-radius: 12px;
   cursor: pointer;
   touch-action: manipulation;
   /* 薄いまま読ませないよう、現れるのは短く（初見の検査） */

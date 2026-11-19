@@ -2,7 +2,7 @@ import * as THREE from 'three';
 
 /**
  * 言葉にしない声の印（ゲーム脚本の序章: 番兵の叫び・売り子の呼び込み・家族の笑い声）。
- * 人形の頭上に、声の種類ごとの小さな絵（文字ではない）を短い間だけ出す。叫びはぎざぎざの線、呼び込みは広がる弧、笑いは小さな波。
+ * 人形の頭上に、声の種類ごとの小さな絵（文字ではない）を短い間だけ出す。叫びはぎざぎざの線、呼び込みは吹き出し、笑いは小さな波。
  */
 /** 声の印の種類。hum は歌っている・鼻歌を歌っている人の頭上の音符（@音の印） */
 export type VoiceKind = 'shout' | 'call' | 'laugh' | 'hum';
@@ -71,8 +71,27 @@ function drawIcon(kind: VoiceKind): THREE.CanvasTexture | undefined {
       });
     }
   } else if (kind === 'call') {
-    // 広がる弧を3つ
-    for (const r of [16, 32, 48]) paint(() => g.arc(64, 100, r, -Math.PI * 0.8, -Math.PI * 0.2));
+    // 吹き出し（中に点を三つ）。広がる弧は電波の印に見えると言われたため（初見の検査）
+    paint(() => {
+      g.moveTo(30, 30);
+      g.lineTo(98, 30);
+      g.quadraticCurveTo(112, 30, 112, 46);
+      g.lineTo(112, 70);
+      g.quadraticCurveTo(112, 86, 98, 86);
+      g.lineTo(60, 86);
+      g.lineTo(42, 106);
+      g.lineTo(46, 86);
+      g.lineTo(30, 86);
+      g.quadraticCurveTo(16, 86, 16, 70);
+      g.lineTo(16, 46);
+      g.quadraticCurveTo(16, 30, 30, 30);
+    });
+    for (const x of [42, 64, 86]) {
+      g.beginPath();
+      g.arc(x, 58, 7, 0, Math.PI * 2);
+      g.fillStyle = COLORS.call;
+      g.fill();
+    }
   } else {
     // 小さな波を2段
     for (const y of [56, 84]) {

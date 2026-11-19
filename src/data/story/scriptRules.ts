@@ -17,8 +17,7 @@ export const SCRIPT_RULES: ScriptRules = {
    * 序章の演出の直しで、発注者の指示により 2 行（場面1だけ 3 行）から 4 行に緩めた。分かりやすさのために超える場面は narrationLimits に書く
    */
   maxNarrationLines: 4,
-  // 場面1の戦闘の前: 物語の作者の直し（2026-11-19）で、1-5 が「…沈む。」「だから今日、崩しておく。」「水は、西の谷へ逃がす。」の三枠になったため
-  narrationLimits: { prologueWeirIntro: 5 },
+  narrationLimits: {},
   /** 字幕の画面の1行は、台詞と同じ 40 字以内を目安にする */
   maxCaptionLineChars: 40,
   /**
