@@ -91,7 +91,7 @@ npm run preview      # ビルド結果を確認（http://localhost:4173/tactics-
 npm run check        # lint・型チェック・テスト・ビルドをまとめて実行
 npm run autoplay     # 自動プレイ（全体。手元で実行）: 実際のブラウザで画面をタップして1戦を最後まで進め、core だけの計算と結果が一致するか確かめる（約15〜20分。画面サイズを減らすと短い）
 npm run script-rules # 台本の決まり（台詞の字数・続けて話す枠・字幕の行数）に合わない所の一覧を出す
-npm run script-export # 序章の「画面に出るものだけ」（札・字幕・台詞と肩書き・物の文字・名札・操作の案内）を場面ごとに書き出す（-- --out=ファイル でファイルに）
+npm run script-export # 序章の「画面に出るものだけ」（札・字幕・台詞と肩書き・物の文字・名札・操作の案内・カットの秒数・場面の光）を場面ごとに書き出す（-- --all で動き・カメラ・音も、-- --out=ファイル でファイルに）
 npm run autoplay:ci  # 自動プレイ（短くした版。CI で実行）: 1戦は操作を一通り確かめたところで照合して打ち切る（約3〜4分）
 npm run balance      # バランス確認: 画面を使わず AI 同士を戦わせ、敵の段階ごとの勝率、ジョブごとのレベル 50 までの戦闘数・成長率の違い、ダンジョンの各戦闘の勝率と時間、装備の段階ごとの勝率・お金の速さ・買いそろえるまでの戦闘数を集計する（約15分。-- --dungeon-only でダンジョンだけ、-- --equipment-only で装備だけ、-- --jobs でジョブごとの勝率の比較だけ（1つのジョブだけを入れ替えた部隊どうしを戦わせる）、-- --unlocks で新しいジョブの解放までの戦闘数だけ、-- --prologue で序章の2つの戦闘の勝率と見込みの時間だけ）
 ```
@@ -206,6 +206,8 @@ npm run balance      # バランス確認: 画面を使わず AI 同士を戦わ
   字幕の行数は画面の行で数え、場面1だけ3行（`src/data/story/scriptRules.ts` の `narrationLimits`）。書き出しは `src/core/scriptExport.ts` と `scripts/script-export.mjs`（伏線のカットの秒数と場面の光も出す）。
   手ほどきの物語の段（`scriptId`。測り棒の札）は、手ほどきを飛ばしても、見た手ほどきを出さない設定でも必ず一度出す（`src/ui/tutorial.ts`）。
   場面の時刻の光（朝・昼・夕方・夜）は、台本の `@時刻`・会話用のマップと戦場の定義の `time`、数値は `src/data/lighting.ts`、当てるのは `src/render/lighting.ts`。
+  操作の場面の文字の案内を出さない指定（`@文字の案内 なし`。押す所は `src/render/sceneView.ts` の揺れる目印、聞く操作は手の絵）、人物の手もとを映す `@映す 名前の手もと`、
+  物語の段を出さないまま勝った時に勝った直後に出す処理（`src/main.ts` の `playAfterVictory`）。
 - 物語の確認（物語の確認の PR）: 題名の「物語」の後の「つづきから／はじめから」と「場面を選ぶ」の画面は `src/ui/titleScreen.ts`、場面の一覧と選んだ場面の進み具合は
   `src/core/story.ts`（`sceneEntries`・`progressAt`。場面の脚本の番号は `books.ts` の `scriptScene`、名前は text.ts の `story.scenes`）。確認用の機能の切り替えは設定（`checkTools`）、
   隅の印と「勝ったことにする」は `src/ui/checkBadge.ts`、勝った状態を作るのは `src/core/battle.ts` の `forceVictory`。確認用の機能で進めた物語は進み具合に `checked` が付き、報酬を得ない。

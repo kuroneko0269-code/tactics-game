@@ -207,6 +207,8 @@ export function applyDirective(stage: StageState, d: Directive): StageState {
       return stage;
     case 'timeOfDay':
       return { ...stage, time: d.time };
+    case 'controlText':
+      return stage;
   }
 }
 

@@ -2689,6 +2689,12 @@ async function storyRun(browser, baseUrl, name, core) {
         );
       }
       if (d.caption && d.text === 'ただいま、と言うつもりだった。') caption = true;
+      if (['walk', 'tap', 'listen'].includes(d.waiting)) {
+        // 場面9は文字の案内を出さない（手引きの文・タップのボタンの文・聞く操作の文）
+        const shown = await T(() => [...document.querySelectorAll('.dialogue-hint, .tap-button, .listen-button .label')].filter((e) => e.offsetParent !== null).map((e) => e.textContent));
+        check(shown.length === 0, `場面9で文字の案内が出ています（${shown.join(' / ')}）`);
+      }
+      if (d.waiting === 'tap') check(await T(() => window.__tactics.beacon()), '場面9で、押す物の上に光る印が出ていません');
       if (d.waiting === 'tap' && d.tapTarget?.x === 2) {
         check(thanks && caption, '家までの道で、見知らぬ男の礼か「ただいま、と言うつもりだった。」の字幕が出ていません');
         await screenshot('door');
@@ -2702,6 +2708,9 @@ async function storyRun(browser, baseUrl, name, core) {
     const st = await T(() => ({ stage: window.__tactics.dialogueStage(), where: window.__tactics.sceneStage() }));
     check(st.where === 'stage-home' && Object.keys(st.stage.props).filter((p) => p.startsWith('椀')).length === 3, '物置の場面で、家に移っていないか、椀が三つではありません');
     check(st.stage.props['箸4'] === undefined && st.stage.props['箸3'] !== undefined && !st.stage.props['石'], '箸を一膳戻していないか、石を拾っていません');
+    // 耳に当てる操作は、手の絵だけ（押し続ける動きの絵）。全体の版では、押さないまま待つと手の絵が目立つことも確かめる
+    check(await T(() => document.querySelector('.listen-button.hand-only .hold-hand') !== null), '耳に当てる操作が、手の絵だけになっていません');
+    if (!QUICK) await until(() => document.querySelector('.listen-button.nudge') !== null, undefined, 8000);
     const overlaysBefore = (await T(() => window.__tactics.history())).overlays;
     await doListen(4300);
     check((await T(() => window.__tactics.history())).overlays > overlaysBefore, '石が終わりの三つの音を鳴らす時に、ユナの指の画が重なっていません');
@@ -2868,11 +2877,21 @@ async function storyRun(browser, baseUrl, name, core) {
     check(await T(() => { const t = window.__tactics.tutorial(); return t === null || (t.story && t.step === null); }), '堰: 再開した戦闘で、見た手ほどきがまた出ています');
     await until(() => ['main', 'busy', 'ended'].includes(window.__tactics.mode()) && !window.__tactics.dialogue());
     await T(() => window.__tactics.finishBattle('player'));
-    // 勝った後の台本（台詞はない。崩れる音・遠い谷のカット・帰りの門）
+    // キリが崖の上に立たないまま勝ったので、勝った直後（遠景のカットの前）に測り棒の札が出る。その後の勝った後の台本には台詞はない
+    let lateTag = '';
+    let cutBeforeTag = false;
     for (let guard = 0; guard < 600 && (await sceneNow()) === 2; guard++) {
       await noteMarks();
+      const d = await status();
+      if (d?.waiting === 'line' && d.inscription) {
+        lateTag = d.text;
+        cutBeforeTag = stats.cuts > 0;
+        await tapLine();
+        continue;
+      }
       await page.waitForTimeout(60);
     }
+    check(lateTag.endsWith('ユナ') && lateTag.startsWith('高い所から撃つ矢は') && !cutBeforeTag, `崖の上に立たずに勝った時、勝った直後（遠景の前）に測り棒の札が出ていません（${lateTag}）`);
     const counts = await soundCounts();
     check(counts.collapse >= 1 && counts.gate >= 1 && counts.chime >= 1, `堰の勝った後の音（崩れる・門・石の鳴る音）が鳴っていません（${JSON.stringify(counts)}）`);
     check(stats.cuts > 0, '堰の勝った後に、遠い谷の家々のカットが出ていません');
@@ -2953,7 +2972,8 @@ async function storyRun(browser, baseUrl, name, core) {
   await settle();
   await press(text.dialogue.fast);
   await drive();
-  check(stats.voices > 0, '番兵の叫び（言葉にしない声）の印が出ていません');
+  // 短い印は、画面を見る間隔によっては見逃すので、これまでの記録（開発用）でも確かめる
+  check(stats.voices > 0 || (await T(() => window.__tactics.history())).voices > 0, '番兵の叫び（言葉にしない声）の印が出ていません');
   log('冒頭（札・肩書き・母の「だれ？」・暗転）・章の題・堰の会話（暗転の上の前提の字幕・札・ルビ・声の印・読み返し・早送り）・会話の途中での読み込み直しと「これまで」✔');
   // 場面1の戦闘。手ほどきを手で進め、キリを崖の上へ動かして測り棒の札（署名「ユナ」）を確かめる。退場しない番兵・名札の役目
   await waitScene(2);
@@ -3469,7 +3489,16 @@ async function checkLayouts(browser, baseUrl, name, core) {
   // 勝った後の台本（戦闘のマップの上。台詞はなく、音と動きと遠景のカット）
   await page.evaluate(() => window.__tactics.finishBattle('player'));
   await until(() => window.__tactics.dialogue() !== null);
+  // キリが崖の上に立たないまま勝ったので、勝った直後に測り棒の札（物の文字）が出る。読んでタップで進める
+  await until(() => window.__tactics.dialogue()?.waiting === 'line' || window.__tactics.story().main?.scene === 3, undefined, 60000);
   await inspect('after-victory');
+  for (let guard = 0; guard < 400 && (await page.evaluate(() => window.__tactics.story().main?.scene)) !== 3; guard++) {
+    const d = await page.evaluate(() => window.__tactics.dialogue());
+    if (d?.waiting === 'line') {
+      await page.locator(d.inscription ? '.dialogue-inscription' : d.caption ? '.dialogue-caption' : '.dialogue-body').click();
+      await until((i) => window.__tactics.dialogue()?.index !== i, d.index);
+    } else await page.waitForTimeout(100);
+  }
   // 塔の会話（台詞）と、「これまで」（読み込み直して続きから）
   await until(() => window.__tactics.story().main?.scene === 3 && window.__tactics.dialogue() !== null, undefined, 120000);
   await lineReady();

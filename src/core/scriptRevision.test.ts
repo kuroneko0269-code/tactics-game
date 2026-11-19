@@ -207,3 +207,53 @@ describe('書き出しのカットの秒数と場面の光', () => {
     expect(screenTextOf(s, labels).some((t) => t.kind === '光')).toBe(false);
   });
 });
+
+describe('書き出しの「すべて」の指定と、文字の案内なし', () => {
+  const cat: ScriptCatalog = {
+    ...catalog,
+    gestures: ['うなずく', '三度叩く', '戸を開ける'],
+    props: ['椀', '石', '戸', '開いた戸'],
+    times: ['昼', '夕方'],
+  };
+  const labels = { walk: '光っているマスを押すと歩きます。', tapDefault: '押す', listenDefault: '聞く', holdDefault: '押し続ける' };
+
+  it('文字の案内なしの台本では、操作の案内の文を出さず、操作の説明（光る印・手の絵）を出す', async () => {
+    const { screenTextOf } = await import('./scriptExport');
+    const s = parseScriptOrThrow('t', ['@歩かせる トウマ 1,0', '@文字の案内 なし', '@タップ 戸 戸を開ける', '@聞く ユナの鼻歌 石'].join('\n'), cat);
+    const out = screenTextOf(s, labels);
+    expect(out[0]).toEqual({ kind: '操作の案内', text: '光っているマスを押すと歩きます。' });
+    expect(out.slice(1).map((t) => t.kind)).toEqual(['操作', '操作']);
+    expect(out.some((t) => t.text === '戸を開ける')).toBe(false);
+    expect(out[2]!.text).toMatch(/手の絵/);
+  });
+
+  it('すべての指定では、脚本の行の印・動き・物・カメラ・画面・間・音も、指示の順に種類つきで出す', async () => {
+    const { screenTextOf, formatScreenText } = await import('./scriptExport');
+    const s = parseScriptOrThrow(
+      't',
+      ['@脚本 4-2', '@節 ユナの鼻歌 鼻歌', '@節を切る 戸 3', '@脚本 4-3', '@同時 @仕草 トウマ 戸を開ける @変える 戸 開いた戸', '@歩く トウマ 2,3', '@カメラ ユナ 中 1秒', '@暗転 0.8', '@間 1', 'ユナ〔トウマの妹〕「おかえり」 @脚本 4-5'].join('\n'),
+      cat,
+    );
+    const out = screenTextOf(s, labels, undefined, { all: true });
+    expect(out.map(formatScreenText)).toEqual([
+      '―― 脚本 4-2 ――',
+      '音　　　　　節「ユナの鼻歌」（鼻歌）',
+      '音　　　　　節を、終わりから3つ目の音の手前で切り、「戸」',
+      '―― 脚本 4-3 ――',
+      '動き　　　　（同時に）トウマ: 戸を開ける',
+      '物　　　　　（同時に）戸を「開いた戸」に変える',
+      '動き　　　　トウマが2,3へ歩く',
+      'カメラ　　　ユナへ（中）1秒かけて',
+      '画面　　　　暗転（0.8秒）',
+      '間　　　　　1秒',
+      '―― 脚本 4-5 ――',
+      '台詞　　　　ユナ〔トウマの妹〕「おかえり」',
+    ]);
+    // すべての指定がなければ、文字として出るものだけ
+    expect(screenTextOf(s, labels).map((t) => t.kind)).toEqual(['台詞']);
+  });
+
+  it('映す先の「の手もと」を読む', () => {
+    expect(directivesOf('@映す テオの手もと 近 1.5')).toEqual([{ kind: 'shot', actor: 'テオ', hands: true, zoom: 'near', ms: 1500 }]);
+  });
+});

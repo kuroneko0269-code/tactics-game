@@ -38,7 +38,7 @@ export type Directive =
   /**
    * カメラを、マスか人物・物に向ける（actor は人物か物の名前）。ms があれば、その時間をかけてゆっくり動かす
    */
-  | { readonly kind: 'camera'; readonly x?: number; readonly z?: number; readonly actor?: string; readonly zoom?: CameraZoom; readonly ms?: number }
+  | { readonly kind: 'camera'; readonly x?: number; readonly z?: number; readonly actor?: string; readonly hands?: true; readonly zoom?: CameraZoom; readonly ms?: number }
   /** 暗転（画面を暗くする）と明転（戻す） */
   | { readonly kind: 'fadeOut'; readonly ms: number }
   | { readonly kind: 'fadeIn'; readonly ms: number }
@@ -119,7 +119,7 @@ export type Directive =
   /**
    * 映す: カメラをマスか人物・物に向け、ちょうど ms の間（動く時間を含む）映してから次へ移る（意味ありげなカットを長く止めない）
    */
-  | { readonly kind: 'shot'; readonly x?: number; readonly z?: number; readonly actor?: string; readonly zoom?: CameraZoom; readonly ms: number }
+  | { readonly kind: 'shot'; readonly x?: number; readonly z?: number; readonly actor?: string; readonly hands?: true; readonly zoom?: CameraZoom; readonly ms: number }
   /**
    * 重ねる: 今の場面の上に、別の短い画（回想の台本 scriptId が作る舞台）を ms の間だけ重ねて見せる（序章の場面9: ユナの指）
    */
@@ -130,7 +130,12 @@ export type Directive =
    */
   | { readonly kind: 'melodyCut'; readonly sound: string; readonly remaining: number }
   /** 場面の時刻の光（朝・昼・夕方・夜）。空の色・光の色と明るさが変わる。場所を移すと、移った先のマップの時刻に戻る */
-  | { readonly kind: 'timeOfDay'; readonly time: string };
+  | { readonly kind: 'timeOfDay'; readonly time: string }
+  /**
+   * 操作の場面の文字の案内を出すか（台本の終わりまで続く）。なし にすると、操作のしかたの手引き・タップのボタンの文・聞く操作の文を出さず、
+   * 押す所を光る印（揺れる矢印と明滅）と手の絵だけで示す（序章の場面9: ユナのいない家を進む場面の静けさ）
+   */
+  | { readonly kind: 'controlText'; readonly on: boolean };
 
 /** 場所を移した時に、新しいマップに置いておく物 */
 export interface LocationProp {
@@ -261,11 +266,12 @@ export const DIRECTIVE_USAGE: Readonly<Record<string, string>> = {
   聞く: '@聞く 旋律の名前 音色 [案内の文]（操作の場面: 押している間だけ鳴る。待たずに次の行へ進み、@節を待つ で聞く進み具合を待つ）',
   札: '@札 今　暦の塔（場所と時の札。画面の隅に短く出す）',
   名札: '@名札 名前 肩書き（台詞のない人物の名前と肩書きを短く出す）',
-  映す: '@映す x,z か 人物・物の名前 [遠・中・近] 秒（その秒の間だけ映して次へ）',
+  映す: '@映す x,z か 人物・物の名前（人物の名前の後に「の手もと」で手の高さ） [遠・中・近] 秒（その秒の間だけ映して次へ）',
   重ねる: '@重ねる 回想の台本の名前 秒（今の場面の上に、別の短い画を重ねる）',
   節を切る: '@節を切る 効果音の名前 [残りの音の数]（鳴っている旋律を、その音の手前で切って効果音を鳴らす）',
   暗転の上: '字幕の後ろに @暗転の上（暗転してから、画面の中央に出す）',
   時刻: '@時刻 朝・昼・夕方・夜（場面の時刻の光。空の色・光の色と明るさ）',
+  文字の案内: '@文字の案内 なし か あり（操作の場面の文字の案内を出すか。なし なら光る印と手の絵だけ）',
 };
 
 const STRIKE_OUTCOMES: Readonly<Record<string, 'hit' | 'miss' | 'parry'>> = { 当たる: 'hit', 外れる: 'miss', 払う: 'parry' };
@@ -689,7 +695,10 @@ function parseDirective(text: string, catalog: ScriptCatalog): Directive | strin
       }
       if (!ms) return bad('映す秒を書きます');
       const c = coord(args[0]!);
-      return c ? { kind: 'shot', ...c, ...(zoom ? { zoom } : {}), ms } : { kind: 'shot', actor: args[0]!, ...(zoom ? { zoom } : {}), ms };
+      if (c) return { kind: 'shot', ...c, ...(zoom ? { zoom } : {}), ms };
+      // 人物の名前の後に「の手もと」と書くと、その人物の手の高さを映す（守り袋を握らせる手もと）
+      const hands = args[0]!.endsWith('の手もと');
+      return { kind: 'shot', actor: hands ? args[0]!.slice(0, -'の手もと'.length) : args[0]!, ...(hands ? { hands: true as const } : {}), ...(zoom ? { zoom } : {}), ms };
     }
     case '重ねる': {
       const e = need(2);
@@ -712,6 +721,12 @@ function parseDirective(text: string, catalog: ScriptCatalog): Directive | strin
       if (e) return e;
       if (!(catalog.times ?? []).includes(args[0]!)) return bad(`時刻「${args[0]}」はありません（使える時刻: ${(catalog.times ?? []).join('・')}）`);
       return { kind: 'timeOfDay', time: args[0]! };
+    }
+    case '文字の案内': {
+      const e = need(1);
+      if (e) return e;
+      if (args[0] !== 'なし' && args[0] !== 'あり') return bad(`「${args[0]}」は なし か あり で書きます`);
+      return { kind: 'controlText', on: args[0] === 'あり' };
     }
     case '暗転の上':
       return bad('@暗転の上 は字幕の後ろに書きます');

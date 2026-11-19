@@ -4,8 +4,12 @@
  * 伏線のカットの秒数（映す・秒を決めた物の文字・重ねる画・遠景）と、場面の光（朝・昼・夕方・夜）も、出る順に入れる。
  * 台本のデータ（src/data/story/scripts/）と章の定義・戦場の定義から自動で作る（計算は src/core/scriptExport.ts）。
  *
- * 使い方: npm run script-export                  … 画面に出す
- *         npm run script-export -- --out=ファイル  … ファイルに書く
+ * `--all` で、動き・物・カメラ・画面（暗転）・間・音・操作と、ゲーム脚本の行の印（―― 脚本 4-2 ――）も、台本の指示の順に種類つきで出す
+ * （物語の作者が、文字以外の演出も確かめるため。第1章以降でも使う）。
+ *
+ * 使い方: npm run script-export                        … 画面に出す
+ *         npm run script-export -- --all               … 動き・カメラ・音も含めて出す
+ *         npm run script-export -- --out=ファイル        … ファイルに書く（--all と一緒にも使える）
  */
 import fs from 'node:fs';
 import { createServer } from 'vite';
@@ -31,8 +35,10 @@ try {
 
   const labels = { walk: TEXT.dialogue.walkHint, tapDefault: TEXT.dialogue.tapHint, listenDefault: TEXT.dialogue.listenDefault, holdDefault: TEXT.dialogue.holdDefault };
   /** 台本の書き出し。会話の場面は、始めのマップから場面の光を出す（戦闘の台本は、戦場の光を見出しに出す） */
+  const all = args.all === 'true';
+  const exportOptions = { all, stageName: (id) => TEXT.mapNames[id] ?? id };
   const textOf = (id, startStage) =>
-    screenTextOf(parseScriptOrThrow(id, scriptTexts[id], scriptCatalog), labels, startStage ? { startStage, timeOf, defaultTime: DEFAULT_TIME } : undefined)
+    screenTextOf(parseScriptOrThrow(id, scriptTexts[id], scriptCatalog), labels, startStage ? { startStage, timeOf, defaultTime: DEFAULT_TIME } : undefined, exportOptions)
       .map((t) => (t.kind === 'カット' ? { ...t, text: readableCut(t.text) } : t))
       .map(formatScreenText);
   /** カットの行の、会話用マップと回想の台本の名前を、読める言葉に直す（重ねる画は、その場所・光・動き） */
@@ -50,10 +56,13 @@ try {
   const chapter = mainBook.chapters[0];
   const chapterName = TEXT.story.chapters[chapter.id] ?? chapter.id;
   lines.push(
-    `# ${chapterName} 画面に出るものの書き出し`,
+    `# ${chapterName} ${all ? '演出の書き出し（動き・カメラ・音を含む）' : '画面に出るものの書き出し'}`,
     '',
     '（台本のデータから自動で作ったもの。行の始めが種類: 札・字幕・台詞・物の文字・名札・章の題・操作の案内。',
-    '　あわせて、伏線のカットの秒数を「カット」、場面の光（朝・昼・夕方・夜）を「光」として、出る順に入れる。それ以外の動き・カメラ・音は書かない）',
+    '　あわせて、伏線のカットの秒数を「カット」、場面の光（朝・昼・夕方・夜）を「光」として、出る順に入れる。',
+    all
+      ? '　さらに、動き・物・カメラ・画面（暗転と明転）・間・音・操作・場所を、台本の指示の順に入れる。「―― 脚本 4-2 ――」は、そこからがゲーム脚本の表のその行の演出）'
+      : '　それ以外の動き・カメラ・音は書かない）',
     '',
   );
   for (const sc of chapter.scenes) {
@@ -74,6 +83,8 @@ try {
         if (st.scriptId) lines.push(...textOf(st.scriptId));
         else lines.push(formatScreenText({ kind: '操作の案内', text: TEXT.tutorial.steps[st.id] ?? st.id }));
       }
+      const story = steps.filter((st) => st.scriptId);
+      if (story.length > 0) lines.push('（物の文字の段を、崖の上に立たないまま勝った時は、勝った直後（勝った後の台本の前）に出す）');
       const rest = [...new Set(dialogues(events.filter((e) => !(e.trigger.kind === 'turn' && e.trigger.turn === 0))))];
       for (const id of rest) {
         const t = textOf(id);
@@ -81,6 +92,13 @@ try {
       }
       const after = site.afterVictory ? textOf(site.afterVictory) : [];
       if (after.length > 0) lines.push('（勝った後）', ...after);
+    }
+    // 「すべて」の時は、重ねる画（回想の台本）の中身も書く
+    if (all && (sc.kind === 'dialogue' || sc.kind === 'interactive')) {
+      const overlays = parseScriptOrThrow(sc.scriptId, scriptTexts[sc.scriptId], scriptCatalog)
+        .steps.flatMap((s) => (s.kind === 'line' ? s.directives : [s.directive]))
+        .filter((d) => d.kind === 'overlay');
+      for (const o of overlays) lines.push('', `（重ねる画の中身: ${o.scriptId}）`, ...textOf(o.scriptId));
     }
     lines.push('');
   }

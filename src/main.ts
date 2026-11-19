@@ -101,6 +101,10 @@ type ScreenName = 'title' | 'base' | 'roster' | 'shop' | 'deploy' | 'battle' | '
 const storySites: readonly BattleSite[] = prologueBattles;
 /** 会話の場面のカメラの寄り（その画面の形の最初の拡大率を 1 として） */
 const SCENE_ZOOM = { far: 0.85, mid: 1.25, near: 1.9 } as const;
+/** 人物を映す点（頭の少し下）から、手もとまでの高さの差（@映す 名前の手もと） */
+const HANDS_OFFSET = -0.3;
+/** 手もとを映す時の、さらに寄る倍率 */
+const HANDS_ZOOM = 1.7;
 
 interface ActiveBattle {
   readonly view: BattleView;
@@ -726,6 +730,8 @@ function main(): void {
       );
     // 戦闘の手ほどき（序章に足りない仕組み）: 手ほどきのある戦場で、まだ見ていないか、見たものも出す設定の時
     const site = currentSite;
+    // この戦闘で出した物語の段（測り棒の札）。出さないまま勝った時は、勝った直後に出す
+    shownStoryScripts = new Set();
     // 見た手ほどきを出さない設定で、もう見た戦場でも、物語の段（測り棒の札など。scriptId）だけは出す
     const seen = site !== undefined && settings.skipSeenTutorials && settings.seenTutorials.includes(site.id);
     const steps = (site?.tutorial ?? []).filter((st) => !seen || st.scriptId !== undefined);
@@ -733,6 +739,7 @@ function main(): void {
       site && steps.length > 0
         ? createTutorial(hudEl, steps, {
             ...(seen ? { storyOnly: true } : {}),
+            onStoryShown: (scriptId) => shownStoryScripts.add(scriptId),
             tileScreen: (x, z) => view.tileScreenPosition(x, z),
             unitScreen: (id) => {
               try {
@@ -822,6 +829,8 @@ function main(): void {
     devHistory.voices++;
     voiceMarks.show(headOf, VOICE_KINDS[id] ?? 'call', 1.5);
   };
+  /** この戦闘で出した物語の段（手ほどきの scriptId。測り棒の札） */
+  let shownStoryScripts = new Set<string>();
   /** 遠景のカット（@遠景）で見せている舞台（カットの間だけある） */
   let cutView: SceneView | undefined;
   /**
@@ -1058,9 +1067,15 @@ function main(): void {
           return g ? view.gesture(d.actor, g) : undefined;
         }
         case 'camera': {
-          // 人物か物の名前（人物を先に探す）か、マス
-          const point = d.actor ? (view.actorPoint(d.actor) ?? view.propPoint(d.actor)) : mapView.tileTop(d.x ?? 0, d.z ?? 0);
-          if (point) await rig.lookAt(point, zoomOf(d), cameraSeconds(d, fast));
+          // 人物か物の名前（人物を先に探す）か、マス。手もとなら、人物の手の高さ
+          const point = d.actor
+            ? d.hands
+              ? view.actorPoint(d.actor)?.add(new THREE.Vector3(0, HANDS_OFFSET, 0))
+              : (view.actorPoint(d.actor) ?? view.propPoint(d.actor))
+            : mapView.tileTop(d.x ?? 0, d.z ?? 0);
+          // 手もとは、ふつうの寄りより、さらに寄る（守り袋を握らせる手もと）
+          const zoom = d.hands ? (zoomOf(d) ?? SCENE_ZOOM.near) * HANDS_ZOOM : zoomOf(d);
+          if (point) await rig.lookAt(point, zoom, cameraSeconds(d, fast));
           return;
         }
         case 'propPut':
@@ -1515,6 +1530,8 @@ function main(): void {
    */
   const playAfterVictory = async (target: BattleSite, state: BattleState) => {
     if (!target.afterVictory) return;
+    // 物語の段（測り棒の札）を一度も出さないまま勝った時は、勝った直後（勝った後の台本の前）に出す
+    const unseen = (target.tutorial ?? []).flatMap((st) => (st.scriptId && !shownStoryScripts.has(st.scriptId) ? [st.scriptId] : []));
     if (!battle) {
       useMap(target.map);
       setScreen('battle');
@@ -1526,6 +1543,10 @@ function main(): void {
     }
     hudEl.hidden = true;
     labelsEl.hidden = true;
+    for (const id of unseen) {
+      shownStoryScripts.add(id);
+      await playScript(id, battlePort);
+    }
     await playScript(target.afterVictory, battlePort);
   };
 
@@ -1682,6 +1703,8 @@ function main(): void {
       story: () => story,
       /** これまでに鳴らした旋律（旋律/音色）・見せた会話用マップ・言葉にしない声の数（読み込み直すと消える） */
       time: () => currentTime.name,
+      /** 押す場所の上の揺れる目印が出ているか（会話の場面） */
+      beacon: () => sceneView?.beaconVisible() ?? false,
       history: () => ({ melodies: [...devHistory.melodies], stages: [...devHistory.stages], voices: devHistory.voices, overlays: devHistory.overlays, placards: [...devHistory.placards], nameTags: [...devHistory.nameTags] }),
       /** 暗転しているか */
       dark: () => fadeEl.classList.contains('dark'),
