@@ -140,6 +140,8 @@ export interface DialogueRun {
 }
 
 const FAST_LINE_MS = 280;
+/** その前に、出ている台詞の枠を閉じる指示（場面の切り替え・人物が消える・光が立つ） */
+const CLOSES_LINE: ReadonlySet<Directive['kind']> = new Set(['fadeOut', 'location', 'cut', 'overlay', 'exit', 'light', 'chapterTitle']);
 /** 聞く操作で、押されないまま手の絵を目立たせるまでの時間 */
 const LISTEN_IDLE_MS = 3500;
 
@@ -599,7 +601,8 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       else {
         // 文字を出さず、押し続ける手の絵だけで示す（指が押し込んだまま、輪が広がる）
         button.classList.add('hand-only');
-        button.append(holdHandIcon(), meter);
+        // 手の絵の意味が分からないと言われたので、手の絵の下に短い字を添える（初見の検査）
+        button.append(holdHandIcon(), el('span', 'hold-hand-caption', TEXT.dialogue.listenHandCaption), meter);
       }
       control.append(button);
       // 数秒たっても押されない時は、手の絵を少し目立たせる
@@ -905,6 +908,9 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
 
   /** 指示を見せる（暗転と間は、ここで扱う）。before は指示の前の舞台（同時の指示の中では、それまでの指示を行った舞台） */
   async function runDirective(d: Directive, before: StageState = stage): Promise<void> {
+    // 場面が切り替わる前（暗転・場所を移す・遠景・短い画を重ねる）と、人物が消える時・光が立つ時には、前の台詞の枠を閉じる
+    // （台詞の枠が、暗転や場所の切り替え、話した人物が消えた後まで残らないように。早送り・読み返し・スキップのボタンは残す）
+    if (CLOSES_LINE.has(d.kind) && !box.hidden && !box.classList.contains('tools-only')) hideLine(true);
     // 同時: 中の指示を一斉に始め、すべて終わるまで待つ
     if (d.kind === 'together') {
       let st = before;

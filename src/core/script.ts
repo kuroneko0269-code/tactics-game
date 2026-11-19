@@ -63,6 +63,8 @@ export type Directive =
   | { readonly kind: 'lightOff'; readonly name: string }
   /** 旋律を鳴らす（待たずに次へ進む）。melody は旋律の名前、timbre は音色の名前。mark は鳴っている間の印に添える文（省くと音色の名前） */
   | { readonly kind: 'melody'; readonly melody: string; readonly timbre: string; readonly mark?: string }
+  /** 歌っている人の頭上に音符の印を ms の間出す（だれの鼻歌・歌かが分かるように。@音の印 人物 秒）。待たずに次へ */
+  | { readonly kind: 'humMark'; readonly actor: string; readonly ms: number }
   /**
    * 鳴っている旋律が、残り remaining 個の音になるまで待つ（0 なら終わるまで。鳴っていなければ待たない）。first なら、旋律の最初の音が鳴りはじめるまで。
    * 耳に当てて聞く操作の間は、プレイヤーが押して進める旋律を待つ（早送りでも待つ）
@@ -273,6 +275,7 @@ export const DIRECTIVE_USAGE: Readonly<Record<string, string>> = {
   聞く: '@聞く 旋律の名前 音色 [案内の文]（操作の場面: 押している間だけ鳴る。待たずに次の行へ進み、@節を待つ で聞く進み具合を待つ）',
   札: '@札 今　暦の塔（場所と時の札。画面の隅に短く出す）',
   名札: '@名札 名前 肩書き（台詞のない人物の名前と肩書きを短く出す）',
+  音の印: '@音の印 人物 [秒]（歌っている人の頭上に音符の印を出す。省くと 6 秒。待たない）',
   物の札: '@物の札 物か人物かマス(x,z) 名前 [秒]（物の上に、物の名前だけを短く出す。省くと 2.5 秒。待たずに次へ）',
   映す: '@映す x,z か 人物・物の名前（人物の名前の後に「の手もと」で手の高さ） [遠・中・近] 秒（その秒の間だけ映して次へ）',
   重ねる: '@重ねる 回想の台本の名前 秒（今の場面の上に、別の短い画を重ねる）',
@@ -571,6 +574,13 @@ function parseDirective(text: string, catalog: ScriptCatalog): Directive | strin
       if (!(catalog.timbres ?? []).includes(args[1]!)) return bad(`音色「${args[1]}」はありません（使える音色: ${(catalog.timbres ?? []).join('・')}）`);
       const mark = args.slice(2).join(' ');
       return { kind: 'melody', melody: args[0]!, timbre: args[1]!, ...(mark ? { mark } : {}) };
+    }
+    case '音の印': {
+      const e = need(1);
+      if (e) return e;
+      const ms = seconds(args[1], 6000);
+      if (typeof ms === 'string') return ms;
+      return { kind: 'humMark', actor: args[0]!, ms };
     }
     case '節を待つ': {
       if (args[0] === '頭') return { kind: 'melodyWait', remaining: 0, first: true };

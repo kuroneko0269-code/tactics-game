@@ -99,8 +99,11 @@ export const GESTURES: Readonly<Record<string, GestureDefinition>> = {
   後ずさる: { seconds: 1.0, frames: [{ t: 0 }, { t: 0.5, back: 0.25, armL: 0.5, armR: 0.5 }, { t: 0.8, back: 0.25 }, { t: 1 }] },
   /** 耳に当てる（石を耳に当てる） */
   耳に当てる: { seconds: 1.8, frames: [{ t: 0 }, { t: 0.25, armR: 2.3, tilt: 0.25 }, { t: 0.8, armR: 2.3, tilt: 0.25 }, { t: 1 }] },
-  /** 床から物を拾う */
-  拾う: { seconds: 1.2, frames: [{ t: 0 }, { t: 0.4, drop: 0.16, bow: 0.6, armR: 0.9 }, { t: 0.6, drop: 0.16, bow: 0.6, armR: 0.9 }, { t: 1 }] },
+  /**
+   * 床から物を拾う: 腰を落としてしゃがみ、体は少しだけ前へ、頭を下げて足もとを見ながら、右手を下へ伸ばす
+   * （体を大きく前へ倒すと、倒れ込んだように見えるため。序章の演出の直し）
+   */
+  拾う: { seconds: 1.4, frames: [{ t: 0 }, { t: 0.35, drop: 0.24, bow: 0.12, head: 0.28, armR: 0.6 }, { t: 0.65, drop: 0.24, bow: 0.12, head: 0.28, armR: 0.6 }, { t: 1 }] },
   /** 泣く（肩を震わせる） */
   泣く: { seconds: 1.8, frames: repeat(4, { head: 0.6, bow: 0.25, armL: 0.6, armR: 0.6 }, { lift: 0.02 }) },
   /** 小刀で何かを刻む（手もとを見ながら） */
@@ -141,7 +144,8 @@ export const POSTURES: Readonly<Record<string, GesturePose>> = {
   座る: { drop: 0.2, armL: 0.6, armR: 0.6 },
   /** 作業台に向かって手を動かしている（三度叩くは、この姿勢から叩く） */
   作業する: { armR: 0.8, armL: 0.7, bow: 0.15, head: 0.35 },
-  膝をついたまま: { drop: 0.22, bow: 0.3 },
+  /** 膝をついたまま（遠くから見ても、立っていないと分かる深さ。戦闘不能の膝をついた姿と同じくらい） */
+  膝をついたまま: { drop: 0.3, bow: 0.4, head: 0.45, armL: 0.35, armR: 0.35 },
   /** 腰掛けて、手もとの帳面に目を落としたまま（ハルドの「顔を上げずに話す」。話を聞く部屋） */
   帳面を読む: { drop: 0.2, armL: 0.9, armR: 0.9, head: 0.55, bow: 0.1 },
   うつむいたまま: { head: 0.6, bow: 0.1 },

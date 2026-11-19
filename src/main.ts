@@ -706,6 +706,7 @@ function main(): void {
         facingScreen: (unitId) => view.facingScreen(unitId),
         expToNext: (level) => (level >= progressionRules.maxLevel ? undefined : expToNext(level, progressionRules)),
         ...(currentSite?.roleTags ? { roleTags: currentSite.roleTags } : {}),
+        story: liveStoryBattle !== null,
       },
       start.state.scenario.objectives.victory.flatMap((c) => (c.kind === 'defeatUnit' ? [c.unitId] : [])),
     );
@@ -846,7 +847,8 @@ function main(): void {
   const showCut = async (stageId: string, ms: number, fast: boolean) => {
     const def = stages.find((st) => st.id === stageId);
     if (!def) return;
-    const fade = fast ? 80 : 300;
+    // 暗くなってから明るくなるように見えないよう、ほぼ切り替えるだけにする（初見の検査: 遠景が前の画と同じ光に見えるように）
+    const fade = fast ? 60 : 120;
     await setDark(true, fade);
     const hidden = stage.scene.children.filter((o) => o.visible && !(o instanceof THREE.Light));
     for (const o of hidden) o.visible = false;
@@ -866,7 +868,10 @@ function main(): void {
     const v = def.view;
     if (v) void rig.lookAt(cutMap.tileTop(v.x, v.z).add(new THREE.Vector3(0, 0.5, 0)), SCENE_ZOOM[v.zoom], 0.01);
     await setDark(false, fade);
-    await new Promise<void>((resolve) => window.setTimeout(resolve, fast ? Math.min(ms, 300) : ms));
+    // 遠景の間は、カメラをゆっくり横へ流す（動きのない画のまま待たせないように。序章の演出の直し）
+    const hold = fast ? Math.min(ms, 300) : ms;
+    if (v) void rig.lookAt(cutMap.tileTop(v.x + 1.5, v.z).add(new THREE.Vector3(0, 0.5, 0)), SCENE_ZOOM[v.zoom], hold / 1000);
+    await new Promise<void>((resolve) => window.setTimeout(resolve, hold));
     await setDark(true, fade);
     view.dispose();
     cutView = undefined;
@@ -1053,6 +1058,9 @@ function main(): void {
           return showCut(d.stageId, d.ms, fast);
         case 'voice':
           return playVoice(d.voice, () => view.actorHead(d.actor));
+        case 'humMark':
+          voiceMarks.show(() => view.actorHead(d.actor), 'hum', d.ms / 1000);
+          return;
         case 'propMove':
           return view.moveProp(d.name, d, d.ms / 1000);
         case 'enter':
@@ -1141,13 +1149,23 @@ function main(): void {
       if (c) void rig.focusOn([mapView.tileTop(c.x, c.z), mapView.tileTop(c.x, c.z).add(new THREE.Vector3(0, 1, 0))]);
       return c;
     },
-    screenOf: (name) => worldToScreen(tileOfName(name) ?? view.propTop(name) ?? view.actorHead(name)),
+    screenOf: (name) => {
+      const held = heldOfName(name);
+      return worldToScreen(tileOfName(name) ?? (held ? view.actorSlot(held.actor, held.slot) : undefined) ?? view.propTop(name) ?? view.actorHead(name));
+    },
     };
   };
   /** 「x,z」と書いた名前なら、そのマスの上面の少し上（物の名前の札を、マップのマスに出す。堰など） */
   const tileOfName = (name: string) => {
     const m = /^(-?\d+),(-?\d+)$/.exec(name);
     return m ? mapView.tileTop(Number(m[1]), Number(m[2])).add(new THREE.Vector3(0, 0.5, 0)) : undefined;
+  };
+  /** 「ユナの手もと」「トウマの腰」「ゴードの背」のような名前なら、その人物の持ち物の付く所（物の名前の札を、持っている物のそばに出す） */
+  const heldOfName = (name: string): { actor: string; slot: 'hand' | 'handL' | 'waist' | 'back' } | undefined => {
+    const m = /^(.+)の(手もと|右手|左手|腰|背)$/.exec(name);
+    if (!m) return undefined;
+    const slot = ({ 手もと: 'hand', 右手: 'hand', 左手: 'handL', 腰: 'waist', 背: 'back' } as const)[m[2] as '手もと'];
+    return { actor: m[1]!, slot };
   };
   /** 3D の位置を、画面の座標にする（物の名前の札を出す所。カメラの後ろなら undefined） */
   const worldToScreen = (world: THREE.Vector3 | undefined) => {
@@ -1173,7 +1191,9 @@ function main(): void {
     sync: () => {},
     screenOf: (name) => {
       const id = battleActorId(name);
-      return worldToScreen(tileOfName(name) ?? (id ? battle?.view.actorHead(id) : battle?.view.propPoint(name)));
+      const held = heldOfName(name);
+      const heldId = held ? battleActorId(held.actor) : undefined;
+      return worldToScreen(tileOfName(name) ?? (heldId && held ? battle?.view.actorSlot(heldId, held.slot) : undefined) ?? (id ? battle?.view.actorHead(id) : battle?.view.propPoint(name)));
     },
     highlight: (speaker) => {
       const id = speaker ? battleActorId(speaker) : undefined;
@@ -1247,6 +1267,11 @@ function main(): void {
         case 'voice': {
           const id = battleActorId(d.actor);
           if (id) playVoice(d.voice, () => battle?.view.actorHead(id));
+          return;
+        }
+        case 'humMark': {
+          const id = battleActorId(d.actor);
+          if (id) voiceMarks.show(() => battle?.view.actorHead(id), 'hum', d.ms / 1000);
           return;
         }
         case 'propMove':
@@ -1511,6 +1536,7 @@ function main(): void {
     currentStageId = stageDef.id;
     devHistory.stages.add(stageDef.id);
     useMap(stageDef.map);
+    mapView.group.visible = stageDef.hideGround !== true;
     applySky(stageDef);
     rig.reset();
     const view = createSceneView(sceneViewOptions());
@@ -1526,6 +1552,7 @@ function main(): void {
     sceneBaseStageId = stageDef.id;
     sceneToken = {};
     useMap(stageDef.map);
+    mapView.group.visible = stageDef.hideGround !== true;
     applySky(stageDef);
     setScreen('scene');
     rig.reset();

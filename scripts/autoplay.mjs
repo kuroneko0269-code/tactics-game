@@ -2692,6 +2692,7 @@ async function storyRun(browser, baseUrl, name, core) {
     check(st.stage.props['箸4'] === undefined && st.stage.props['箸3'] !== undefined && !st.stage.props['石'], '箸を一膳戻していないか、石を拾っていません');
     // 耳に当てる操作は、手の絵だけ（押し続ける動きの絵）。全体の版では、押さないまま待つと手の絵が目立つことも確かめる
     check(await T(() => document.querySelector('.listen-button.hand-only .hold-hand') !== null), '耳に当てる操作が、手の絵だけになっていません');
+    check((await T(() => document.querySelector('.listen-button.hand-only .hold-hand-caption')?.textContent)) === '押したまま、聞く', '耳に当てる手の絵の下に「押したまま、聞く」が出ていません');
     if (!QUICK) await until(() => document.querySelector('.listen-button.nudge') !== null, undefined, 8000);
     const overlaysBefore = (await T(() => window.__tactics.history())).overlays;
     await doListen(4300);
@@ -2815,7 +2816,7 @@ async function storyRun(browser, baseUrl, name, core) {
       skip: document.querySelector('.tutorial-skip')?.hidden === true,
     }));
     check(
-      bubble.on && bubble.label === '測り棒の札' && bubble.text.startsWith('高い所から撃つ矢は、遠くまで届く。兄さんは高い所が好きでしょう。') && bubble.sign === 'ユナ' && bubble.skip,
+      bubble.on && bubble.label === '測り棒を作った、トウマの妹ユナの札' && bubble.text.startsWith('高い所から撃つ矢は、遠くまで届く。兄さんは高い所が好きでしょう。') && bubble.sign === 'ユナ' && bubble.skip,
       `手ほどきを飛ばした後、キリを崖の上へ動かした時に、測り棒の札（署名「ユナ」。飛ばすボタンなし）が出ていません（${JSON.stringify(bubble)}）`,
     );
     await screenshot('weir-tag');

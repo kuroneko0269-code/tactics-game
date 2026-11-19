@@ -37,7 +37,7 @@ function readRows(md: string): Row[] {
 /** 脚本の場面 → その場面を作る台本 */
 const SCENE_SCRIPTS: Readonly<Record<number, readonly string[]>> = {
   0: ['prologueOpen'],
-  1: ['prologueWeirIntro', 'prologueWeirTag', 'prologueWeirCrack1', 'prologueWeirCrack2', 'prologueWeirCrack3', 'prologueWeirAfter'],
+  1: ['prologueWeirIntro', 'prologueWeirSeams', 'prologueWeirTag', 'prologueWeirCrack1', 'prologueWeirCrack2', 'prologueWeirCrack3', 'prologueWeirAfter'],
   2: ['prologueTower'],
   3: ['prologueHall'],
   4: ['prologueHome'],
@@ -108,11 +108,13 @@ const sameWords = (a: string) => a.replace(/。/g, '');
  */
 const ADDED_NARRATION: readonly { readonly ref: string; readonly text: string }[] = [
   // 場面1の勝った後: 西の谷へ水が流れていく画の後、遠い谷の家々のカット（1-16）の前（2026-11-19。物語の作者の回答）
-  { ref: '1-15', text: '下流の村は、もう沈まない。水は、遠い谷へ流れていった。' },
+  { ref: '1-15', text: '下流の村は、もう沈まない。水は、西の谷へ流れていった。' },
+  // 場面9の家までの道: 知らない顔が会釈していく画の上（2026-11-19。物語の作者の直し）
+  { ref: '9-2', text: '知らない顔が、知った顔のように挨拶をしてくる。' },
 ];
 const isAdded = (l: { speaker: string | null; text: Parameters<typeof plainText>[0] }) => l.speaker === null && ADDED_NARRATION.some((a) => a.text === plainText(l.text));
 
-const OBJECT_LABELS = ['堰', '下流の村', '測り棒', '蜜菓子の包み', '塔の暦盤', 'ユナの暦盤', '守り袋', '指示書', '隊の道具', '灯', '誓いの剣', '石'];
+const OBJECT_LABELS = ['堰', '下流の村', '測り棒', '蜜菓子の包み', '塔の暦盤', 'ユナの暦盤', '守り袋', '指示書', '隊の道具', '灯', '誓いの剣', '石', '合わせ目', '測り棒（崖の高さを測る道具）', '堰を築く人々', '七つの氏族'];
 
 describe('序章の台本とゲーム脚本の対応', () => {
   it('脚本の表は10場面で、行を読める', () => {
@@ -168,7 +170,7 @@ describe('序章の台本とゲーム脚本の対応', () => {
       const narr = lineSteps(block).filter((l) => l.speaker === null);
       expect(narr.length, refOf(r)).toBeGreaterThanOrEqual(1);
       const want = captionOf(r);
-      expect(joined(narr.map((n) => plainText(n.text).replace('\n', ' / '))), refOf(r)).toBe(sameWords(want.text));
+      expect(joined(narr.map((n) => plainText(n.text).replace(/\n/g, ' / '))), refOf(r)).toBe(sameWords(want.text));
       for (const n of narr) expect(n.overDark === true, refOf(r)).toBe(want.overDark);
     }
   });
@@ -270,7 +272,7 @@ describe('序章の台本とゲーム脚本の対応', () => {
       allBlocks.flatMap((b) => {
         const ls = lineSteps(b).filter((l) => !l.inscription && !isAdded(l) && (l.speaker !== null) === speech);
         if (ls.length === 0) return [];
-        return [speech ? `${ls[0]!.speaker}:${joined(ls.map((l) => plainText(l.text)))}` : joined(ls.map((l) => plainText(l.text).replace('\n', ' / ')))];
+        return [speech ? `${ls[0]!.speaker}:${joined(ls.map((l) => plainText(l.text)))}` : joined(ls.map((l) => plainText(l.text).replace(/\n/g, ' / ')))];
       });
     expect(perRow(true)).toEqual(want.map(sameWords));
     expect(perRow(false)).toEqual(wantNarr.map(sameWords));

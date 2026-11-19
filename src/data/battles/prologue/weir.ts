@@ -29,6 +29,15 @@ const map = stageMap('prologue-weir', [
 const seams = ['weir-seam-1', 'weir-seam-2', 'weir-seam-3'];
 /** 水が流れこむ、西の涸れた谷 */
 const westValley = map.heights.flatMap((row, z) => row.flatMap((h, x) => (x === 0 && h === 0 ? [{ x, z, terrain: 'water' as const }] : [])));
+/**
+ * 崩れた堰の形（3つ目の合わせ目を壊した時）: 西の端（x=1・2）が切れて水が西の谷へ落ち、残りは一段低い瓦礫の土になる
+ * （崩れる音がしても堰の形が残って見えないように。序章の演出の直し）
+ */
+const brokenWeir = [
+  { x: 1, z: 2, height: 0, terrain: 'water' as const },
+  { x: 2, z: 2, height: 0, terrain: 'water' as const },
+  ...[3, 4, 5, 6, 7].map((x) => ({ x, z: 2, height: 2, terrain: 'dirt' as const })),
+];
 
 export const weirBattle: BattleSite = {
   id: 'prologue-weir',
@@ -58,12 +67,14 @@ export const weirBattle: BattleSite = {
   objectives: { victory: [{ kind: 'destroyObjects', unitIds: seams }], defeat: [{ kind: 'allDefeated' }], defeatAllWins: false },
   // 合わせ目が一つ割れるたびに、石の割れる音と水の音が少しずつ強まる（戦闘中の台詞はない。音だけの台本）
   events: [
+    // 戦闘の始めに、壊す合わせ目を一つずつ映して札を出す（初見の検査）
+    { id: 'weir-start', trigger: { kind: 'turn', turn: 0 }, effects: [{ kind: 'dialogue', scriptId: 'prologueWeirSeams' }] },
     { id: 'weir-seam-crack-1', trigger: { kind: 'objectsBroken', unitIds: seams, count: 1 }, effects: [{ kind: 'dialogue', scriptId: 'prologueWeirCrack1' }] },
     { id: 'weir-seam-crack-2', trigger: { kind: 'objectsBroken', unitIds: seams, count: 2 }, effects: [{ kind: 'dialogue', scriptId: 'prologueWeirCrack2' }] },
     {
       id: 'weir-last-seam',
       trigger: { kind: 'objectsBroken', unitIds: seams, count: 3 },
-      effects: [{ kind: 'terrain', tiles: westValley }, { kind: 'dialogue', scriptId: 'prologueWeirCrack3' }],
+      effects: [{ kind: 'terrain', tiles: [...brokenWeir, ...westValley] }, { kind: 'dialogue', scriptId: 'prologueWeirCrack3' }],
     },
   ],
   // 堰を積む男たち（戦わない）。東の崖の上から見ている
@@ -71,7 +82,7 @@ export const weirBattle: BattleSite = {
     { id: 'weir-worker-1', x: 8, z: 0, facing: 'south', look: 'worker' },
     { id: 'weir-worker-2', x: 8, z: 1, facing: 'west', look: 'clanD' },
   ],
-  cast: { 番兵: 'weir-guard-2', 番兵A: 'weir-guard-1', 番兵B: 'weir-guard-3', 男たち: 'weir-worker-1', 男: 'weir-worker-2' },
+  cast: { 合わせ目1: 'weir-seam-1', 合わせ目2: 'weir-seam-2', 合わせ目3: 'weir-seam-3', 番兵: 'weir-guard-2', 番兵A: 'weir-guard-1', 番兵B: 'weir-guard-3', 男たち: 'weir-worker-1', 男: 'weir-worker-2' },
   looks: { 'weir-guard-1': 'guard', 'weir-guard-2': 'guard', 'weir-guard-3': 'guardBow' },
   afterVictory: 'prologueWeirAfter',
   // マップの外の土地（地面・上流の湖・西の谷・下流の川筋と三つの村）。浮いて見える物を置かない（足もとに地面がある）

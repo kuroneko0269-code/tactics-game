@@ -4,7 +4,8 @@ import * as THREE from 'three';
  * 言葉にしない声の印（ゲーム脚本の序章: 番兵の叫び・売り子の呼び込み・家族の笑い声）。
  * 人形の頭上に、声の種類ごとの小さな絵（文字ではない）を短い間だけ出す。叫びはぎざぎざの線、呼び込みは広がる弧、笑いは小さな波。
  */
-export type VoiceKind = 'shout' | 'call' | 'laugh';
+/** 声の印の種類。hum は歌っている・鼻歌を歌っている人の頭上の音符（@音の印） */
+export type VoiceKind = 'shout' | 'call' | 'laugh' | 'hum';
 
 export interface VoiceMarks {
   /** 頭の位置を返す関数の人物の頭上に、印を seconds 秒出す */
@@ -15,7 +16,7 @@ export interface VoiceMarks {
   dispose(): void;
 }
 
-const COLORS: Readonly<Record<VoiceKind, string>> = { shout: '#ff7a4a', call: '#ffd65a', laugh: '#ffe8b0' };
+const COLORS: Readonly<Record<VoiceKind, string>> = { shout: '#ff7a4a', call: '#ffd65a', laugh: '#ffe8b0', hum: '#bfe6ff' };
 
 function drawIcon(kind: VoiceKind): THREE.CanvasTexture | undefined {
   if (typeof document === 'undefined') return undefined;
@@ -37,6 +38,24 @@ function drawIcon(kind: VoiceKind): THREE.CanvasTexture | undefined {
     stroke(16, 'rgba(40,24,8,0.75)', path);
     stroke(8, COLORS[kind], path);
   };
+  if (kind === 'hum') {
+    // 八分音符（玉と棒と旗）
+    paint(() => {
+      g.moveTo(74, 30);
+      g.lineTo(74, 88);
+      g.moveTo(74, 30);
+      g.quadraticCurveTo(96, 40, 92, 62);
+    });
+    g.beginPath();
+    g.ellipse(60, 90, 16, 12, -0.4, 0, Math.PI * 2);
+    g.fillStyle = 'rgba(40,24,8,0.75)';
+    g.fill();
+    g.beginPath();
+    g.ellipse(60, 90, 11, 8, -0.4, 0, Math.PI * 2);
+    g.fillStyle = COLORS.hum;
+    g.fill();
+    return new THREE.CanvasTexture(canvas);
+  }
   if (kind === 'shout') {
     // ぎざぎざの線を3本（放射状）
     for (const a of [-0.6, 0, 0.6]) {
