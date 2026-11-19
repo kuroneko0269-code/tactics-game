@@ -846,8 +846,21 @@ export function createBattleView(options: {
       const glow = new THREE.Color(0xffffff);
       const y0 = a.puppet.body.position.y;
       if (fall) {
-        // 光が横からさらう: 横へ流され、傾きながら、白く光って足もとの下へ沈んでいく（2.4 秒。見届けられる長さ）
+        // 足もとに白い穴（どの時代でもない白）が開き、横へ押し流されて傾きながら、白く光ってその中へ沈んでいく（2.4 秒。見届けられる長さ）。
+        // 光の柱は使わない（帰りの門の柱と見分けがつかず、だれが光に入ったか分からなくなるため）
         const x0 = a.puppet.body.position.x;
+        const hole = new THREE.Mesh(
+          new THREE.CircleGeometry(0.5, 32),
+          new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false }),
+        );
+        hole.rotation.x = -Math.PI / 2;
+        hole.position.copy(a.puppet.group.position).add(new THREE.Vector3(0.15, 0.02, 0));
+        hole.renderOrder = 5;
+        scene.add(hole);
+        await tweens.play(0.5, (t) => {
+          (hole.material as THREE.MeshBasicMaterial).opacity = t;
+          hole.scale.setScalar(0.3 + 0.9 * t);
+        });
         await tweens.play(2.4, (t) => {
           a.puppet.setGlow(glow, Math.min(1, t * 1.6));
           a.puppet.setOpacity(t < 0.6 ? 1 : 1 - (t - 0.6) / 0.4);
@@ -859,6 +872,13 @@ export function createBattleView(options: {
         a.puppet.setGlow(glow, 0);
         a.puppet.body.rotation.z = 0;
         a.puppet.body.position.set(x0, y0, a.puppet.body.position.z);
+        await tweens.play(0.8, (t) => {
+          (hole.material as THREE.MeshBasicMaterial).opacity = 1 - t;
+          hole.scale.setScalar(1.2 - 0.9 * t);
+        });
+        hole.removeFromParent();
+        hole.geometry.dispose();
+        (hole.material as THREE.MeshBasicMaterial).dispose();
         return;
       }
       // 門の光へ入っていく: 少しだけ光りながら薄れる（白く光る人影に見えないように）
