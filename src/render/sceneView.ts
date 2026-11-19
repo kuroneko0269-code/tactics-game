@@ -44,6 +44,8 @@ export interface SceneView {
   actorHead(name: string): THREE.Vector3 | undefined;
   /** 歩かせる時に、進めるマスを色分けする（空なら消す） */
   setWalkTargets(tiles: readonly Coord[], goal?: Coord): void;
+  /** 押す場所の上の目印が出ているか（自動テスト用） */
+  beaconVisible(): boolean;
   /** 動きの速さ（早送りの時に上げる） */
   setSpeed(multiplier: number): void;
   pickTargets(): THREE.Object3D[];
@@ -79,6 +81,29 @@ export function createSceneView(options: {
   const lights = new Map<string, { pillar: LightPillar; light: LightState }>();
   /** タップを待っている物（光らせる） */
   let tapTarget: string | null = null;
+  /**
+   * 押す場所の目印: 押すマスや物の上で、上下に揺れる下向きの矢印（文字の案内を出さない場面でも、押す所が迷わず分かるように）
+   */
+  const beacon = new THREE.Group();
+  {
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffd34d, transparent: true, opacity: 0.95, depthTest: false });
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.26, 4), mat);
+    cone.rotation.x = Math.PI;
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.025, 6, 20), mat);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.2;
+    beacon.add(cone, ring);
+    beacon.renderOrder = 999;
+    for (const c of beacon.children) c.renderOrder = 999;
+  }
+  beacon.visible = false;
+  scene.add(beacon);
+  /** 目印の土台の位置（揺れはこの上で） */
+  const beaconBase = new THREE.Vector3();
+  const setBeacon = (at: THREE.Vector3 | undefined) => {
+    beacon.visible = at !== undefined;
+    if (at) beaconBase.copy(at);
+  };
   /** 台本の持ち物（物の種類の名前）を、見た目の id にして人形に付ける */
   const applyItems = (puppet: Puppet, items: ActorState['items']) => {
     const models: Record<string, string> = {};
@@ -260,6 +285,7 @@ export function createSceneView(options: {
       tapTarget = name;
       const p = name ? props.get(name) : undefined;
       mapView.setMarks(p ? [{ x: p.coord.x, z: p.coord.z, kind: 'selected' }] : []);
+      setBeacon(p ? mapView.tileTop(p.coord.x, p.coord.z).add(new THREE.Vector3(0, 1.15, 0)) : undefined);
       return p ? { ...p.coord } : undefined;
     },
     async changeProp(name, kind) {
@@ -317,7 +343,10 @@ export function createSceneView(options: {
       const next = tiles.map((t) => ({ x: t.x, z: t.z, kind: 'selected' as const }));
       const showGoal = goal && !tiles.some((t) => t.x === goal.x && t.z === goal.z);
       mapView.setMarks([...(showGoal ? [{ x: goal.x, z: goal.z, kind: 'move' as const }] : []), ...next]);
+      const first = tiles[0];
+      setBeacon(first ? mapView.tileTop(first.x, first.z).add(new THREE.Vector3(0, 0.75, 0)) : undefined);
     },
+    beaconVisible: () => beacon.visible,
     setSpeed(multiplier) {
       speed = Math.max(0.1, multiplier);
     },
@@ -339,13 +368,23 @@ export function createSceneView(options: {
       for (const a of actors.values()) a.puppet.update(elapsed);
       for (const p of props.values()) p.model.update(elapsed);
       // タップを待っている物は、ゆっくり明滅する
-      if (tapTarget) props.get(tapTarget)?.model.setGlow(new THREE.Color(0xffe8a0), 0.35 + Math.sin(elapsed * 4) * 0.25);
+      if (tapTarget) props.get(tapTarget)?.model.setGlow(new THREE.Color(0xffe8a0), 0.45 + Math.sin(elapsed * 4) * 0.3);
+      if (beacon.visible) {
+        beacon.position.copy(beaconBase).add(new THREE.Vector3(0, Math.abs(Math.sin(elapsed * 3)) * 0.18, 0));
+        beacon.rotation.y = elapsed * 1.5;
+      }
       for (const l of lights.values()) {
         if (l.light.actor) placeLight(l);
         l.pillar.update(elapsed);
       }
     },
     dispose() {
+      scene.remove(beacon);
+      for (const c of beacon.children) {
+        const m = c as THREE.Mesh;
+        m.geometry.dispose();
+        (m.material as THREE.Material).dispose();
+      }
       for (const name of [...lights.keys()]) dropLight(name);
       for (const name of [...actors.keys()]) dropActor(name);
       for (const name of [...props.keys()]) dropProp(name);

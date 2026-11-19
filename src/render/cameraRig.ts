@@ -74,6 +74,8 @@ const DEFAULT_HEIGHT: HeightLevel = 1;
 /** 拡大率の下限と上限（1 でマップ全体が収まる） */
 export const ZOOM_MIN = 0.8;
 export const ZOOM_MAX = 4;
+/** 台本のカメラ（lookAt）だけが寄れる上限（手もとのような小さな物を映すため。プレイヤーの拡大は ZOOM_MAX まで） */
+export const SCRIPT_ZOOM_MAX = 8;
 /** ボタン1回ぶんの拡大率 */
 const ZOOM_STEP = 1.35;
 /** 縦長の画面（スマホ縦向き）の初期の拡大率。マップ全体は入らないが、マスが大きく見える */
@@ -293,7 +295,7 @@ export function createCameraRig(initial: CameraRigOptions): CameraRig {
       glide = undefined;
       clampPan(goalPan.copy(groundPan(point)));
       basePan.copy(goalPan);
-      if (zoomScale !== undefined) goalZoom = clampZoom(initialZoom() * zoomScale);
+      if (zoomScale !== undefined) goalZoom = THREE.MathUtils.clamp(initialZoom() * zoomScale, ZOOM_MIN, SCRIPT_ZOOM_MAX);
       // 秒の指定があれば、その時間をかけて、なめらかに加速・減速しながら動かす
       if (seconds !== undefined && seconds > 0) {
         glide = { from: pan.clone(), to: goalPan.clone(), zoomFrom: zoom, zoomTo: goalZoom, t: 0, seconds };

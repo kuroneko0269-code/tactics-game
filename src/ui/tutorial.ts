@@ -35,6 +35,8 @@ export interface TutorialPorts {
    * 物語の段（物の文字を出す段。scriptId）だけを出す（見た手ほどきを出さない設定の時）。操作の説明は出さず、飛ばすボタンも出さない
    */
   readonly storyOnly?: boolean;
+  /** 物語の段（scriptId）を出した時に知らせる（出さないまま勝った時に、勝った直後に出すため） */
+  readonly onStoryShown?: (scriptId: string) => void;
 }
 
 export function createTutorial(root: HTMLElement, steps: readonly TutorialStep[], ports: TutorialPorts): TutorialScreen {
@@ -116,6 +118,7 @@ export function createTutorial(root: HTMLElement, steps: readonly TutorialStep[]
   const show = (step: TutorialStep, reachable: readonly Coord[]) => {
     showing = step;
     const ins = step.scriptId ? ports.inscriptionOf?.(step.scriptId) : undefined;
+    if (step.scriptId) ports.onStoryShown?.(step.scriptId);
     bubble.classList.toggle('inscription', ins !== undefined);
     // 物語の段だけを出す状態では、飛ばすボタンを出さない（読んで、操作を続ければ消える）
     skip.hidden = storyMode;

@@ -3319,6 +3319,90 @@ body.in-dialogue #hud {
   background: rgba(242, 193, 78, 0.35);
 }
 
+/* 文字を出さない聞く操作（序章の場面9）: 押し続ける手の絵だけ。指が押し込んだまま、下に輪が広がる */
+.hold-button.hand-only {
+  width: 120px;
+  min-height: 112px;
+  border-radius: 56px;
+  gap: 4px;
+  padding: 8px 0 12px;
+}
+
+.hold-hand {
+  display: block;
+  color: var(--accent);
+  line-height: 0;
+}
+
+.hold-hand-finger {
+  animation: hold-hand-press 1.6s ease-in-out infinite;
+}
+
+.hold-hand-ripple {
+  transform-origin: 32px 54px;
+  animation: hold-hand-ripple 1.6s ease-out infinite;
+}
+
+/* 押している間は、指を押し込んだまま止め、輪だけを広げる */
+.hold-button.holding .hold-hand-finger {
+  animation: none;
+  transform: translateY(6px);
+}
+
+@keyframes hold-hand-press {
+  0%,
+  15% {
+    transform: translateY(0);
+  }
+  35%,
+  85% {
+    transform: translateY(6px);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+
+@keyframes hold-hand-ripple {
+  0%,
+  30% {
+    transform: scale(0.5);
+    opacity: 0;
+  }
+  45% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+}
+
+/* 数秒たっても押されない時は、手の絵を少し目立たせる（ゆっくり脈打つ光） */
+.hold-button.hand-only.nudge {
+  animation: hold-hand-nudge 1.2s ease-in-out infinite;
+}
+
+@keyframes hold-hand-nudge {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(242, 193, 78, 0);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(242, 193, 78, 0.35);
+    transform: scale(1.06);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hold-hand-finger,
+  .hold-hand-ripple,
+  .hold-button.hand-only.nudge {
+    animation: none;
+  }
+}
+
 .hold-meter {
   width: 70%;
   height: 8px;

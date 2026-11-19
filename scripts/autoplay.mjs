@@ -2689,6 +2689,12 @@ async function storyRun(browser, baseUrl, name, core) {
         );
       }
       if (d.caption && d.text === 'ただいま、と言うつもりだった。') caption = true;
+      if (['walk', 'tap', 'listen'].includes(d.waiting)) {
+        // 場面9は文字の案内を出さない（手引きの文・タップのボタンの文・聞く操作の文）
+        const shown = await T(() => [...document.querySelectorAll('.dialogue-hint, .tap-button, .listen-button .label')].filter((e) => e.offsetParent !== null).map((e) => e.textContent));
+        check(shown.length === 0, `場面9で文字の案内が出ています（${shown.join(' / ')}）`);
+      }
+      if (d.waiting === 'tap') check(await T(() => window.__tactics.beacon()), '場面9で、押す物の上に光る印が出ていません');
       if (d.waiting === 'tap' && d.tapTarget?.x === 2) {
         check(thanks && caption, '家までの道で、見知らぬ男の礼か「ただいま、と言うつもりだった。」の字幕が出ていません');
         await screenshot('door');
@@ -2702,6 +2708,9 @@ async function storyRun(browser, baseUrl, name, core) {
     const st = await T(() => ({ stage: window.__tactics.dialogueStage(), where: window.__tactics.sceneStage() }));
     check(st.where === 'stage-home' && Object.keys(st.stage.props).filter((p) => p.startsWith('椀')).length === 3, '物置の場面で、家に移っていないか、椀が三つではありません');
     check(st.stage.props['箸4'] === undefined && st.stage.props['箸3'] !== undefined && !st.stage.props['石'], '箸を一膳戻していないか、石を拾っていません');
+    // 耳に当てる操作は、手の絵だけ（押し続ける動きの絵）。全体の版では、押さないまま待つと手の絵が目立つことも確かめる
+    check(await T(() => document.querySelector('.listen-button.hand-only .hold-hand') !== null), '耳に当てる操作が、手の絵だけになっていません');
+    if (!QUICK) await until(() => document.querySelector('.listen-button.nudge') !== null, undefined, 8000);
     const overlaysBefore = (await T(() => window.__tactics.history())).overlays;
     await doListen(4300);
     check((await T(() => window.__tactics.history())).overlays > overlaysBefore, '石が終わりの三つの音を鳴らす時に、ユナの指の画が重なっていません');
@@ -2868,11 +2877,21 @@ async function storyRun(browser, baseUrl, name, core) {
     check(await T(() => { const t = window.__tactics.tutorial(); return t === null || (t.story && t.step === null); }), '堰: 再開した戦闘で、見た手ほどきがまた出ています');
     await until(() => ['main', 'busy', 'ended'].includes(window.__tactics.mode()) && !window.__tactics.dialogue());
     await T(() => window.__tactics.finishBattle('player'));
-    // 勝った後の台本（台詞はない。崩れる音・遠い谷のカット・帰りの門）
+    // キリが崖の上に立たないまま勝ったので、勝った直後（遠景のカットの前）に測り棒の札が出る。その後の勝った後の台本には台詞はない
+    let lateTag = '';
+    let cutBeforeTag = false;
     for (let guard = 0; guard < 600 && (await sceneNow()) === 2; guard++) {
       await noteMarks();
+      const d = await status();
+      if (d?.waiting === 'line' && d.inscription) {
+        lateTag = d.text;
+        cutBeforeTag = stats.cuts > 0;
+        await tapLine();
+        continue;
+      }
       await page.waitForTimeout(60);
     }
+    check(lateTag.endsWith('ユナ') && lateTag.startsWith('高い所から撃つ矢は') && !cutBeforeTag, `崖の上に立たずに勝った時、勝った直後（遠景の前）に測り棒の札が出ていません（${lateTag}）`);
     const counts = await soundCounts();
     check(counts.collapse >= 1 && counts.gate >= 1 && counts.chime >= 1, `堰の勝った後の音（崩れる・門・石の鳴る音）が鳴っていません（${JSON.stringify(counts)}）`);
     check(stats.cuts > 0, '堰の勝った後に、遠い谷の家々のカットが出ていません');

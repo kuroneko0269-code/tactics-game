@@ -134,6 +134,23 @@ export interface DialogueRun {
 }
 
 const FAST_LINE_MS = 280;
+/** 聞く操作で、押されないまま手の絵を目立たせるまでの時間 */
+const LISTEN_IDLE_MS = 3500;
+
+/** 押し続ける手の絵（指で押し込んだまま、下に輪が広がる）。文字を出さない場面の聞く操作で使う */
+function holdHandIcon(): HTMLElement {
+  const wrap = el('span', 'hold-hand');
+  wrap.setAttribute('aria-hidden', 'true');
+  wrap.innerHTML =
+    '<svg viewBox="0 0 64 64" width="56" height="56">' +
+    '<ellipse class="hold-hand-ripple" cx="32" cy="54" rx="14" ry="4" fill="none" stroke="currentColor" stroke-width="2"/>' +
+    '<ellipse cx="32" cy="54" rx="7" ry="2.2" fill="currentColor" opacity="0.6"/>' +
+    '<g class="hold-hand-finger" fill="currentColor">' +
+    '<rect x="27" y="14" width="10" height="30" rx="5"/>' +
+    '<path d="M20 30 q0-5 5-5 h14 q5 0 5 5 v8 q0 10-12 10 q-12 0-12-10 z"/>' +
+    '</g></svg>';
+  return wrap;
+}
 
 /** ルビつきの文を、ruby 要素で組み立てる */
 export function rubyNodes(segments: readonly RubySegment[]): Node[] {
@@ -246,6 +263,8 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
   /** 聞く操作（@聞く）を始めてから、聞き終えるまで: 聞き終えた時に解決する。旋律の表と、今の聞く進み具合 */
   let listenSession: { done: Promise<void>; readonly timeline?: ListenTimeline; finished: boolean; abort: () => void } | undefined;
   let placardShown = '';
+  /** 操作の場面の文字の案内を出すか（@文字の案内 なし で出さない。光る印と手の絵だけで示す） */
+  let controlText = true;
   let nameTagShown = '';
   let overlayOn = false;
   let placardTimer: number | undefined;
@@ -434,7 +453,7 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
 
   /** 操作のしかたを初めての時だけ出す */
   const hint = (id: string, message: string) => {
-    if (deps.hintSeen(id)) return;
+    if (!controlText || deps.hintSeen(id)) return;
     deps.markHint(id);
     const h = el('div', 'dialogue-hint', message);
     control.prepend(h);
@@ -520,10 +539,12 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       control.innerHTML = '';
       hint('tap', TEXT.dialogue.tapHint);
       tapTarget = port.setTapTarget?.(target) ?? (stage.props[target] ? { x: stage.props[target]!.x, z: stage.props[target]!.z } : undefined);
+      // 文字の案内を出さない時は、手もとのボタンも出さない（光っている物を押す）
       const button = el('button', 'screen-button tap-button', label || TEXT.dialogue.tapHint);
       button.type = 'button';
       button.setAttribute('aria-label', label || TEXT.dialogue.tapHint);
-      control.append(button);
+      if (controlText) control.append(button);
+      else control.hidden = true;
       const finish = () => {
         walkTap = undefined;
         tapTarget = undefined;
@@ -562,13 +583,27 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       const meter = el('span', 'hold-meter');
       const fill = el('span', 'hold-fill');
       meter.append(fill);
-      button.append(el('span', 'label', label || TEXT.dialogue.listenDefault), meter);
+      if (controlText) button.append(el('span', 'label', label || TEXT.dialogue.listenDefault), meter);
+      else {
+        // 文字を出さず、押し続ける手の絵だけで示す（指が押し込んだまま、輪が広がる）
+        button.classList.add('hand-only');
+        button.append(holdHandIcon(), meter);
+      }
       control.append(button);
+      // 数秒たっても押されない時は、手の絵を少し目立たせる
+      let idleTimer: number | undefined;
+      const armIdle = () => {
+        window.clearTimeout(idleTimer);
+        button.classList.remove('nudge');
+        idleTimer = window.setTimeout(() => button.classList.add('nudge'), LISTEN_IDLE_MS);
+      };
+      armIdle();
       let since: number | undefined;
       let timer: number | undefined;
       const elapsed = () => listenMs + (since === undefined ? 0 : performance.now() - since);
       listenNow = elapsed;
       const finish = (completed: boolean) => {
+        window.clearTimeout(idleTimer);
         if (timer !== undefined) window.clearInterval(timer);
         timer = undefined;
         since = undefined;
@@ -594,6 +629,8 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
         if (timeline) listenMs = listenRestart(timeline, listenMs);
         since = performance.now();
         listening = true;
+        window.clearTimeout(idleTimer);
+        button.classList.remove('nudge');
         button.classList.add('holding');
         if (timeline) deps.sound?.listenFrom?.(melody, timbre, timeline, Math.floor(listenMs));
         timer = window.setInterval(tick, 50);
@@ -605,6 +642,7 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
         since = undefined;
         listening = false;
         button.classList.remove('holding');
+        armIdle();
         if (timer !== undefined) window.clearInterval(timer);
         timer = undefined;
         deps.sound?.listenPause?.(false);
@@ -621,7 +659,8 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       const startPos = stage.actors[actor];
       let current: Coord = startPos ? { x: startPos.x, z: startPos.z } : path[0]!;
       hint('walk', TEXT.dialogue.walkHint);
-      control.hidden = false;
+      // 手引きの文がない時は、空の枠を出さない
+      control.hidden = control.childElementCount === 0;
       const show = () => {
         walkNext = path[at];
         port.setWalkTargets?.(walkNext ? [walkNext] : [], path[path.length - 1]);
@@ -832,6 +871,10 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       return;
     }
     if (d.kind === 'placard') return showPlacard(d.text, d.era);
+    if (d.kind === 'controlText') {
+      controlText = d.on;
+      return;
+    }
     if (d.kind === 'nameTag') return showNameTag(d.actor, d.title);
     if (d.kind === 'shot') {
       // 映す: 動く時間を含めて、ちょうど ms の間だけ映す（早送りなら短く）
