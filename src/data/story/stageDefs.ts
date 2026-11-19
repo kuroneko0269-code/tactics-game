@@ -63,10 +63,11 @@ export const GESTURES: Readonly<Record<string, GestureDefinition>> = {
   うつむく: { seconds: 1.2, frames: [{ t: 0 }, { t: 0.3, head: 0.6, bow: 0.1 }, { t: 0.8, head: 0.6, bow: 0.1 }, { t: 1 }] },
   手を上げる: { seconds: 1.0, frames: [{ t: 0 }, { t: 0.3, armR: 2.6 }, { t: 0.7, armR: 2.6 }, { t: 1 }] },
   胸に手を当てる: { seconds: 1.2, frames: [{ t: 0 }, { t: 0.3, armR: 1.3 }, { t: 0.8, armR: 1.3 }, { t: 1 }] },
-  会釈する: { seconds: 0.9, frames: [{ t: 0 }, { t: 0.4, bow: 0.5, head: 0.2 }, { t: 0.6, bow: 0.5, head: 0.2 }, { t: 1 }] },
+  // 上から見ると、深く曲げた体がしゃがんだ姿に見えるので、浅めにする（初見の検査）
+  会釈する: { seconds: 0.9, frames: [{ t: 0 }, { t: 0.4, bow: 0.3, head: 0.25 }, { t: 0.6, bow: 0.3, head: 0.25 }, { t: 1 }] },
   驚く: { seconds: 0.5, frames: [{ t: 0 }, { t: 0.3, lift: 0.12, armL: 0.8, armR: 0.8 }, { t: 1 }] },
   // ---- 序章に足りない仕組みで足した仕草 ----
-  深く会釈する: { seconds: 1.3, frames: [{ t: 0 }, { t: 0.35, bow: 0.85, head: 0.3 }, { t: 0.7, bow: 0.85, head: 0.3 }, { t: 1 }] },
+  深く会釈する: { seconds: 1.3, frames: [{ t: 0 }, { t: 0.35, bow: 0.55, head: 0.35 }, { t: 0.7, bow: 0.55, head: 0.35 }, { t: 1 }] },
   首をかしげる: { seconds: 1.1, frames: [{ t: 0 }, { t: 0.3, tilt: 0.38 }, { t: 0.75, tilt: 0.38 }, { t: 1 }] },
   /**
    * 作業台や灯の底を指で三度叩く（節の終わりの三つの音に合わせる）。今の姿勢から手を下ろして叩く。

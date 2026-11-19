@@ -707,7 +707,8 @@ function main(): void {
         facingScreen: (unitId) => view.facingScreen(unitId),
         expToNext: (level) => (level >= progressionRules.maxLevel ? undefined : expToNext(level, progressionRules)),
         ...(currentSite?.roleTags ? { roleTags: currentSite.roleTags } : {}),
-        story: liveStoryBattle !== null,
+        // 物語の戦闘（物語から出撃した戦闘か、人物の呼び名を持つ序章の戦場）
+        story: liveStoryBattle !== null || currentSite?.cast !== undefined,
       },
       start.state.scenario.objectives.victory.flatMap((c) => (c.kind === 'defeatUnit' ? [c.unitId] : [])),
     );

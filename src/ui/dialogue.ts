@@ -141,7 +141,7 @@ export interface DialogueRun {
 
 const FAST_LINE_MS = 280;
 /** その前に、出ている台詞の枠を閉じる指示（場面の切り替え・人物が消える・光が立つ） */
-const CLOSES_LINE: ReadonlySet<Directive['kind']> = new Set(['fadeOut', 'location', 'cut', 'overlay', 'exit', 'light', 'chapterTitle', 'melody']);
+const CLOSES_LINE: ReadonlySet<Directive['kind']> = new Set(['fadeOut', 'location', 'cut', 'overlay', 'exit', 'light', 'chapterTitle', 'melody', 'walk']);
 /** 聞く操作で、押されないまま手の絵を目立たせるまでの時間 */
 const LISTEN_IDLE_MS = 3500;
 
