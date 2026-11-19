@@ -234,6 +234,7 @@ export const PROP_KINDS: Readonly<Record<string, string>> = {
   下流の村2: 'village2',
   下流の村3: 'village3',
   涸れた谷: 'dryChannel',
+  手の赤み: 'handStain',
   机の上の包み二つ: 'deskParcels',
   机の上の包み一つ: 'deskParcel',
   水の流れる谷: 'wetChannel',

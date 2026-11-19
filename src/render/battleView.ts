@@ -286,7 +286,7 @@ export function createBattleView(options: {
     if (v) return v;
     return bystanders.get(id);
   };
-  const lights = new Map<string, { pillar: LightPillar; actor?: string }>();
+  const lights = new Map<string, { pillar: LightPillar; actor?: string; color: number }>();
   const props = new Map<string, Puppet>();
   for (const d of options.decor ?? []) {
     const p = createPropModel(d.model);
@@ -846,19 +846,24 @@ export function createBattleView(options: {
       const glow = new THREE.Color(0xffffff);
       const y0 = a.puppet.body.position.y;
       if (fall) {
-        // 足もとに白い穴（どの時代でもない白）が開き、横へ押し流されて傾きながら、白く光ってその中へ沈んでいく（2.4 秒。見届けられる長さ）。
-        // 光の柱は使わない（帰りの門の柱と見分けがつかず、だれが光に入ったか分からなくなるため）
+        // 帰りの門の光（立っている光の柱）の足もとから、同じ色の光が地面を走ってガレスの足もとへ広がり、白い穴（どの時代でもない白）になる。
+        // ガレスは横へ押し流されて傾きながら、白く光ってその中へ沈んでいく（2.4 秒。見届けられる長さ）。「門に落ちた」につながるように、
+        // 新しい光の柱は立てない（柱が2本あると、だれが光に入ったか分からなくなるため）
         const x0 = a.puppet.body.position.x;
+        const gate = [...lights.values()][0];
+        const target = a.puppet.group.position.clone().add(new THREE.Vector3(0.15, 0.02, 0));
+        const origin = gate ? gate.pillar.group.position.clone().setY(target.y) : target.clone();
         const hole = new THREE.Mesh(
           new THREE.CircleGeometry(0.5, 32),
-          new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false }),
+          new THREE.MeshBasicMaterial({ color: gate?.color ?? 0xffffff, transparent: true, opacity: 0, depthWrite: false }),
         );
         hole.rotation.x = -Math.PI / 2;
-        hole.position.copy(a.puppet.group.position).add(new THREE.Vector3(0.15, 0.02, 0));
+        hole.position.copy(origin);
         hole.renderOrder = 5;
         scene.add(hole);
-        await tweens.play(0.5, (t) => {
-          (hole.material as THREE.MeshBasicMaterial).opacity = t;
+        await tweens.play(0.7, (t) => {
+          (hole.material as THREE.MeshBasicMaterial).opacity = Math.min(1, t * 1.5);
+          hole.position.lerpVectors(origin, target, t);
           hole.scale.setScalar(0.3 + 0.9 * t);
         });
         await tweens.play(2.4, (t) => {
@@ -1036,7 +1041,7 @@ export function createBattleView(options: {
       if (!c) return pillar.dispose();
       pillar.group.position.copy(mapView.tileTop(c.x, c.z));
       scene.add(pillar.group);
-      lights.set(name, { pillar, ...(light.actor ? { actor: light.actor } : {}) });
+      lights.set(name, { pillar, color: light.color, ...(light.actor ? { actor: light.actor } : {}) });
       await tweens.play(0.6, (t) => pillar.setOpacity(t));
     },
     update(dt, elapsed) {

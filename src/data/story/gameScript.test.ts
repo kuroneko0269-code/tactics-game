@@ -102,7 +102,17 @@ const sameWords = (a: string) => a.replace(/。/g, '');
  * 物の名前の札（@物の札）に出してよい文。名前だけにする（働きや意味を書くと、序章で伏せる事柄に触れるため）。
  * 足す時は、物語の作者に確かめてから、ここに足す（一覧は docs/story/prologue-screen-review.md）
  */
-const OBJECT_LABELS = ['堰', '下流の村', '測り棒', '蜜菓子の包み', '暦盤', '守り袋', '指示書', '隊の道具', '灯', '誓いの剣', '石'];
+/**
+ * 物語の作者が足した語り（ゲーム脚本の表にはまだない字幕）。脚本の行の印と文。足す時は作者の確認を取り、
+ * docs/story/prologue-screen-review.md にも書く
+ */
+const ADDED_NARRATION: readonly { readonly ref: string; readonly text: string }[] = [
+  // 場面1の勝った後: 西の谷へ水が流れていく画の後、遠い谷の家々のカット（1-16）の前（2026-11-19。物語の作者の回答）
+  { ref: '1-15', text: '下流の村は、もう沈まない。水は、遠い谷へ流れていった。' },
+];
+const isAdded = (l: { speaker: string | null; text: Parameters<typeof plainText>[0] }) => l.speaker === null && ADDED_NARRATION.some((a) => a.text === plainText(l.text));
+
+const OBJECT_LABELS = ['堰', '下流の村', '測り棒', '蜜菓子の包み', '塔の暦盤', 'ユナの暦盤', '守り袋', '指示書', '隊の道具', '灯', '誓いの剣', '石'];
 
 describe('序章の台本とゲーム脚本の対応', () => {
   it('脚本の表は10場面で、行を読める', () => {
@@ -241,7 +251,7 @@ describe('序章の台本とゲーム脚本の対応', () => {
           `${refOf(r)}（${r.kind}）: ${ds.join(',')}`,
         ).toBe(true);
         // 物の文字のほかに、台詞や語りを足さない
-        expect(lineSteps(block).filter((l) => !l.inscription), refOf(r)).toEqual([]);
+        expect(lineSteps(block).filter((l) => !l.inscription && !(isAdded(l) && ADDED_NARRATION.some((a) => a.ref === refOf(r)))), refOf(r)).toEqual([]);
       }
     }
   });
@@ -249,21 +259,28 @@ describe('序章の台本とゲーム脚本の対応', () => {
   it('脚本の台詞と字幕は、すべて台本にある。台本に、脚本にない台詞と語りはない', () => {
     const want = rows.filter((r) => r.kind === '台詞').map((r) => `${speechOf(r).speaker}:${speechOf(r).text}`);
     const wantNarr = rows.filter((r) => r.kind === '字幕').map((r) => captionOf(r).text);
-    const lines = allBlocks.flatMap(lineSteps).filter((l) => !l.inscription);
+    const lines = allBlocks.flatMap(lineSteps).filter((l) => !l.inscription && !isAdded(l));
     // 最初の印より前（場面の準備）にも、台詞は書かない
     const all = Object.values(SCENE_SCRIPTS)
       .flat()
-      .flatMap((id) => parseScriptOrThrow(id, scriptTexts[id]!, scriptCatalog).steps.flatMap((s) => (s.kind === 'line' && !s.inscription ? [s] : [])));
+      .flatMap((id) => parseScriptOrThrow(id, scriptTexts[id]!, scriptCatalog).steps.flatMap((s) => (s.kind === 'line' && !s.inscription && !isAdded(s) ? [s] : [])));
     expect(all.length).toBe(lines.length);
     // 分けた枠は、脚本の行ごとにつないで比べる
     const perRow = (speech: boolean) =>
       allBlocks.flatMap((b) => {
-        const ls = lineSteps(b).filter((l) => !l.inscription && (l.speaker !== null) === speech);
+        const ls = lineSteps(b).filter((l) => !l.inscription && !isAdded(l) && (l.speaker !== null) === speech);
         if (ls.length === 0) return [];
         return [speech ? `${ls[0]!.speaker}:${joined(ls.map((l) => plainText(l.text)))}` : joined(ls.map((l) => plainText(l.text).replace('\n', ' / ')))];
       });
     expect(perRow(true)).toEqual(want.map(sameWords));
     expect(perRow(false)).toEqual(wantNarr.map(sameWords));
+  });
+
+  it('作者が足した語りは、決めた行の組に、決めた文のまま1つずつある', () => {
+    for (const a of ADDED_NARRATION) {
+      const found = allBlocks.filter((b) => b.ref === a.ref).flatMap(lineSteps).filter((l) => l.speaker === null && plainText(l.text) === a.text);
+      expect(found, a.text).toHaveLength(1);
+    }
   });
 
   it('物の名前の札は、決めた名前だけを出す（働きや意味を書かない）', () => {

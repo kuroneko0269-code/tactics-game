@@ -3044,6 +3044,14 @@ async function storyRun(browser, baseUrl, name, core) {
       await until(() => window.__tactics.dialogue() === null || ['line', 'busy'].includes(window.__tactics.dialogue().waiting));
       await press(text.dialogue.skip);
       await press(text.dialogue.skipYes);
+      // 勝った後に会話が続く（物語の段を出さないまま勝った時の測り棒の札の後に、勝った後の台本の字幕がある）間は、続けてスキップする
+      for (let guard = 0; guard < 4; guard++) {
+        await until((m) => (window.__tactics.story().main?.scene ?? -1) > m || window.__tactics.dialogue()?.waiting === 'line', n, 60000);
+        if ((await sceneNow()) > n) break;
+        await until(() => document.querySelector('.dialogue-tools')?.offsetParent !== null);
+        await press(text.dialogue.skip);
+        await press(text.dialogue.skipYes);
+      }
       continue;
     }
     await until(() => window.__tactics.screen() === 'scene' && window.__tactics.dialogue() !== null);
