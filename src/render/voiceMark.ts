@@ -71,7 +71,7 @@ function drawIcon(kind: VoiceKind): THREE.CanvasTexture | undefined {
       });
     }
   } else if (kind === 'call') {
-    // 吹き出し（中に点を三つ）。広がる弧は電波の印に見えると言われたため（初見の検査）
+    // 吹き出し（中に波の線）。広がる弧は電波の印に見えると言われたため（初見の検査）
     paint(() => {
       g.moveTo(30, 30);
       g.lineTo(98, 30);
@@ -86,12 +86,11 @@ function drawIcon(kind: VoiceKind): THREE.CanvasTexture | undefined {
       g.lineTo(16, 46);
       g.quadraticCurveTo(16, 30, 30, 30);
     });
-    for (const x of [42, 64, 86]) {
-      g.beginPath();
-      g.arc(x, 58, 7, 0, Math.PI * 2);
-      g.fillStyle = COLORS.call;
-      g.fill();
-    }
+    // 中に、声が出ている波の線（点にすると「…」で黙っているように見えるため）
+    paint(() => {
+      g.moveTo(32, 58);
+      for (let x = 32; x <= 96; x += 4) g.lineTo(x, 58 + Math.sin((x - 32) / 5) * 9);
+    });
   } else {
     // 小さな波を2段
     for (const y of [56, 84]) {

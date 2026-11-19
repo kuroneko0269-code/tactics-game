@@ -868,14 +868,18 @@ export function createBattleView(options: {
           hole.position.lerpVectors(origin, target, t);
           hole.scale.setScalar(0.3 + 0.9 * t);
         });
-        // 沈む所を見届けられるよう、ゆっくり（初見の検査で、ガレスが落ちる所が見えないと言われたため）
-        await tweens.play(3.6, (t) => {
-          a.puppet.setGlow(glow, Math.min(1, t * 1.6));
-          // 一定の速さで沈み、半分ほど沈むまでは消えない（白い穴に体が沈んでいく途中が見えるように）
-          a.puppet.setOpacity(t < 0.75 ? 1 : 1 - (t - 0.75) / 0.25);
+        // 沈む所を見届けられるよう、腰まで沈んだ所で一度止める（初見の検査で、ガレスが落ちる所が見えないと言われたため）
+        const sink = (t: number) => {
+          a.puppet.setGlow(glow, Math.min(1, 0.4 + t * 0.6));
           a.puppet.body.position.x = x0 + 0.25 * Math.min(1, t * 2);
           a.puppet.body.rotation.z = -0.6 * t;
           a.puppet.body.position.y = y0 - 1.3 * t;
+        };
+        await tweens.play(1.6, (t) => sink(t * 0.4));
+        await tweens.play(1.2, () => sink(0.4));
+        await tweens.play(1.6, (t) => {
+          sink(0.4 + t * 0.6);
+          a.puppet.setOpacity(t < 0.5 ? 1 : 1 - (t - 0.5) / 0.5);
         });
         a.puppet.group.visible = false;
         a.puppet.setGlow(glow, 0);

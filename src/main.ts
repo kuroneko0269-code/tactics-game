@@ -188,7 +188,7 @@ function main(): void {
   );
   const soundMark = createSoundMark(document.getElementById('app') ?? document.body);
   /** 開発中だけ: これまでに鳴らした旋律・見せた場所・言葉にしない声の数（自動プレイが、短い印を見逃さずに確かめるため） */
-  const devHistory = { melodies: new Set<string>(), stages: new Set<string>(), voices: 0, overlays: 0, placards: [] as string[], nameTags: [] as string[], objectLabels: [] as string[] };
+  const devHistory = { melodies: new Set<string>(), stages: new Set<string>(), voices: 0, overlays: 0, placards: [] as string[], nameTags: [] as string[], objectLabels: [] as string[], inscriptions: [] as string[] };
   sound.onMelodyChange(() => {
     const m = sound.melody();
     if (m) devHistory.melodies.add(`${m.melody}/${m.timbre}`);
@@ -740,16 +740,13 @@ function main(): void {
       );
     // 戦闘の手ほどき（序章に足りない仕組み）: 手ほどきのある戦場で、まだ見ていないか、見たものも出す設定の時
     const site = currentSite;
-    // この戦闘で出した物語の段（測り棒の札）。出さないまま勝った時は、勝った直後に出す
-    shownStoryScripts = new Set();
-    // 見た手ほどきを出さない設定で、もう見た戦場でも、物語の段（測り棒の札など。scriptId）だけは出す
+    // 見た手ほどきを出さない設定で、もう見た戦場でも、物語の段（物の文字を出す段。scriptId）だけは出す
     const seen = site !== undefined && settings.skipSeenTutorials && settings.seenTutorials.includes(site.id);
     const steps = (site?.tutorial ?? []).filter((st) => !seen || st.scriptId !== undefined);
     const tutorial =
       site && steps.length > 0
         ? createTutorial(hudEl, steps, {
             ...(seen ? { storyOnly: true } : {}),
-            onStoryShown: (scriptId) => shownStoryScripts.add(scriptId),
             tileScreen: (x, z) => view.tileScreenPosition(x, z),
             unitScreen: (id) => {
               try {
@@ -839,8 +836,6 @@ function main(): void {
     devHistory.voices++;
     voiceMarks.show(headOf, VOICE_KINDS[id] ?? 'call', 1.5);
   };
-  /** この戦闘で出した物語の段（手ほどきの scriptId。測り棒の札） */
-  let shownStoryScripts = new Set<string>();
   /** 遠景のカット（@遠景）で見せている舞台（カットの間だけある） */
   let cutView: SceneView | undefined;
   /**
@@ -1011,7 +1006,7 @@ function main(): void {
         return { body: look.body, accent: look.accent };
       },
       overlay: showOverlay,
-      onNotice: (kind, t) => (kind === 'placard' ? devHistory.placards : kind === 'nameTag' ? devHistory.nameTags : devHistory.objectLabels).push(t),
+      onNotice: (kind, t) => (kind === 'placard' ? devHistory.placards : kind === 'nameTag' ? devHistory.nameTags : kind === 'inscription' ? devHistory.inscriptions : devHistory.objectLabels).push(t),
       ...(import.meta.env.DEV ? { autoAdvance: () => devAutoDialogue } : {}),
     });
     dialogueRun = run;
@@ -1621,8 +1616,6 @@ function main(): void {
    */
   const playAfterVictory = async (target: BattleSite, state: BattleState) => {
     if (!target.afterVictory) return;
-    // 物語の段（測り棒の札）を一度も出さないまま勝った時は、勝った直後（勝った後の台本の前）に出す
-    const unseen = (target.tutorial ?? []).flatMap((st) => (st.scriptId && !shownStoryScripts.has(st.scriptId) ? [st.scriptId] : []));
     if (!battle) {
       useMap(target.map);
       setScreen('battle');
@@ -1634,10 +1627,6 @@ function main(): void {
     }
     hudEl.hidden = true;
     labelsEl.hidden = true;
-    for (const id of unseen) {
-      shownStoryScripts.add(id);
-      await playScript(id, battlePort);
-    }
     await playScript(target.afterVictory, battlePort);
   };
 
@@ -1796,7 +1785,7 @@ function main(): void {
       time: () => currentTime.name,
       /** 押す場所の上の揺れる目印が出ているか（会話の場面） */
       beacon: () => sceneView?.beaconVisible() ?? false,
-      history: () => ({ melodies: [...devHistory.melodies], stages: [...devHistory.stages], voices: devHistory.voices, overlays: devHistory.overlays, placards: [...devHistory.placards], nameTags: [...devHistory.nameTags], objectLabels: [...devHistory.objectLabels] }),
+      history: () => ({ melodies: [...devHistory.melodies], stages: [...devHistory.stages], voices: devHistory.voices, overlays: devHistory.overlays, placards: [...devHistory.placards], nameTags: [...devHistory.nameTags], objectLabels: [...devHistory.objectLabels], inscriptions: [...devHistory.inscriptions] }),
       /** 暗転しているか */
       dark: () => fadeEl.classList.contains('dark'),
       /** 話者の印が見えているか・顔の枠に写している人物（会話の見せ方） */

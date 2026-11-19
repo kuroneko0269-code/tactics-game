@@ -108,10 +108,9 @@ export const weirBattle: BattleSite = {
     { id: 'weir-target', mode: 'targeting' },
     { id: 'weir-confirm', mode: 'confirm', point: { kind: 'button', button: 'confirm' } },
     { id: 'weir-facing', mode: 'facing', point: { kind: 'button', button: 'endTurn' } },
-    // ゴードを前へ、キリを崖の上へ、フェンの火で合わせ目を割る。キリが崖の上に立った時、測り棒の札（署名「ユナ」。台本 prologueWeirTag）を出す
+    // ゴードを前へ、キリを崖の上へ（手ほどきの文で、測り棒の札の文面を短く思い出させる。札は戦闘の前に見せている）、フェンの火で合わせ目を割る
     { id: 'weir-gord', mode: 'main', unitId: 'gord', point: { kind: 'reachToward', x: 4, z: 3 } },
     { id: 'weir-kiri', mode: 'main', unitId: 'kiri', point: { kind: 'reachToward', x: 8, z: 3 } },
-    { id: 'weir-high', mode: 'afterMove', unitId: 'kiri', minHeight: 3, scriptId: 'prologueWeirTag' },
     { id: 'weir-fen', mode: 'main', unitId: 'fen', point: { kind: 'button', button: 'ability' } },
   ],
 };

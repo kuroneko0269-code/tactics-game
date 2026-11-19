@@ -2603,8 +2603,7 @@ async function storyRun(browser, baseUrl, name, core) {
     await reloadAndResume();
     await until(() => window.__tactics.screen() === 'battle' || window.__tactics.dialogue() !== null);
     // 見た手ほどき（堰）は、再開した戦闘で出さない（丘の「最後の一撃は、トウマで」は、まだ見ていない）
-    // 見た手ほどきは出さない（物語の段（測り棒の札）だけを待つ状態になる）
-    if (siteName === '堰') check(await T(() => { const t = window.__tactics.tutorial(); return t === null || (t.story && t.step === null); }), `${siteName}: 再開した戦闘で、見た手ほどきがまた出ています`);
+    if (siteName === '堰') check(await T(() => window.__tactics.tutorial() === null), `${siteName}: 再開した戦闘で、見た手ほどきがまた出ています`);
     await T(() => window.__tactics.setAutoPlayer(true));
     const expected = core.ai.runAutoBattle(saved.state, 3000, { player: core.data.ai, enemy: core.data.ai }).state;
     let last;
@@ -2750,75 +2749,18 @@ async function storyRun(browser, baseUrl, name, core) {
     check((await placardsShown()).includes('過去　谷の外れの堰'), '札「過去　谷の外れの堰」が出ていません');
   };
   /**
-   * 堰の戦闘の手ほどきを手で進め、キリを崖の上へ動かして、測り棒の札（署名「ユナ」）が手ほどきに出ることを確かめる。
-   * 隊員の名札に役目が添えられていること（弓使いキリ）も確かめる。確かめたら手ほどきを飛ばす
+   * 堰の戦闘の始め: 測り棒の札は戦闘の前（1-7）に出ている。戦闘の中の手ほどきは、キリの段の文で札の文面を短く思い出させるだけ
+   * （札を大きく出す段はない）。確かめたら手ほどきを飛ばす（飛ばした後に待つ物語の段はない）
    */
   const weirTagByHand = async () => {
+    const h = await T(() => window.__tactics.history());
+    check(h.inscriptions.includes('測り棒を作った、トウマの妹ユナの札'), `戦闘の前に、測り棒の札（上に「測り棒を作った、トウマの妹ユナの札」）が出ていません（${JSON.stringify(h.inscriptions)}）`);
+    check(h.objectLabels.includes('測り棒（崖の高さを測る道具）'), '戦闘の前に、札「測り棒（崖の高さを測る道具）」が出ていません');
+    check(text.tutorial.steps['weir-kiri'].includes('高い所からは、矢が遠くまで届きます'), 'キリの手ほどきの文に、札の文面を思い出させる一文がありません');
     await until(() => window.__tactics.tutorial()?.step === 'weir-move', undefined, 120000);
-    // 手ほどきを始めに飛ばす。物語の段（測り棒の札）は、飛ばした後も必ず一度出る
     await press(text.tutorial.skip);
-    check((await T(() => window.__tactics.tutorial())).story === true, '手ほどきを飛ばした後に、測り棒の札を待つ状態になっていません');
+    check((await T(() => window.__tactics.tutorial())) === null, '手ほどきを飛ばした後に、まだ手ほどきが残っています（戦闘の中で札を出す段は外した）');
     check((await T(() => window.__tactics.settings().seenTutorials)).includes('prologue-weir'), '手ほどきを飛ばしたことが設定に残っていません');
-    const playerUnit = () =>
-      T(() => {
-        const st = window.__tactics.state();
-        const u = st?.turn && st.units.find((x) => x.id === st.turn.unitId);
-        return u && u.team === 'player' ? u.id : null;
-      });
-    const endTurn = async () => {
-      await press(text.buttons.wait);
-      await until(() => window.__tactics.mode() === 'facing');
-      await press(text.buttons.endTurn);
-      await until(() => window.__tactics.mode() !== 'facing');
-    };
-    /** 移動できるマスのうち、高さが min 以上（low なら 3 より低い）のマス */
-    const moveTile = (high) =>
-      T((high) => {
-        const st = window.__tactics.state();
-        const h = (x, z) => st.map.tiles.find((t) => t.x === x && t.z === z)?.height ?? 0;
-        return window.__tactics.marks().filter((m) => m.kind === 'move' && (high ? h(m.x, m.z) >= 3 : h(m.x, m.z) < 3)).sort((a, b) => (high ? b.z - a.z : a.z - b.z))[0];
-      }, high);
-    const tapTile = async (c) => {
-      await until(() => window.__tactics.camera().idle);
-      const p = await T((c) => window.__tactics.tileScreen(c.x, c.z), c);
-      await page.mouse.click(p.x, p.y);
-    };
-    // 味方の手番ごとに: キリなら崖の上へ動かして札を待つ。ほかの人物は低いマスへ動くか、そのまま待機して手番を終える
-    for (let guard = 0; guard < 600; guard++) {
-      const mode = await T(() => window.__tactics.mode());
-      const who = mode === 'main' ? await playerUnit() : null;
-      if (!who) {
-        await page.waitForTimeout(100);
-        continue;
-      }
-      if (who === 'kiri') {
-        const name = await T(() => document.querySelector('.unit-info strong')?.textContent ?? '');
-        check(name === '弓使いキリ', `戦闘の名札に役目が添えられていません（${name}）`);
-        const high = await moveTile(true);
-        check(high, 'キリが崖の上へ移動できません');
-        await tapTile(high);
-        await until(() => window.__tactics.tutorial()?.step === 'weir-high', undefined, 30000);
-        break;
-      }
-      const low = await moveTile(false);
-      if (low) {
-        await tapTile(low);
-        // 移動の後も、画面の段階は main（移動したかは手番の状態が持つ）
-        await until(() => window.__tactics.mode() === 'main' && window.__tactics.state()?.turn?.moved === true, undefined, 30000);
-      }
-      await endTurn();
-    }
-    const bubble = await T(() => ({
-      on: document.querySelector('.tutorial-bubble.inscription') !== null,
-      label: document.querySelector('.tutorial-label')?.textContent,
-      text: document.querySelector('.tutorial-text')?.textContent,
-      sign: document.querySelector('.tutorial-text .inscription-signature')?.textContent,
-      skip: document.querySelector('.tutorial-skip')?.hidden === true,
-    }));
-    check(
-      bubble.on && bubble.label === '測り棒を作った、トウマの妹ユナの札' && bubble.text.startsWith('高い所から撃つ矢は、遠くまで届く。兄さんは高い所が好きでしょう。') && bubble.sign === 'ユナ' && bubble.skip,
-      `手ほどきを飛ばした後、キリを崖の上へ動かした時に、測り棒の札（署名「ユナ」。飛ばすボタンなし）が出ていません（${JSON.stringify(bubble)}）`,
-    );
     await screenshot('weir-tag');
   };
 
@@ -2888,7 +2830,7 @@ async function storyRun(browser, baseUrl, name, core) {
   // 短い印は、画面を見る間隔によっては見逃すので、これまでの記録（開発用）でも確かめる
   check(stats.voices > 0 || (await T(() => window.__tactics.history())).voices > 0, '番兵の叫び（言葉にしない声）の印が出ていません');
   log('冒頭（札・肩書き・母の「だれ？」・暗転）・章の題・堰の会話（暗転の上の前提の字幕・札・ルビ・声の印・読み返し・早送り）・会話の途中での読み込み直しと「これまで」✔');
-  // 場面1の戦闘。手ほどきを手で進め、キリを崖の上へ動かして測り棒の札（署名「ユナ」）を確かめる。退場しない番兵・名札の役目
+  // 場面1の戦闘。戦闘の前に出た測り棒の札と、手ほどきの文を確かめる。退場しない番兵
   await waitScene(2);
   await deployAndStart();
   await weirTagByHand();
@@ -3043,7 +2985,7 @@ async function storyRun(browser, baseUrl, name, core) {
       await until(() => window.__tactics.dialogue() === null || ['line', 'busy'].includes(window.__tactics.dialogue().waiting));
       await press(text.dialogue.skip);
       await press(text.dialogue.skipYes);
-      // 勝った後に会話が続く（物語の段を出さないまま勝った時の測り棒の札の後に、勝った後の台本の字幕がある）間は、続けてスキップする
+      // 勝った後に会話が続く（勝った後の台本の字幕がある）間は、続けてスキップする
       for (let guard = 0; guard < 4; guard++) {
         await until((m) => (window.__tactics.story().main?.scene ?? -1) > m || window.__tactics.dialogue()?.waiting === 'line', n, 60000);
         if ((await sceneNow()) > n) break;
@@ -3409,7 +3351,7 @@ async function checkLayouts(browser, baseUrl, name, core) {
   // 勝った後の台本（戦闘のマップの上。台詞はなく、音と動きと遠景のカット）
   await page.evaluate(() => window.__tactics.finishBattle('player'));
   await until(() => window.__tactics.dialogue() !== null);
-  // キリが崖の上に立たないまま勝ったので、勝った直後に測り棒の札（物の文字）が出る。読んでタップで進める
+  // 勝った後の台本を、タップで進める
   await until(() => window.__tactics.dialogue()?.waiting === 'line' || window.__tactics.story().main?.scene === 3, undefined, 60000);
   await inspect('after-victory');
   for (let guard = 0; guard < 400 && (await page.evaluate(() => window.__tactics.story().main?.scene)) !== 3; guard++) {
