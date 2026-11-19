@@ -16,7 +16,7 @@ import { spells, strikes } from '../abilities';
 import { passives } from '../passives';
 import { books, mainBook } from './books';
 import { scriptTexts } from './scripts';
-import { ACTOR_LOOKS, GESTURES, PROP_KINDS, scriptCatalog } from './stageDefs';
+import { ACTOR_LOOKS, GESTURES, OUTSIDE_PROP_KINDS, PROP_KINDS, scriptCatalog } from './stageDefs';
 import { stageMap, stages } from './stages';
 import { MODELS } from './models';
 import { LOOKS } from './looks';
@@ -175,7 +175,7 @@ describe('会話用のマップ（文字の行）', () => {
     for (const st of stages) {
       const map = createMap(st.map);
       for (const p of st.props ?? []) {
-        if (p.kind !== '群衆' && p.kind !== '遠くの家') expect(getTile(map, p.x, p.z), `${st.id} ${p.id}`).toBeDefined();
+        if (!OUTSIDE_PROP_KINDS.includes(p.kind)) expect(getTile(map, p.x, p.z), `${st.id} ${p.id}`).toBeDefined();
         expect(PROP_KINDS[p.kind], `${st.id} ${p.kind}`).toBeDefined();
       }
     }

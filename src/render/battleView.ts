@@ -102,8 +102,8 @@ export interface BattleView {
   walkActor(id: string, path: readonly Coord[], speed?: number): Promise<void>;
   /** 人物の頭のてっぺんの位置（会話の話者の印を出す所） */
   actorHead(id: string): THREE.Vector3 | undefined;
-  /** 光にさらわれるように消える */
-  vanish(id: string): Promise<void>;
+  /** 光にさらわれるように消える。fall なら、横から押し流されて、白く光りながら下へ落ちていく（時の外へ落ちる） */
+  vanish(id: string, fall?: boolean): Promise<void>;
   /**
    * 攻撃の動きを見せる（見た目だけ。序章の丘の始めの演出）。隣なら踏み込んで斬り、離れていれば矢を放つ。
    * parry は受ける側が武器で払う（白く光る）。当たった瞬間に onImpact を呼ぶ
@@ -114,6 +114,10 @@ export interface BattleView {
   /** 物を置く・消す（見た目だけ） */
   putProp(name: string, model: string, c: Coord): Promise<void>;
   removeProp(name: string): Promise<void>;
+  /** 物（置き物を含む）の見た目を替える（涸れた谷に水が流れる など） */
+  changeProp(name: string, model: string): Promise<void>;
+  /** 物（置き物を含む）の位置（物の名前の札を出す所） */
+  propPoint(name: string): THREE.Vector3 | undefined;
   /** 物（置き物を含む）を、そのマスへ seconds 秒かけて動かす */
   moveProp(name: string, c: Coord, seconds: number): Promise<void>;
   /** 台本の人物（ユニットか背景の人）の続く姿勢（勝った後の台本の「膝をついたまま」など）。空なら元に戻す */
@@ -836,13 +840,30 @@ export function createBattleView(options: {
         a.coord = { x: path[i]!.x, z: path[i]!.z };
       }
     },
-    async vanish(id) {
+    async vanish(id, fall) {
       const a = actorPuppet(id);
       if (!a) return;
       const glow = new THREE.Color(0xffffff);
       const y0 = a.puppet.body.position.y;
-      await tweens.play(1.1, (t) => {
-        a.puppet.setGlow(glow, Math.min(1, t * 2));
+      if (fall) {
+        // 光が横からさらう: 横へ流され、傾きながら、白く光って足もとの下へ沈んでいく（2.4 秒。見届けられる長さ）
+        const x0 = a.puppet.body.position.x;
+        await tweens.play(2.4, (t) => {
+          a.puppet.setGlow(glow, Math.min(1, t * 1.6));
+          a.puppet.setOpacity(t < 0.6 ? 1 : 1 - (t - 0.6) / 0.4);
+          a.puppet.body.position.x = x0 + 0.35 * Math.min(1, t * 2);
+          a.puppet.body.rotation.z = -0.9 * t;
+          a.puppet.body.position.y = y0 - 1.6 * t * t;
+        });
+        a.puppet.group.visible = false;
+        a.puppet.setGlow(glow, 0);
+        a.puppet.body.rotation.z = 0;
+        a.puppet.body.position.set(x0, y0, a.puppet.body.position.z);
+        return;
+      }
+      // 門の光へ入っていく: 少しだけ光りながら薄れる（白く光る人影に見えないように）
+      await tweens.play(0.9, (t) => {
+        a.puppet.setGlow(glow, Math.min(0.35, t));
         a.puppet.setOpacity(1 - t);
         a.puppet.body.position.y = y0 + 0.5 * t * t;
       });
@@ -926,6 +947,30 @@ export function createBattleView(options: {
       scene.add(p.group);
       props.set(name, p);
       await tweens.play(0.3, (t) => p.setOpacity(t));
+    },
+    async changeProp(name, model) {
+      const old = props.get(name);
+      if (!old) return;
+      const p = createPropModel(model);
+      p.group.position.copy(old.group.position);
+      p.group.rotation.copy(old.group.rotation);
+      p.group.traverse((o) => (o.raycast = () => {}));
+      scene.add(p.group);
+      props.set(name, p);
+      p.setOpacity(0);
+      await tweens.play(0.6, (t) => {
+        p.setOpacity(t);
+        old.setOpacity(1 - t);
+      });
+      old.group.removeFromParent();
+    },
+    propPoint(name) {
+      const p = props.get(name);
+      if (!p) return undefined;
+      // 物の形のいちばん上の少し上（物の名前の札が物を隠さないように）。大きな遠景（村など）は、置いた所の少し上
+      const box = new THREE.Box3().setFromObject(p.group);
+      const top = box.isEmpty() ? 0.3 : Math.min(box.max.y - p.group.position.y + 0.08, 1.2);
+      return p.group.position.clone().add(new THREE.Vector3(0, top, 0));
     },
     async removeProp(name) {
       const p = props.get(name);

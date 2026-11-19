@@ -227,7 +227,23 @@ export const PROP_KINDS: Readonly<Record<string, string>> = {
   /** 遠くの家（マップの外の遠景。堰の下流の村の屋根） */
   遠くの家: 'house',
   壁の工具: 'wallTools',
+  // 序章の演出の直し（実際の画面での初見の検査）で足した物
+  /** 堰のまわりの土地（地面・上流の湖・西の谷の尾根・下流の川筋） */
+  堰のまわりの土地: 'weirLand',
+  下流の村1: 'village1',
+  下流の村2: 'village2',
+  下流の村3: 'village3',
+  涸れた谷: 'dryChannel',
+  机の上の包み二つ: 'deskParcels',
+  机の上の包み一つ: 'deskParcel',
+  水の流れる谷: 'wetChannel',
+  遠い谷のまわり: 'farValleyLand',
 };
+
+/**
+ * マップの外に置いてよい物（遠景）。足もとに地面の板を持つか、地面そのもの（浮いて見えないように。序章の演出の直し）
+ */
+export const OUTSIDE_PROP_KINDS: readonly string[] = ['群衆', '遠くの家', '堰のまわりの土地', '下流の村1', '下流の村2', '下流の村3', '涸れた谷', '水の流れる谷', '遠い谷のまわり'];
 
 /**
  * 人物の見た目（台本に書く名前 → 見た目の id。見た目は looks.ts）。

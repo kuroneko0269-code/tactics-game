@@ -11,17 +11,19 @@ import { enemyUnit, kit } from '../enemyUnits';
  * 東の崖の上（高さ 3〜4）から弓で撃ち下ろせる（札の「高い所から撃つ矢は、遠くまで届く」）。
  * 合わせ目を3つ壊すと勝利。3つ目を壊すと、西の涸れた谷に水が流れはじめる（水が別の谷へ）。
  * 初めて遊ぶ人が、説明を読まなくても勝てる強さにする（番兵は弱い。味方が倒れることはまずない）。
+ * 堰の下から南へ、土の川床が続き（マップの中ほど）、マップの外の南に下流の三つの村がある（置き物の decor）。
+ * 西の涸れた谷は、マップの外で西へ折れて、遠くの別の谷へ続く。勝った後、この谷に水が流れる（@変える 西の谷 水の流れる谷）。
  */
 const map = stageMap('prologue-weir', [
   '0d 2w 2w 2w 2w 2w 2w 2w 4s',
   '0d 2w 2w 2w 2w 2w 2w 2w 4s',
   '0d 3s 3s 3s 3s 3s 3s 3s 4s',
   '0d 2d 2d 2d 2d 2d 2d 2d 3s',
-  '0d 1g 1g 1g 1g 1g 1g 1g 3g',
-  '0d 1g 0g 0g 0g 0g 0g 1g 2g',
+  '0d 1g 1g 1g 1d 1g 1g 1g 3g',
+  '0d 1g 0g 0g 0d 0g 0g 1g 2g',
   '0d 0g 0g 0d 0d 0d 0g 0g 2g',
   '1g 0g 0g 0d 0d 0d 0g 0g 1g',
-  '1g 1g 0g 0g 0g 0g 0g 1g 1g',
+  '1g 1g 0g 0d 0d 0d 0g 1g 1g',
 ]);
 
 const seams = ['weir-seam-1', 'weir-seam-2', 'weir-seam-3'];
@@ -72,6 +74,19 @@ export const weirBattle: BattleSite = {
   cast: { 番兵: 'weir-guard-2', 番兵A: 'weir-guard-1', 番兵B: 'weir-guard-3', 男たち: 'weir-worker-1', 男: 'weir-worker-2' },
   looks: { 'weir-guard-1': 'guard', 'weir-guard-2': 'guard', 'weir-guard-3': 'guardBow' },
   afterVictory: 'prologueWeirAfter',
+  // マップの外の土地（地面・上流の湖・西の谷・下流の川筋と三つの村）。浮いて見える物を置かない（足もとに地面がある）
+  decor: [
+    { id: '土地', kind: '堰のまわりの土地', x: 4, z: 12 },
+    { id: '村1', kind: '下流の村1', x: 4, z: 11 },
+    { id: '村2', kind: '下流の村2', x: 4, z: 14 },
+    { id: '村3', kind: '下流の村3', x: 4, z: 17 },
+    { id: '西の谷', kind: '涸れた谷', x: -1, z: 5 },
+  ],
+  // 台本のカメラが向く、マップの外のマス（下流の村々・西の谷の先）
+  lookouts: [
+    { x: 4, z: 17 },
+    { x: -6, z: 5 },
+  ],
   // 隊員の名札に役目を添える（戦士ゴード、弓使いキリ、魔道士フェン、治癒師ノノ）
   roleTags: ['gord', 'kiri', 'fen', 'nono'],
   // 昼（勝った後の遠い谷の家々は「昼なのに、軒の灯が揺れている」）

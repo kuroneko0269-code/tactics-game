@@ -12,6 +12,7 @@ export type ScreenTextKind =
   | '字幕'
   | '台詞'
   | '物の文字'
+  | '物の札'
   | '名札'
   | '章の題'
   | '操作の案内'
@@ -134,6 +135,9 @@ export function screenTextOf(script: Script, labels: ControlLabels, light?: Ligh
       case 'nameTag':
         push({ kind: '名札', text: `${d.actor}〔${d.title}〕` });
         return;
+      case 'objectLabel':
+        push({ kind: '物の札', text: `${d.text}（${d.target}の上に${seconds(d.ms)}）` });
+        return;
       case 'chapterTitle':
         push({ kind: '章の題', text: `${d.title}「${d.subtitle}」` });
         return;
@@ -154,7 +158,7 @@ export function screenTextOf(script: Script, labels: ControlLabels, light?: Ligh
         extra('動き', `${pre}${d.actor}が登場（${d.x},${d.z}・${DIR_JA[d.facing]}向き）`);
         return;
       case 'exit':
-        extra('動き', `${pre}${d.actor}が消える`);
+        extra('動き', `${pre}${d.actor}が${d.fall ? '光にさらわれ、白く光りながら足もとの下へ落ちて消える' : '消える'}`);
         return;
       case 'place':
         extra('動き', `${pre}${d.actor}を${d.x},${d.z}に置き直す`);
@@ -205,7 +209,7 @@ export function screenTextOf(script: Script, labels: ControlLabels, light?: Ligh
         extra('物', `${pre}${d.name}を${d.x},${d.z}へ動かす（${seconds(d.ms)}）`);
         return;
       case 'camera':
-        extra('カメラ', `${pre}${target(d)}へ${d.zoom ? `（${ZOOM_JA[d.zoom]}）` : ''}${d.ms ? `${seconds(d.ms)}かけて` : ''}`);
+        extra('カメラ', `${pre}${target(d)}へ${d.zoom ? `（${ZOOM_JA[d.zoom]}）` : ''}${d.ms ? `${seconds(d.ms)}かけて` : ''}${d.flow ? '（動き終わるのを待たずに次へ）' : ''}`);
         return;
       case 'fadeOut':
         extra('画面', `${pre}暗転（${seconds(d.ms)}）`);

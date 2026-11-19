@@ -84,6 +84,8 @@ export interface BattleSite {
    * マップの外（x や z が範囲の外）にも置ける。戦闘の状態には入らない（通れる・対象にならない）。勝った後の台本から @動かす・@消す できる
    */
   readonly decor?: readonly { readonly id: string; readonly kind: string; readonly x: number; readonly z: number }[];
+  /** マップの外で、台本のカメラを向けてよいマス（堰の下流の村など）。カメラを動かせる範囲が、ここまで広がる */
+  readonly lookouts?: readonly { readonly x: number; readonly z: number }[];
   /**
    * 戦闘の間、遠くで繰り返し鳴らす旋律（丘の歌。ゲーム脚本の序章）。名前は src/data/sounds.ts の旋律と音色。level は音の大きさ（0〜100）。
    * 勝った後の台本の @節を止める で止まる

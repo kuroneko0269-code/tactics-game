@@ -2992,7 +2992,8 @@ body.in-dialogue #hud {
 .dialogue-caption {
   position: absolute;
   left: 50%;
-  top: calc(max(10px, env(safe-area-inset-top)) + 44px);
+  /* 場所と時の札（top + 52px、高さ約 34px）の下から出す（札に字幕の頭が隠れないように） */
+  top: calc(max(10px, env(safe-area-inset-top)) + 92px);
   transform: translateX(-50%);
   width: min(calc(100% - 32px), 640px);
   padding: 10px 18px;
@@ -3464,7 +3465,7 @@ body.in-dialogue #hud {
   }
 
   .dialogue-caption {
-    top: calc(max(6px, env(safe-area-inset-top)) + 36px);
+    top: calc(max(6px, env(safe-area-inset-top)) + 84px);
     font-size: 17px;
     padding: 6px 14px;
   }
@@ -3862,4 +3863,43 @@ body.in-dialogue #hud {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     align-content: start;
   }
+}
+
+/* 物の名前の札（物の上に、名前だけを短く出す。物を指す小さな三角つき） */
+.dialogue-objlabel {
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 14px));
+  padding: 4px 12px;
+  border-radius: 6px;
+  background: rgba(250, 244, 226, 0.95);
+  color: #2a1e10;
+  border: 1px solid rgba(120, 90, 40, 0.7);
+  font-size: 16px;
+  font-weight: bold;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  animation: placard-in 0.25s ease-out;
+  z-index: 3;
+}
+
+.dialogue-objlabel::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -8px;
+  transform: translateX(-50%);
+  border: 8px solid transparent;
+  border-bottom: 0;
+  border-top-color: rgba(250, 244, 226, 0.95);
+}
+
+.dialogue-objlabel.free {
+  left: 50% !important;
+  top: 34% !important;
+}
+
+.dialogue-objlabel[hidden] {
+  display: none;
 }

@@ -40,6 +40,8 @@ export interface SceneView {
   actorPoint(name: string): THREE.Vector3 | undefined;
   /** 物の位置（カメラを向ける先） */
   propPoint(name: string): THREE.Vector3 | undefined;
+  /** 物の形のいちばん上の少し上（物の名前の札を出す所。札が物を隠さないように） */
+  propTop(name: string): THREE.Vector3 | undefined;
   /** 人物の頭のてっぺんの位置（話者の印を出す所。歩いている途中も追う） */
   actorHead(name: string): THREE.Vector3 | undefined;
   /** 歩かせる時に、進めるマスを色分けする（空なら消す） */
@@ -333,6 +335,12 @@ export function createSceneView(options: {
     propPoint(name) {
       const p = props.get(name);
       return p ? mapView.tileTop(p.coord.x, p.coord.z).add(new THREE.Vector3(0, 0.3, 0)) : undefined;
+    },
+    propTop(name) {
+      const p = props.get(name);
+      if (!p) return undefined;
+      const box = new THREE.Box3().setFromObject(p.model.group);
+      return box.isEmpty() ? undefined : new THREE.Vector3((box.min.x + box.max.x) / 2, box.max.y + 0.08, (box.min.z + box.max.z) / 2);
     },
     actorHead(name) {
       const a = actors.get(name);

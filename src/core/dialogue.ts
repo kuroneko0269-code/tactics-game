@@ -201,6 +201,7 @@ export function applyDirective(stage: StageState, d: Directive): StageState {
     case 'listen':
     case 'placard':
     case 'nameTag':
+    case 'objectLabel':
     case 'shot':
     case 'overlay':
     case 'melodyCut':

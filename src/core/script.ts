@@ -26,7 +26,8 @@ export type Directive =
   /** 人物が現れる（立つ位置と向き） */
   | { readonly kind: 'enter'; readonly actor: string; readonly x: number; readonly z: number; readonly facing: Direction }
   /** 人物が去る */
-  | { readonly kind: 'exit'; readonly actor: string }
+  /** 退場する。fall なら、光にさらわれて白の中へ落ちていく（序章の丘のガレス。@退場 名前 落ちる） */
+  | { readonly kind: 'exit'; readonly actor: string; readonly fall?: true }
   /** 人物をそのマスへ置き直す（動きなし） */
   | { readonly kind: 'place'; readonly actor: string; readonly x: number; readonly z: number }
   /** 人物がそのマスへ歩く（縦、横の順に、まっすぐ）。speed は歩く速さの百分率（100 がふつう。省くと 100） */
@@ -38,7 +39,8 @@ export type Directive =
   /**
    * カメラを、マスか人物・物に向ける（actor は人物か物の名前）。ms があれば、その時間をかけてゆっくり動かす
    */
-  | { readonly kind: 'camera'; readonly x?: number; readonly z?: number; readonly actor?: string; readonly hands?: true; readonly zoom?: CameraZoom; readonly ms?: number }
+  /** カメラを向ける。flow なら、動き終わるのを待たずに次へ進む（字幕を読ませながら、堰から下流の村へカメラをたどらせる。@カメラ … 待たない） */
+  | { readonly kind: 'camera'; readonly x?: number; readonly z?: number; readonly actor?: string; readonly hands?: true; readonly zoom?: CameraZoom; readonly ms?: number; readonly flow?: true }
   /** 暗転（画面を暗くする）と明転（戻す） */
   | { readonly kind: 'fadeOut'; readonly ms: number }
   | { readonly kind: 'fadeIn'; readonly ms: number }
@@ -116,6 +118,11 @@ export type Directive =
   | { readonly kind: 'placard'; readonly text: string; readonly era?: string }
   /** 名札: 台詞のない人物の名前と肩書きを、短く画面に出す（序章の丘のガレス〔アスタルの若き王〕）。待たずに次へ進む */
   | { readonly kind: 'nameTag'; readonly actor: string; readonly title: string }
+  /**
+   * 物の名前の札: 大事な物を映す時に、その物（か、それを持つ人物）の上に、物の名前だけを短く出す（「蜜菓子の包み」「測り棒」）。
+   * 働きや意味は書かない（伏せる事柄に触れないため）。待たずに次へ進み、ms の後に消える
+   */
+  | { readonly kind: 'objectLabel'; readonly target: string; readonly text: string; readonly ms: number }
   /**
    * 映す: カメラをマスか人物・物に向け、ちょうど ms の間（動く時間を含む）映してから次へ移る（意味ありげなカットを長く止めない）
    */
@@ -229,7 +236,7 @@ export const DIRECTIVE_USAGE: Readonly<Record<string, string>> = {
   歩く: '@歩く 名前 x,z [ゆっくり・ふつう・速く・走る]',
   向き: '@向き 名前 向き（北・東・南・西）か、相手の人物・物の名前',
   仕草: '@仕草 名前 仕草の名前',
-  カメラ: '@カメラ x,z [遠・中・近] [秒] か @カメラ 人物か物の名前 [遠・中・近] [秒]（秒を書くと、その時間をかけてゆっくり動く）',
+  カメラ: '@カメラ x,z [遠・中・近] [秒] か @カメラ 人物か物の名前 [遠・中・近] [秒]（秒を書くと、その時間をかけてゆっくり動く。「待たない」を添えると、動き終わるのを待たずに次の字幕や台詞へ進む）',
   暗転: '@暗転 [秒]',
   明転: '@明転 [秒]',
   間: '@間 秒',
@@ -266,6 +273,7 @@ export const DIRECTIVE_USAGE: Readonly<Record<string, string>> = {
   聞く: '@聞く 旋律の名前 音色 [案内の文]（操作の場面: 押している間だけ鳴る。待たずに次の行へ進み、@節を待つ で聞く進み具合を待つ）',
   札: '@札 今　暦の塔（場所と時の札。画面の隅に短く出す）',
   名札: '@名札 名前 肩書き（台詞のない人物の名前と肩書きを短く出す）',
+  物の札: '@物の札 物か人物かマス(x,z) 名前 [秒]（物の上に、物の名前だけを短く出す。省くと 2.5 秒。待たずに次へ）',
   映す: '@映す x,z か 人物・物の名前（人物の名前の後に「の手もと」で手の高さ） [遠・中・近] 秒（その秒の間だけ映して次へ）',
   重ねる: '@重ねる 回想の台本の名前 秒（今の場面の上に、別の短い画を重ねる）',
   節を切る: '@節を切る 効果音の名前 [残りの音の数]（鳴っている旋律を、その音の手前で切って効果音を鳴らす）',
@@ -456,7 +464,8 @@ function parseDirective(text: string, catalog: ScriptCatalog): Directive | strin
       return { kind: 'enter', actor: args[0]!, ...c, facing: f };
     }
     case '退場':
-      return need(1) ?? { kind: 'exit', actor: args[0]! };
+      if (args[1] !== undefined && args[1] !== '落ちる') return bad(`退場のしかた「${args[1]}」は 落ちる だけです`);
+      return need(1) ?? { kind: 'exit', actor: args[0]!, ...(args[1] === '落ちる' ? { fall: true as const } : {}) };
     case '位置':
     case '歩く': {
       const e = need(2);
@@ -486,7 +495,12 @@ function parseDirective(text: string, catalog: ScriptCatalog): Directive | strin
       if (e) return e;
       let zoom: CameraZoom | undefined;
       let ms: number | undefined;
+      let flow = false;
       for (const w of args.slice(1)) {
+        if (w === '待たない') {
+          flow = true;
+          continue;
+        }
         if (ZOOMS_JA[w]) {
           if (zoom) return bad('寄りが2つ書かれています');
           zoom = ZOOMS_JA[w];
@@ -498,9 +512,9 @@ function parseDirective(text: string, catalog: ScriptCatalog): Directive | strin
           ms = v;
           continue;
         }
-        return bad(`「${w}」は、寄り（遠・中・近）か秒（例: 2秒）で書きます`);
+        return bad(`「${w}」は、寄り（遠・中・近）か秒（例: 2秒）か「待たない」で書きます`);
       }
-      const extra = { ...(zoom ? { zoom } : {}), ...(ms ? { ms } : {}) };
+      const extra = { ...(zoom ? { zoom } : {}), ...(ms ? { ms } : {}), ...(flow ? { flow: true as const } : {}) };
       const c = coord(args[0]!);
       return c ? { kind: 'camera', ...c, ...extra } : { kind: 'camera', actor: args[0]!, ...extra };
     }
@@ -674,6 +688,20 @@ function parseDirective(text: string, catalog: ScriptCatalog): Directive | strin
       const e = need(2);
       if (e) return e;
       return { kind: 'nameTag', actor: args[0]!, title: args.slice(1).join('　') };
+    }
+    case '物の札': {
+      const e = need(2);
+      if (e) return e;
+      const rest = args.slice(1);
+      let ms = 2500;
+      const last = rest[rest.length - 1]!;
+      if (rest.length > 1 && /^[\d.]+秒?$/.test(last)) {
+        const v = seconds(last, 0);
+        if (typeof v === 'string') return v;
+        ms = v;
+        rest.pop();
+      }
+      return { kind: 'objectLabel', target: args[0]!, text: rest.join('　'), ms };
     }
     case '映す': {
       const e = need(2);

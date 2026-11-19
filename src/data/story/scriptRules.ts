@@ -7,12 +7,17 @@ import type { ScriptRules } from '../../core/scriptRules';
 export const SCRIPT_RULES: ScriptRules = {
   /** 台詞は、1つの枠に 40 字以内 */
   maxLineChars: 40,
-  /** 同じ人物の台詞は、続けて 3 枠まで（4 枠以上続いたら知らせる） */
-  maxSameSpeakerRun: 3,
-  /** 1つの場面の字幕は、画面に出る行で 2 行まで（3 行以上あったら知らせる。場所と時の札は数えない） */
-  maxNarrationLines: 2,
-  /** ゲーム脚本の改訂の決まり: 場面1（堰の戦闘の前）だけは、前提の字幕のため 3 行まで */
-  narrationLimits: { prologueWeirIntro: 3 },
+  /**
+   * 同じ人物の台詞が続けて何枠まで続いてよいか。序章の演出の直し（実際の画面での初見の検査）で、台詞を意味の切れ目で
+   * 分けるために、発注者の指示でこの制限を外した（大きな数にしてある）
+   */
+  maxSameSpeakerRun: 99,
+  /**
+   * 1つの場面の字幕は、画面に出る行で 4 行まで（5 行以上あったら知らせる。場所と時の札は数えない）。
+   * 序章の演出の直しで、発注者の指示により 2 行（場面1だけ 3 行）から 4 行に緩めた。分かりやすさのために超える場面は narrationLimits に書く
+   */
+  maxNarrationLines: 4,
+  narrationLimits: {},
   /** 字幕の画面の1行は、台詞と同じ 40 字以内を目安にする */
   maxCaptionLineChars: 40,
   /**
