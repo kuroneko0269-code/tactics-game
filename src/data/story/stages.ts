@@ -34,6 +34,8 @@ export interface StageDefinition {
   readonly view?: { readonly x: number; readonly z: number; readonly zoom: 'far' | 'mid' | 'near' };
   /** マップの外で、台本のカメラを向けてよいマス（堰の下流の村など）。カメラを動かせる範囲が、ここまで広がる */
   readonly lookouts?: readonly { readonly x: number; readonly z: number }[];
+  /** マップのマスを描かない（夜空だけを映す場面。地面の板が何か分からない箱に見えないように） */
+  readonly hideGround?: boolean;
 }
 
 /** 室内（仮）: 5×5 の床と、奥の壁（高さ 4） */
@@ -198,12 +200,10 @@ export const farValleyStage: StageDefinition = {
 /** 夜空（家の窓の外）。星のよく見える空。星の並びがはっきり分かる画（第2章で、ここからひとつ欠ける） */
 export const nightSkyStage: StageDefinition = {
   id: 'stage-night-sky',
-  map: stageMap('stage-night-sky', ['0d 0d 0d 0d 0d', '1b 1b 1b 1b 1b', '1b 1b 1b 1b 1b']),
-  props: [
-    { id: '星', kind: '星の並び', x: 2, z: 0 },
-    { id: '家1', kind: '家', x: 0, z: 2 },
-    { id: '家2', kind: '家', x: 4, z: 2 },
-  ],
+  // 星空だけを映す（初見の検査で、地面の箱と家の屋根が何か分からないと言われたので、地面を描かず、家を置かない）
+  map: stageMap('stage-night-sky', ['0d 0d 0d 0d 0d']),
+  hideGround: true,
+  props: [{ id: '星', kind: '星の並び', x: 2, z: 0 }],
   sky: 0x0c1428,
   time: '夜',
   view: { x: 2, z: 0, zoom: 'mid' },

@@ -29,9 +29,9 @@ export function createPortraitRenderer(lookOf: (name: string) => PuppetLook): Po
   canvas.className = 'portrait-canvas';
   let renderer: THREE.WebGLRenderer | undefined;
   const scene = new THREE.Scene();
-  scene.add(new THREE.HemisphereLight(0xeef4ff, 0x4a3a30, 1.6));
+  scene.add(new THREE.HemisphereLight(0xeef4ff, 0x8a7a6a, 1.6));
   const key = new THREE.DirectionalLight(0xffffff, 2.0);
-  key.position.set(1.2, 2.0, 2.4);
+  key.position.set(0.6, 1.2, 2.6);
   scene.add(key);
   const camera = new THREE.PerspectiveCamera(26, 1, 0.05, 20);
   const puppets = new Map<string, Puppet>();

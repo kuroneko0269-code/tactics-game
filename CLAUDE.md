@@ -22,7 +22,7 @@
 - 設計書の「7. 宣伝」で伏せるとされている事柄を、画面の説明文、ジョブやアイテムの名前、PR の題名で明かさない。
 - **物語の場面を作った時は、実際の画面で初見の検査をする。** 脚本の文章で分かることが、実際の画面で伝わるとは限らないため。
   `npm run story-shots -- --out=作業用のフォルダ` でスマホ縦向きの画面写真の列を撮り、物語を何も知らない観客5人に、その画像だけを見せて答えさせ、
-  各場面の「伝えること」を4人以上が正しく答えられるまで直す（まず絵、次に文字）。手順は [docs/STORY_REVIEW.md](docs/STORY_REVIEW.md)。
+  各場面の「伝えること」を4人以上が正しく答えられ、画面の作りに関する違和感がどの項目も挙げた人1人以下になるまで直す（まず絵、次に文字。物語の謎と作者と相談中の点は数えないが、一覧には残す）。手順は [docs/STORY_REVIEW.md](docs/STORY_REVIEW.md)。
   足した語り・物の名前の札・分けた台詞は、場面と脚本の行の前後を添えて一覧にし、物語の作者に確かめてもらう。
 - **分岐とマルチエンディングは作らない。**（会話に選択肢は置かない）
 - 物語の台本（`src/data/story/scripts/`）と章の「これまで」は、例外として text.ts ではなく台本と章のデータに書く。
@@ -207,10 +207,9 @@ npm run balance      # バランス確認: 画面を使わず AI 同士を戦わ
   音を切る（`@節を切る`）は `src/core/script.ts` と `src/ui/dialogue.ts`、短い画を重ねる（`@重ねる`）は `src/main.ts` の `showOverlay`（回想の台本を別のシーンとカメラで描き、今の画の写しを薄く重ねる）、
   聞く操作は待たずに進み、後の `@節を待つ` が聞く進み具合を待つ（`src/ui/dialogue.ts`）。隊員の名札の役目は戦場の定義の `roleTags`、手ほどきで物の文字を出す段は `scriptId`。
   字幕の行数は画面の行で数え、場面1だけ3行（`src/data/story/scriptRules.ts` の `narrationLimits`）。書き出しは `src/core/scriptExport.ts` と `scripts/script-export.mjs`（伏線のカットの秒数と場面の光も出す）。
-  手ほどきの物語の段（`scriptId`。測り棒の札）は、手ほどきを飛ばしても、見た手ほどきを出さない設定でも必ず一度出す（`src/ui/tutorial.ts`）。
+  手ほどきの物語の段（`scriptId`。物の文字を出す段）は、手ほどきを飛ばしても、見た手ほどきを出さない設定でも必ず一度出す（`src/ui/tutorial.ts`）。序章の測り棒の札は、手ほどきではなく戦闘の前の台本（1-7）で出す。
   場面の時刻の光（朝・昼・夕方・夜）は、台本の `@時刻`・会話用のマップと戦場の定義の `time`、数値は `src/data/lighting.ts`、当てるのは `src/render/lighting.ts`。
-  操作の場面の文字の案内を出さない指定（`@文字の案内 なし`。押す所は `src/render/sceneView.ts` の揺れる目印、聞く操作は手の絵）、人物の手もとを映す `@映す 名前の手もと`、
-  物語の段を出さないまま勝った時に勝った直後に出す処理（`src/main.ts` の `playAfterVictory`）。
+  操作の場面の文字の案内を出さない指定（`@文字の案内 なし`。押す所は `src/render/sceneView.ts` の揺れる目印、聞く操作は手の絵）、人物の手もとを映す `@映す 名前の手もと`。
 - 物語の確認（物語の確認の PR）: 題名の「物語」の後の「つづきから／はじめから」と「場面を選ぶ」の画面は `src/ui/titleScreen.ts`、場面の一覧と選んだ場面の進み具合は
   `src/core/story.ts`（`sceneEntries`・`progressAt`。場面の脚本の番号は `books.ts` の `scriptScene`、名前は text.ts の `story.scenes`）。確認用の機能の切り替えは設定（`checkTools`）、
   隅の印と「勝ったことにする」は `src/ui/checkBadge.ts`、勝った状態を作るのは `src/core/battle.ts` の `forceVictory`。確認用の機能で進めた物語は進み具合に `checked` が付き、報酬を得ない。

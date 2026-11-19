@@ -25,7 +25,9 @@ export function victoryText(
     }
     case 'hitUnit': {
       const label = c.labelId ? (TEXT.objectNames[c.labelId] ?? c.labelId) : TEXT.objectives.hitUnitDefaultLabel;
-      const text = TEXT.objectives.hitUnit(label, nameOf(c.unitId), state ? tallyOf(state, c.id) : 0, c.times);
+      const goal = c.labelId ? TEXT.objectives.hitUnitGoal[c.labelId] : undefined;
+      const body = TEXT.objectives.hitUnit(label, nameOf(c.unitId), state ? tallyOf(state, c.id) : 0, c.times);
+      const text = goal ? `${goal}（${body}）` : body;
       return c.finisherId ? `${text}${TEXT.objectives.finisherNote(nameOf(c.finisherId))}` : text;
     }
     case 'defeatAll':
@@ -49,7 +51,8 @@ function victoryShort(state: BattleState, c: VictoryCondition): string {
   if (c.kind === 'hitUnit') {
     const label = c.labelId ? (TEXT.objectNames[c.labelId] ?? c.labelId) : TEXT.objectives.hitUnitDefaultLabel;
     const count = tallyOf(state, c.id);
-    const text = TEXT.objectives.hitUnitShort(label, count, c.times);
+    const goal = c.labelId ? TEXT.objectives.hitUnitGoal[c.labelId] : undefined;
+    const text = goal ? `${goal} ${Math.min(count, c.times)}/${c.times}` : TEXT.objectives.hitUnitShort(label, count, c.times);
     // 最後の1回を当てられるのが決まっている時（序章の丘）は、最後の1回の手前で、だれが当てるかを添える
     return c.finisherId && count === c.times - 1 ? `${text}${TEXT.objectives.finisherShort(namer(state)(c.finisherId))}` : text;
   }

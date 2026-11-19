@@ -42,6 +42,8 @@ export interface SceneView {
   propPoint(name: string): THREE.Vector3 | undefined;
   /** 物の形のいちばん上の少し上（物の名前の札を出す所。札が物を隠さないように） */
   propTop(name: string): THREE.Vector3 | undefined;
+  /** 人物の持ち物の付く所（手・左手・腰・背）の位置（持っている物の名前の札を出す所） */
+  actorSlot(name: string, slot: 'hand' | 'handL' | 'waist' | 'back'): THREE.Vector3 | undefined;
   /** 人物の頭のてっぺんの位置（話者の印を出す所。歩いている途中も追う） */
   actorHead(name: string): THREE.Vector3 | undefined;
   /** 歩かせる時に、進めるマスを色分けする（空なら消す） */
@@ -293,11 +295,16 @@ export function createSceneView(options: {
     async changeProp(name, kind) {
       const p = props.get(name);
       if (!p) return;
-      dropProp(name);
+      // 前の形と新しい形を、光らせずに入れ替える（白く光ると、開いた戸が白い板に見えるため。序章の演出の直し）
+      const old = p.model;
+      props.delete(name);
       const model = makeProp(name, kind, p.coord);
-      const glow = new THREE.Color(0xffffff);
-      await play(0.35, (t) => model.setGlow(glow, 1 - t));
-      model.setGlow(glow, 0);
+      model.setOpacity(0);
+      await play(0.3, (t) => {
+        model.setOpacity(t);
+        old.setOpacity(1 - t);
+      });
+      scene.remove(old.group);
     },
     setItems(name, items) {
       const a = actors.get(name);
@@ -335,6 +342,9 @@ export function createSceneView(options: {
     propPoint(name) {
       const p = props.get(name);
       return p ? mapView.tileTop(p.coord.x, p.coord.z).add(new THREE.Vector3(0, 0.3, 0)) : undefined;
+    },
+    actorSlot(name, slot) {
+      return actors.get(name)?.puppet.itemPoint?.(slot);
     },
     propTop(name) {
       const p = props.get(name);
@@ -376,7 +386,8 @@ export function createSceneView(options: {
       for (const a of actors.values()) a.puppet.update(elapsed);
       for (const p of props.values()) p.model.update(elapsed);
       // タップを待っている物は、ゆっくり明滅する
-      if (tapTarget) props.get(tapTarget)?.model.setGlow(new THREE.Color(0xffe8a0), 0.45 + Math.sin(elapsed * 4) * 0.3);
+      // 押す物は、形が分かる程度に弱く光らせる（強く光ると、戸が光る板に見えるため。初見の検査）。押す所は上の揺れる目印で示す
+      if (tapTarget) props.get(tapTarget)?.model.setGlow(new THREE.Color(0xffe8a0), 0.18 + Math.sin(elapsed * 4) * 0.1);
       if (beacon.visible) {
         beacon.position.copy(beaconBase).add(new THREE.Vector3(0, Math.abs(Math.sin(elapsed * 3)) * 0.18, 0));
         beacon.rotation.y = elapsed * 1.5;

@@ -37,7 +37,7 @@ function readRows(md: string): Row[] {
 /** 脚本の場面 → その場面を作る台本 */
 const SCENE_SCRIPTS: Readonly<Record<number, readonly string[]>> = {
   0: ['prologueOpen'],
-  1: ['prologueWeirIntro', 'prologueWeirTag', 'prologueWeirCrack1', 'prologueWeirCrack2', 'prologueWeirCrack3', 'prologueWeirAfter'],
+  1: ['prologueWeirIntro', 'prologueWeirSeams', 'prologueWeirCrack1', 'prologueWeirCrack2', 'prologueWeirCrack3', 'prologueWeirAfter'],
   2: ['prologueTower'],
   3: ['prologueHall'],
   4: ['prologueHome'],
@@ -47,8 +47,8 @@ const SCENE_SCRIPTS: Readonly<Record<number, readonly string[]>> = {
   8: ['prologueReturn'],
   9: ['prologueEnd'],
 };
-/** 戦闘の途中の行（戦場の定義で確かめる）。1-11（測り棒の札）は、手ほどきの段が出す台本 prologueWeirTag に書く */
-const BATTLE_ROWS = ['1-9', '1-10', '1-13', '7-10', '7-12'];
+/** 戦闘の途中の行（戦場の定義で確かめる）。測り棒の札（1-7）は、戦闘の前の台本 prologueWeirIntro に書く */
+const BATTLE_ROWS = ['1-10', '1-11', '1-13', '7-10', '7-12'];
 /** 戦闘中に何度も起きる行（合わせ目が割れるたび・剣に当たるたび）。同じ印を、いくつかの台本に書く */
 const REPEATED_ROWS = ['1-12', '7-11'];
 
@@ -107,12 +107,14 @@ const sameWords = (a: string) => a.replace(/。/g, '');
  * docs/story/prologue-screen-review.md にも書く
  */
 const ADDED_NARRATION: readonly { readonly ref: string; readonly text: string }[] = [
-  // 場面1の勝った後: 西の谷へ水が流れていく画の後、遠い谷の家々のカット（1-16）の前（2026-11-19。物語の作者の回答）
-  { ref: '1-15', text: '下流の村は、もう沈まない。水は、遠い谷へ流れていった。' },
+  // 場面1の勝った後: 水を下流へ追う画の後、下流の谷の家々（1-16）の前（2026-11-19。物語の作者の訂正）
+  { ref: '1-15', text: '百年後に、村が沈むことはもうない。' },
+  // 場面9の家までの道: 知らない顔が会釈していく画の上（2026-11-19。物語の作者の直し）
+  { ref: '9-2', text: '知らない顔が、知った顔のように挨拶をしてくる。' },
 ];
 const isAdded = (l: { speaker: string | null; text: Parameters<typeof plainText>[0] }) => l.speaker === null && ADDED_NARRATION.some((a) => a.text === plainText(l.text));
 
-const OBJECT_LABELS = ['堰', '下流の村', '測り棒', '蜜菓子の包み', '塔の暦盤', 'ユナの暦盤', '守り袋', '指示書', '隊の道具', '灯', '誓いの剣', '石'];
+const OBJECT_LABELS = ['堰', '下流の村', '測り棒', '蜜菓子の包み', '塔の暦盤', 'ユナの暦盤', '守り袋', '指示書', '隊の道具', '灯', '誓いの剣', '石', '合わせ目', '測り棒（崖の高さを測る道具）', '堰を築く人々', '七つの氏族', '父', '母'];
 
 describe('序章の台本とゲーム脚本の対応', () => {
   it('脚本の表は10場面で、行を読める', () => {
@@ -168,7 +170,7 @@ describe('序章の台本とゲーム脚本の対応', () => {
       const narr = lineSteps(block).filter((l) => l.speaker === null);
       expect(narr.length, refOf(r)).toBeGreaterThanOrEqual(1);
       const want = captionOf(r);
-      expect(joined(narr.map((n) => plainText(n.text).replace('\n', ' / '))), refOf(r)).toBe(sameWords(want.text));
+      expect(joined(narr.map((n) => plainText(n.text).replace(/\n/g, ' / '))), refOf(r)).toBe(sameWords(want.text));
       for (const n of narr) expect(n.overDark === true, refOf(r)).toBe(want.overDark);
     }
   });
@@ -270,7 +272,7 @@ describe('序章の台本とゲーム脚本の対応', () => {
       allBlocks.flatMap((b) => {
         const ls = lineSteps(b).filter((l) => !l.inscription && !isAdded(l) && (l.speaker !== null) === speech);
         if (ls.length === 0) return [];
-        return [speech ? `${ls[0]!.speaker}:${joined(ls.map((l) => plainText(l.text)))}` : joined(ls.map((l) => plainText(l.text).replace('\n', ' / ')))];
+        return [speech ? `${ls[0]!.speaker}:${joined(ls.map((l) => plainText(l.text)))}` : joined(ls.map((l) => plainText(l.text).replace(/\n/g, ' / ')))];
       });
     expect(perRow(true)).toEqual(want.map(sameWords));
     expect(perRow(false)).toEqual(wantNarr.map(sameWords));
@@ -338,18 +340,18 @@ describe('序章の台本とゲーム脚本の対応', () => {
   });
 
   it('戦闘の途中の行は、戦場の定義にある（勝ち方・手ほどき・膝をつく・音）', () => {
-    // 1-9: 合わせ目を3か所壊すと勝ち。番兵は退場しない（1-13: 膝をついたまま残る）。隊員の名札に役目を添える
+    // 1-10: 合わせ目を3か所壊すと勝ち。番兵は退場しない（1-13: 膝をついたまま残る）。隊員の名札に役目を添える
     expect(weirBattle.roleTags).toEqual(['gord', 'kiri', 'fen', 'nono']);
     expect(hillBattle.roleTags).toEqual(['gord', 'kiri', 'fen', 'nono']);
     expect(weirBattle.objectives?.victory[0]).toMatchObject({ kind: 'destroyObjects', unitIds: ['weir-seam-1', 'weir-seam-2', 'weir-seam-3'] });
     const guards = weirBattle.tiers[0]!.units.filter((u) => u.id.startsWith('weir-guard'));
     expect(guards.length).toBe(3);
     for (const g of guards) expect(g.noRetire).toBe(true);
-    // 1-10: 手ほどき（ゴードを前へ、キリを崖の上へ、フェンの火）。キリを崖の上へ動かすと、測り棒の札（1-11。台本 prologueWeirTag）を出す
+    // 1-11: 手ほどき（ゴードを前へ、キリを崖の上へ、フェンの火）。キリの段の文で、測り棒の札の文面を短く思い出させる。札は戦闘の中では出さない（1-7 で戦闘の前に見せる）
     const steps = weirBattle.tutorial ?? [];
     expect(steps.find((s) => s.unitId === 'gord')).toBeDefined();
     expect(steps.find((s) => s.unitId === 'kiri' && s.mode === 'main')).toBeDefined();
-    expect(steps.find((s) => s.id === 'weir-high')).toMatchObject({ unitId: 'kiri', minHeight: 3, scriptId: 'prologueWeirTag' });
+    expect(steps.some((s) => s.scriptId !== undefined)).toBe(false);
     expect(steps.find((s) => s.unitId === 'fen')).toBeDefined();
     // 1-12: 合わせ目が割れるたびの音
     const crack = (weirBattle.events ?? []).filter((e) => e.trigger.kind === 'objectsBroken').flatMap((e) => e.effects.flatMap((x) => (x.kind === 'dialogue' ? [x.scriptId] : [])));

@@ -14,6 +14,7 @@ import {
   type Roster,
 } from './core/progression';
 import { createMap, type MapDefinition } from './core/map';
+import { DIRECTION_VECTORS } from './core/geometry';
 import {
   clearCount,
   clearRewardItems,
@@ -187,7 +188,7 @@ function main(): void {
   );
   const soundMark = createSoundMark(document.getElementById('app') ?? document.body);
   /** 開発中だけ: これまでに鳴らした旋律・見せた場所・言葉にしない声の数（自動プレイが、短い印を見逃さずに確かめるため） */
-  const devHistory = { melodies: new Set<string>(), stages: new Set<string>(), voices: 0, overlays: 0, placards: [] as string[], nameTags: [] as string[], objectLabels: [] as string[] };
+  const devHistory = { melodies: new Set<string>(), stages: new Set<string>(), voices: 0, overlays: 0, placards: [] as string[], nameTags: [] as string[], objectLabels: [] as string[], inscriptions: [] as string[] };
   sound.onMelodyChange(() => {
     const m = sound.melody();
     if (m) devHistory.melodies.add(`${m.melody}/${m.timbre}`);
@@ -706,6 +707,8 @@ function main(): void {
         facingScreen: (unitId) => view.facingScreen(unitId),
         expToNext: (level) => (level >= progressionRules.maxLevel ? undefined : expToNext(level, progressionRules)),
         ...(currentSite?.roleTags ? { roleTags: currentSite.roleTags } : {}),
+        // 物語の戦闘（物語から出撃した戦闘か、人物の呼び名を持つ序章の戦場）
+        story: liveStoryBattle !== null || currentSite?.cast !== undefined,
       },
       start.state.scenario.objectives.victory.flatMap((c) => (c.kind === 'defeatUnit' ? [c.unitId] : [])),
     );
@@ -737,16 +740,13 @@ function main(): void {
       );
     // 戦闘の手ほどき（序章に足りない仕組み）: 手ほどきのある戦場で、まだ見ていないか、見たものも出す設定の時
     const site = currentSite;
-    // この戦闘で出した物語の段（測り棒の札）。出さないまま勝った時は、勝った直後に出す
-    shownStoryScripts = new Set();
-    // 見た手ほどきを出さない設定で、もう見た戦場でも、物語の段（測り棒の札など。scriptId）だけは出す
+    // 見た手ほどきを出さない設定で、もう見た戦場でも、物語の段（物の文字を出す段。scriptId）だけは出す
     const seen = site !== undefined && settings.skipSeenTutorials && settings.seenTutorials.includes(site.id);
     const steps = (site?.tutorial ?? []).filter((st) => !seen || st.scriptId !== undefined);
     const tutorial =
       site && steps.length > 0
         ? createTutorial(hudEl, steps, {
             ...(seen ? { storyOnly: true } : {}),
-            onStoryShown: (scriptId) => shownStoryScripts.add(scriptId),
             tileScreen: (x, z) => view.tileScreenPosition(x, z),
             unitScreen: (id) => {
               try {
@@ -836,8 +836,6 @@ function main(): void {
     devHistory.voices++;
     voiceMarks.show(headOf, VOICE_KINDS[id] ?? 'call', 1.5);
   };
-  /** この戦闘で出した物語の段（手ほどきの scriptId。測り棒の札） */
-  let shownStoryScripts = new Set<string>();
   /** 遠景のカット（@遠景）で見せている舞台（カットの間だけある） */
   let cutView: SceneView | undefined;
   /**
@@ -846,7 +844,8 @@ function main(): void {
   const showCut = async (stageId: string, ms: number, fast: boolean) => {
     const def = stages.find((st) => st.id === stageId);
     if (!def) return;
-    const fade = fast ? 80 : 300;
+    // 暗くなってから明るくなるように見えないよう、ほぼ切り替えるだけにする（初見の検査: 遠景が前の画と同じ光に見えるように）
+    const fade = fast ? 60 : 120;
     await setDark(true, fade);
     const hidden = stage.scene.children.filter((o) => o.visible && !(o instanceof THREE.Light));
     for (const o of hidden) o.visible = false;
@@ -866,7 +865,10 @@ function main(): void {
     const v = def.view;
     if (v) void rig.lookAt(cutMap.tileTop(v.x, v.z).add(new THREE.Vector3(0, 0.5, 0)), SCENE_ZOOM[v.zoom], 0.01);
     await setDark(false, fade);
-    await new Promise<void>((resolve) => window.setTimeout(resolve, fast ? Math.min(ms, 300) : ms));
+    // 遠景の間は、カメラをゆっくり横へ流す（動きのない画のまま待たせないように。序章の演出の直し）
+    const hold = fast ? Math.min(ms, 300) : ms;
+    if (v) void rig.lookAt(cutMap.tileTop(v.x + 1.5, v.z).add(new THREE.Vector3(0, 0.5, 0)), SCENE_ZOOM[v.zoom], hold / 1000);
+    await new Promise<void>((resolve) => window.setTimeout(resolve, hold));
     await setDark(true, fade);
     view.dispose();
     cutView = undefined;
@@ -912,6 +914,9 @@ function main(): void {
     sun.position.set(6, 12, 4);
     scene.add(hemi, sun);
     applyLighting(scene, { hemi, sun }, timeLight(tod && tod.kind === 'timeOfDay' ? tod.time : def.time), def.sky);
+    // 一瞬の画なので、夜の画でも手もとが見える明るさにする（暗くてユナの手が見分けられないと言われたため。初見の検査）
+    hemi.intensity *= 1.8;
+    sun.intensity *= 1.5;
     const map = createMapView(createMap(def.map));
     scene.add(map.group);
     const oRig = createCameraRig(rigOptions(map, def.map));
@@ -935,7 +940,7 @@ function main(): void {
     await new Promise((r) => requestAnimationFrame(() => r(undefined)));
     shot.style.transitionDuration = `${fade}ms`;
     tint.style.transitionDuration = `${fade}ms`;
-    shot.style.opacity = '0.38';
+    shot.style.opacity = '0.28';
     tint.style.opacity = '1';
     devHistory.overlays++;
     const started = performance.now();
@@ -1001,7 +1006,7 @@ function main(): void {
         return { body: look.body, accent: look.accent };
       },
       overlay: showOverlay,
-      onNotice: (kind, t) => (kind === 'placard' ? devHistory.placards : kind === 'nameTag' ? devHistory.nameTags : devHistory.objectLabels).push(t),
+      onNotice: (kind, t) => (kind === 'placard' ? devHistory.placards : kind === 'nameTag' ? devHistory.nameTags : kind === 'inscription' ? devHistory.inscriptions : devHistory.objectLabels).push(t),
       ...(import.meta.env.DEV ? { autoAdvance: () => devAutoDialogue } : {}),
     });
     dialogueRun = run;
@@ -1053,6 +1058,9 @@ function main(): void {
           return showCut(d.stageId, d.ms, fast);
         case 'voice':
           return playVoice(d.voice, () => view.actorHead(d.actor));
+        case 'humMark':
+          voiceMarks.show(() => view.actorHead(d.actor), 'hum', d.ms / 1000);
+          return;
         case 'propMove':
           return view.moveProp(d.name, d, d.ms / 1000);
         case 'enter':
@@ -1141,13 +1149,23 @@ function main(): void {
       if (c) void rig.focusOn([mapView.tileTop(c.x, c.z), mapView.tileTop(c.x, c.z).add(new THREE.Vector3(0, 1, 0))]);
       return c;
     },
-    screenOf: (name) => worldToScreen(tileOfName(name) ?? view.propTop(name) ?? view.actorHead(name)),
+    screenOf: (name) => {
+      const held = heldOfName(name);
+      return worldToScreen(tileOfName(name) ?? (held ? view.actorSlot(held.actor, held.slot) : undefined) ?? view.propTop(name) ?? view.actorHead(name));
+    },
     };
   };
   /** 「x,z」と書いた名前なら、そのマスの上面の少し上（物の名前の札を、マップのマスに出す。堰など） */
   const tileOfName = (name: string) => {
     const m = /^(-?\d+),(-?\d+)$/.exec(name);
     return m ? mapView.tileTop(Number(m[1]), Number(m[2])).add(new THREE.Vector3(0, 0.5, 0)) : undefined;
+  };
+  /** 「ユナの手もと」「トウマの腰」「ゴードの背」のような名前なら、その人物の持ち物の付く所（物の名前の札を、持っている物のそばに出す） */
+  const heldOfName = (name: string): { actor: string; slot: 'hand' | 'handL' | 'waist' | 'back' } | undefined => {
+    const m = /^(.+)の(手もと|右手|左手|腰|背)$/.exec(name);
+    if (!m) return undefined;
+    const slot = ({ 手もと: 'hand', 右手: 'hand', 左手: 'handL', 腰: 'waist', 背: 'back' } as const)[m[2] as '手もと'];
+    return { actor: m[1]!, slot };
   };
   /** 3D の位置を、画面の座標にする（物の名前の札を出す所。カメラの後ろなら undefined） */
   const worldToScreen = (world: THREE.Vector3 | undefined) => {
@@ -1163,6 +1181,8 @@ function main(): void {
    * 台本の人物の名前は、戦場の cast（名前 → id）か、部隊の人物の名前で、ユニットの id に直す。
    * 動きは見せ方だけで、戦闘の状態は変えない（歩く・退場も見た目だけ。戦闘の後の台本で使う）
    */
+  /** 台本の @攻撃 で、だれがだれに打ちかかったか（「トウマの後ろ」の向きを決めるため） */
+  const lastStruck = new Map<string, string>();
   const battleActorId = (name: string): string | undefined => {
     const fromCast = currentSite?.cast?.[name];
     if (fromCast) return fromCast;
@@ -1173,7 +1193,9 @@ function main(): void {
     sync: () => {},
     screenOf: (name) => {
       const id = battleActorId(name);
-      return worldToScreen(tileOfName(name) ?? (id ? battle?.view.actorHead(id) : battle?.view.propPoint(name)));
+      const held = heldOfName(name);
+      const heldId = held ? battleActorId(held.actor) : undefined;
+      return worldToScreen(tileOfName(name) ?? (heldId && held ? battle?.view.actorSlot(heldId, held.slot) : undefined) ?? (id ? battle?.view.actorHead(id) : battle?.view.propPoint(name)));
     },
     highlight: (speaker) => {
       const id = speaker ? battleActorId(speaker) : undefined;
@@ -1222,7 +1244,10 @@ function main(): void {
         case 'strike': {
           const a = battleActorId(d.actor);
           const b = battleActorId(d.target);
-          if (a && b) await view.strikeActor(a, b, d.outcome, () => sound.effect(d.outcome === 'hit' ? 'hit' : 'miss'));
+          if (a && b) {
+            lastStruck.set(a, b);
+            await view.strikeActor(a, b, d.outcome, () => sound.effect(d.outcome === 'hit' ? 'hit' : 'miss'));
+          }
           return;
         }
         case 'pushBack': {
@@ -1232,8 +1257,24 @@ function main(): void {
           return;
         }
         case 'light': {
-          const actor = d.actor ? battleActorId(d.actor) : undefined;
           const color = LIGHT_COLORS[d.color] ?? 0xffffff;
+          // 「トウマの後ろ」: その人物の背中側の隣のマス（序章の丘: トウマの背後で帰りの門が開く。人物の上に立てると、だれが光に入ったか分からなくなるため）
+          const behind = d.actor ? /^(.+)の後ろ$/.exec(d.actor) : null;
+          if (behind) {
+            const bid = battleActorId(behind[1]!);
+            const units = battle?.controller?.state.units ?? [];
+            const u = bid ? units.find((x) => x.id === bid) : undefined;
+            if (u) {
+              // 背中側: 台本で最後に打ちかかった相手の反対側（見た目の向き）。なければ戦闘の状態の向きの反対側
+              const foe = units.find((x) => x.id === (bid ? lastStruck.get(bid) : undefined));
+              const dx = foe ? foe.x - u.x : 0;
+              const dz = foe ? foe.z - u.z : 0;
+              const v = foe && (dx !== 0 || dz !== 0) ? (Math.abs(dx) >= Math.abs(dz) ? { x: Math.sign(dx), z: 0 } : { x: 0, z: Math.sign(dz) }) : DIRECTION_VECTORS[u.facing];
+              await view.setLight(d.name, { x: u.x - v.x, z: u.z - v.z, color });
+              return;
+            }
+          }
+          const actor = d.actor ? battleActorId(d.actor) : undefined;
           await view.setLight(d.name, actor ? { actor, color } : { ...(d.x !== undefined ? { x: d.x, z: d.z } : {}), color });
           return;
         }
@@ -1247,6 +1288,11 @@ function main(): void {
         case 'voice': {
           const id = battleActorId(d.actor);
           if (id) playVoice(d.voice, () => battle?.view.actorHead(id));
+          return;
+        }
+        case 'humMark': {
+          const id = battleActorId(d.actor);
+          if (id) voiceMarks.show(() => battle?.view.actorHead(id), 'hum', d.ms / 1000);
           return;
         }
         case 'propMove':
@@ -1511,6 +1557,7 @@ function main(): void {
     currentStageId = stageDef.id;
     devHistory.stages.add(stageDef.id);
     useMap(stageDef.map);
+    mapView.group.visible = stageDef.hideGround !== true;
     applySky(stageDef);
     rig.reset();
     const view = createSceneView(sceneViewOptions());
@@ -1526,6 +1573,7 @@ function main(): void {
     sceneBaseStageId = stageDef.id;
     sceneToken = {};
     useMap(stageDef.map);
+    mapView.group.visible = stageDef.hideGround !== true;
     applySky(stageDef);
     setScreen('scene');
     rig.reset();
@@ -1568,8 +1616,6 @@ function main(): void {
    */
   const playAfterVictory = async (target: BattleSite, state: BattleState) => {
     if (!target.afterVictory) return;
-    // 物語の段（測り棒の札）を一度も出さないまま勝った時は、勝った直後（勝った後の台本の前）に出す
-    const unseen = (target.tutorial ?? []).flatMap((st) => (st.scriptId && !shownStoryScripts.has(st.scriptId) ? [st.scriptId] : []));
     if (!battle) {
       useMap(target.map);
       setScreen('battle');
@@ -1581,10 +1627,6 @@ function main(): void {
     }
     hudEl.hidden = true;
     labelsEl.hidden = true;
-    for (const id of unseen) {
-      shownStoryScripts.add(id);
-      await playScript(id, battlePort);
-    }
     await playScript(target.afterVictory, battlePort);
   };
 
@@ -1743,7 +1785,7 @@ function main(): void {
       time: () => currentTime.name,
       /** 押す場所の上の揺れる目印が出ているか（会話の場面） */
       beacon: () => sceneView?.beaconVisible() ?? false,
-      history: () => ({ melodies: [...devHistory.melodies], stages: [...devHistory.stages], voices: devHistory.voices, overlays: devHistory.overlays, placards: [...devHistory.placards], nameTags: [...devHistory.nameTags], objectLabels: [...devHistory.objectLabels] }),
+      history: () => ({ melodies: [...devHistory.melodies], stages: [...devHistory.stages], voices: devHistory.voices, overlays: devHistory.overlays, placards: [...devHistory.placards], nameTags: [...devHistory.nameTags], objectLabels: [...devHistory.objectLabels], inscriptions: [...devHistory.inscriptions] }),
       /** 暗転しているか */
       dark: () => fadeEl.classList.contains('dark'),
       /** 話者の印が見えているか・顔の枠に写している人物（会話の見せ方） */

@@ -63,10 +63,11 @@ export const GESTURES: Readonly<Record<string, GestureDefinition>> = {
   うつむく: { seconds: 1.2, frames: [{ t: 0 }, { t: 0.3, head: 0.6, bow: 0.1 }, { t: 0.8, head: 0.6, bow: 0.1 }, { t: 1 }] },
   手を上げる: { seconds: 1.0, frames: [{ t: 0 }, { t: 0.3, armR: 2.6 }, { t: 0.7, armR: 2.6 }, { t: 1 }] },
   胸に手を当てる: { seconds: 1.2, frames: [{ t: 0 }, { t: 0.3, armR: 1.3 }, { t: 0.8, armR: 1.3 }, { t: 1 }] },
-  会釈する: { seconds: 0.9, frames: [{ t: 0 }, { t: 0.4, bow: 0.5, head: 0.2 }, { t: 0.6, bow: 0.5, head: 0.2 }, { t: 1 }] },
+  // 上から見ると、深く曲げた体がしゃがんだ姿に見えるので、浅めにする（初見の検査）
+  会釈する: { seconds: 0.9, frames: [{ t: 0 }, { t: 0.4, bow: 0.3, head: 0.25 }, { t: 0.6, bow: 0.3, head: 0.25 }, { t: 1 }] },
   驚く: { seconds: 0.5, frames: [{ t: 0 }, { t: 0.3, lift: 0.12, armL: 0.8, armR: 0.8 }, { t: 1 }] },
   // ---- 序章に足りない仕組みで足した仕草 ----
-  深く会釈する: { seconds: 1.3, frames: [{ t: 0 }, { t: 0.35, bow: 0.85, head: 0.3 }, { t: 0.7, bow: 0.85, head: 0.3 }, { t: 1 }] },
+  深く会釈する: { seconds: 1.3, frames: [{ t: 0 }, { t: 0.35, bow: 0.55, head: 0.35 }, { t: 0.7, bow: 0.55, head: 0.35 }, { t: 1 }] },
   首をかしげる: { seconds: 1.1, frames: [{ t: 0 }, { t: 0.3, tilt: 0.38 }, { t: 0.75, tilt: 0.38 }, { t: 1 }] },
   /**
    * 作業台や灯の底を指で三度叩く（節の終わりの三つの音に合わせる）。今の姿勢から手を下ろして叩く。
@@ -99,8 +100,11 @@ export const GESTURES: Readonly<Record<string, GestureDefinition>> = {
   後ずさる: { seconds: 1.0, frames: [{ t: 0 }, { t: 0.5, back: 0.25, armL: 0.5, armR: 0.5 }, { t: 0.8, back: 0.25 }, { t: 1 }] },
   /** 耳に当てる（石を耳に当てる） */
   耳に当てる: { seconds: 1.8, frames: [{ t: 0 }, { t: 0.25, armR: 2.3, tilt: 0.25 }, { t: 0.8, armR: 2.3, tilt: 0.25 }, { t: 1 }] },
-  /** 床から物を拾う */
-  拾う: { seconds: 1.2, frames: [{ t: 0 }, { t: 0.4, drop: 0.16, bow: 0.6, armR: 0.9 }, { t: 0.6, drop: 0.16, bow: 0.6, armR: 0.9 }, { t: 1 }] },
+  /**
+   * 床から物を拾う: 腰を落としてしゃがみ、体は少しだけ前へ、頭を下げて足もとを見ながら、右手を下へ伸ばす
+   * （体を大きく前へ倒すと、倒れ込んだように見えるため。序章の演出の直し）
+   */
+  拾う: { seconds: 1.4, frames: [{ t: 0 }, { t: 0.35, drop: 0.24, bow: 0.12, head: 0.28, armR: 0.6 }, { t: 0.65, drop: 0.24, bow: 0.12, head: 0.28, armR: 0.6 }, { t: 1 }] },
   /** 泣く（肩を震わせる） */
   泣く: { seconds: 1.8, frames: repeat(4, { head: 0.6, bow: 0.25, armL: 0.6, armR: 0.6 }, { lift: 0.02 }) },
   /** 小刀で何かを刻む（手もとを見ながら） */
@@ -141,7 +145,8 @@ export const POSTURES: Readonly<Record<string, GesturePose>> = {
   座る: { drop: 0.2, armL: 0.6, armR: 0.6 },
   /** 作業台に向かって手を動かしている（三度叩くは、この姿勢から叩く） */
   作業する: { armR: 0.8, armL: 0.7, bow: 0.15, head: 0.35 },
-  膝をついたまま: { drop: 0.22, bow: 0.3 },
+  /** 膝をついたまま（遠くから見ても、立っていないと分かる深さ。戦闘不能の膝をついた姿と同じくらい） */
+  膝をついたまま: { drop: 0.3, bow: 0.4, head: 0.45, armL: 0.35, armR: 0.35 },
   /** 腰掛けて、手もとの帳面に目を落としたまま（ハルドの「顔を上げずに話す」。話を聞く部屋） */
   帳面を読む: { drop: 0.2, armL: 0.9, armR: 0.9, head: 0.55, bow: 0.1 },
   うつむいたまま: { head: 0.6, bow: 0.1 },
@@ -238,13 +243,17 @@ export const PROP_KINDS: Readonly<Record<string, string>> = {
   机の上の包み二つ: 'deskParcels',
   机の上の包み一つ: 'deskParcel',
   水の流れる谷: 'wetChannel',
+  水の来た土地: 'weirLandFlood',
+  灯のともる村1: 'village1Lamps',
+  灯のともる村2: 'village2Lamps',
+  灯のともる村3: 'village3Lamps',
   遠い谷のまわり: 'farValleyLand',
 };
 
 /**
  * マップの外に置いてよい物（遠景）。足もとに地面の板を持つか、地面そのもの（浮いて見えないように。序章の演出の直し）
  */
-export const OUTSIDE_PROP_KINDS: readonly string[] = ['群衆', '遠くの家', '堰のまわりの土地', '下流の村1', '下流の村2', '下流の村3', '涸れた谷', '水の流れる谷', '遠い谷のまわり'];
+export const OUTSIDE_PROP_KINDS: readonly string[] = ['群衆', '遠くの家', '堰のまわりの土地', '下流の村1', '下流の村2', '下流の村3', '涸れた谷', '水の流れる谷', '遠い谷のまわり', '水の来た土地', '灯のともる村1', '灯のともる村2', '灯のともる村3'];
 
 /**
  * 人物の見た目（台本に書く名前 → 見た目の id。見た目は looks.ts）。

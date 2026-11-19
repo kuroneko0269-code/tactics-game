@@ -3006,10 +3006,13 @@ body.in-dialogue #hud {
   text-shadow:
     0 0 6px rgba(0, 0, 0, 0.95),
     0 1px 2px rgba(0, 0, 0, 0.95);
-  background: radial-gradient(ellipse at center, rgba(5, 8, 14, 0.55) 0%, rgba(5, 8, 14, 0) 72%);
+  /* 後ろの人物や物と重なっても読めるよう、角の丸い半透明の板にする（初見の検査） */
+  background: rgba(5, 8, 14, 0.58);
+  border-radius: 12px;
   cursor: pointer;
   touch-action: manipulation;
-  animation: caption-in 0.5s ease-out;
+  /* 薄いまま読ませないよう、現れるのは短く（初見の検査） */
+  animation: caption-in 0.2s ease-out;
 }
 
 .dialogue-caption[hidden] {
@@ -3061,7 +3064,8 @@ body.in-dialogue #hud {
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
   cursor: pointer;
   touch-action: manipulation;
-  animation: caption-in 0.4s ease-out;
+  /* 物の文字は、半透明で後ろの人物が透けないよう、濃さを変えずに少し広がって現れる（初見の検査） */
+  animation: inscription-in 0.3s ease-out;
 }
 
 .dialogue-inscription[hidden] {
@@ -3238,6 +3242,15 @@ body.in-dialogue #hud {
   min-width: 200px;
 }
 
+@keyframes inscription-in {
+  from {
+    transform: translateX(-50%) scale(0.94);
+  }
+  to {
+    transform: translateX(-50%) scale(1);
+  }
+}
+
 @keyframes caption-in {
   from {
     opacity: 0;
@@ -3327,6 +3340,13 @@ body.in-dialogue #hud {
   border-radius: 56px;
   gap: 4px;
   padding: 8px 0 12px;
+}
+
+.hold-hand-caption {
+  font-size: 12px;
+  line-height: 1.2;
+  color: var(--text);
+  white-space: nowrap;
 }
 
 .hold-hand {

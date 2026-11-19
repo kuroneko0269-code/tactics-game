@@ -135,6 +135,9 @@ export function screenTextOf(script: Script, labels: ControlLabels, light?: Ligh
       case 'nameTag':
         push({ kind: '名札', text: `${d.actor}〔${d.title}〕` });
         return;
+      case 'humMark':
+        extra('音', `${pre}${d.actor}の頭上に音符の印（${seconds(d.ms)}）`);
+        return;
       case 'objectLabel':
         push({ kind: '物の札', text: `${d.text}（${d.target}の上に${seconds(d.ms)}）` });
         return;

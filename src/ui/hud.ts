@@ -131,6 +131,8 @@ export interface AttackPreviewView {
 export interface HudHandlers {
   /** 名札に役目を添えるユニットの id（ゲーム脚本の序章: 戦士ゴード・弓使いキリ・魔道士フェン・治癒師ノノ） */
   readonly roleTags?: readonly string[];
+  /** 物語の戦闘か（HP の尽きない敵の札を出さない。仕組みを文字で明かさず、動きで見せるため。初見の検査） */
+  readonly story?: boolean;
   onRotate(direction: 1 | -1): void;
   /** 1 で拡大、-1 で縮小 */
   onZoom(steps: 1 | -1): void;
@@ -385,7 +387,7 @@ export function createHud(root: HTMLElement, mapId: string, handlers: HudHandler
       info.append(name, job, hp, ...(growthLine ? [growthLine] : []), stats);
       if (infoState.targets.includes(unit.id)) info.append(Object.assign(el('div', 'info-target'), { textContent: TEXT.objectives.targetTag }));
       // HP の尽きないユニット（序章に足りない仕組み）
-      if (unit.minHp) info.append(Object.assign(el('div', 'info-target info-unbreakable'), { textContent: TEXT.objectives.unbreakableTag }));
+      if (unit.minHp && !handlers.story) info.append(Object.assign(el('div', 'info-target info-unbreakable'), { textContent: TEXT.objectives.unbreakableTag }));
       // 戦闘不能（フェーズ2-5）: 残りのカウント
       if (unit.hp <= 0) {
         const line = el('div', `info-knockout${unit.retired ? ' retired' : ''}`);

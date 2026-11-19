@@ -9,10 +9,11 @@ import { enemyUnit, kit } from '../enemyUnits';
  * （膝をついたまま最後まで残り、勝った後、崩れる堰を呆然と見る。戦闘で人は死なない決まり）。
  * 番兵をすべて退けても勝ちにはならない（堰を崩すまで続く）。
  * 東の崖の上（高さ 3〜4）から弓で撃ち下ろせる（札の「高い所から撃つ矢は、遠くまで届く」）。
- * 合わせ目を3つ壊すと勝利。3つ目を壊すと、西の涸れた谷に水が流れはじめる（水が別の谷へ）。
+ * 合わせ目を3つ壊すと勝利。3つ目を壊すと、堰の真ん中が切れて、水が堰の下の川筋を下流の谷へ流れ込む
+ * （下流の村の人々は、今のうちに別の場所へ移る。塔はこれを「助かった」と言い、村の人々から見れば「追われた」。2026-11-19 物語の作者の訂正）。
  * 初めて遊ぶ人が、説明を読まなくても勝てる強さにする（番兵は弱い。味方が倒れることはまずない）。
  * 堰の下から南へ、土の川床が続き（マップの中ほど）、マップの外の南に下流の三つの村がある（置き物の decor）。
- * 西の涸れた谷は、マップの外で西へ折れて、遠くの別の谷へ続く。勝った後、この谷に水が流れる（@変える 西の谷 水の流れる谷）。
+ * 西の涸れた谷は、マップの外で西へ折れる。水の逃げ先ではない（勝った後も涸れたまま）。
  */
 const map = stageMap('prologue-weir', [
   '0d 2w 2w 2w 2w 2w 2w 2w 4s',
@@ -27,8 +28,16 @@ const map = stageMap('prologue-weir', [
 ]);
 
 const seams = ['weir-seam-1', 'weir-seam-2', 'weir-seam-3'];
-/** 水が流れこむ、西の涸れた谷 */
-const westValley = map.heights.flatMap((row, z) => row.flatMap((h, x) => (x === 0 && h === 0 ? [{ x, z, terrain: 'water' as const }] : [])));
+/**
+ * 崩れた堰の形（3つ目の合わせ目を壊した時）: 真ん中（x=4）が切れて湖の水が流れ出し、残りは一段低い瓦礫の土になる
+ * （崩れる音がしても堰の形が残って見えないように。序章の演出の直し）
+ */
+const brokenWeir = [
+  { x: 4, z: 2, height: 2, terrain: 'water' as const },
+  ...[1, 2, 3, 5, 6, 7].map((x) => ({ x, z: 2, height: 2, terrain: 'dirt' as const })),
+];
+/** 堰の下の川筋（土の川床）。堰が切れると、ここを水が下流の谷へ流れる（高さは変えない） */
+const downstream = map.terrain.flatMap((row, z) => [...row].flatMap((t, x) => (z >= 3 && t === 'd' && x >= 3 && x <= 5 && (x === 4 || z >= 5) ? [{ x, z, terrain: 'water' as const }] : [])));
 
 export const weirBattle: BattleSite = {
   id: 'prologue-weir',
@@ -58,12 +67,14 @@ export const weirBattle: BattleSite = {
   objectives: { victory: [{ kind: 'destroyObjects', unitIds: seams }], defeat: [{ kind: 'allDefeated' }], defeatAllWins: false },
   // 合わせ目が一つ割れるたびに、石の割れる音と水の音が少しずつ強まる（戦闘中の台詞はない。音だけの台本）
   events: [
+    // 戦闘の始めに、壊す合わせ目を一つずつ映して札を出す（初見の検査）
+    { id: 'weir-start', trigger: { kind: 'turn', turn: 0 }, effects: [{ kind: 'dialogue', scriptId: 'prologueWeirSeams' }] },
     { id: 'weir-seam-crack-1', trigger: { kind: 'objectsBroken', unitIds: seams, count: 1 }, effects: [{ kind: 'dialogue', scriptId: 'prologueWeirCrack1' }] },
     { id: 'weir-seam-crack-2', trigger: { kind: 'objectsBroken', unitIds: seams, count: 2 }, effects: [{ kind: 'dialogue', scriptId: 'prologueWeirCrack2' }] },
     {
       id: 'weir-last-seam',
       trigger: { kind: 'objectsBroken', unitIds: seams, count: 3 },
-      effects: [{ kind: 'terrain', tiles: westValley }, { kind: 'dialogue', scriptId: 'prologueWeirCrack3' }],
+      effects: [{ kind: 'terrain', tiles: [...brokenWeir, ...downstream] }, { kind: 'dialogue', scriptId: 'prologueWeirCrack3' }],
     },
   ],
   // 堰を積む男たち（戦わない）。東の崖の上から見ている
@@ -71,7 +82,7 @@ export const weirBattle: BattleSite = {
     { id: 'weir-worker-1', x: 8, z: 0, facing: 'south', look: 'worker' },
     { id: 'weir-worker-2', x: 8, z: 1, facing: 'west', look: 'clanD' },
   ],
-  cast: { 番兵: 'weir-guard-2', 番兵A: 'weir-guard-1', 番兵B: 'weir-guard-3', 男たち: 'weir-worker-1', 男: 'weir-worker-2' },
+  cast: { 合わせ目1: 'weir-seam-1', 合わせ目2: 'weir-seam-2', 合わせ目3: 'weir-seam-3', 番兵: 'weir-guard-2', 番兵A: 'weir-guard-1', 番兵B: 'weir-guard-3', 男たち: 'weir-worker-1', 男: 'weir-worker-2' },
   looks: { 'weir-guard-1': 'guard', 'weir-guard-2': 'guard', 'weir-guard-3': 'guardBow' },
   afterVictory: 'prologueWeirAfter',
   // マップの外の土地（地面・上流の湖・西の谷・下流の川筋と三つの村）。浮いて見える物を置かない（足もとに地面がある）
@@ -89,7 +100,7 @@ export const weirBattle: BattleSite = {
   ],
   // 隊員の名札に役目を添える（戦士ゴード、弓使いキリ、魔道士フェン、治癒師ノノ）
   roleTags: ['gord', 'kiri', 'fen', 'nono'],
-  // 昼（勝った後の遠い谷の家々は「昼なのに、軒の灯が揺れている」）
+  // 昼（勝った後の下流の谷の家々は「昼なのに、軒の灯が揺れている」）
   time: '昼',
   tutorial: [
     { id: 'weir-move', mode: 'main', point: { kind: 'reachToward', x: 4, z: 3 } },
@@ -97,10 +108,9 @@ export const weirBattle: BattleSite = {
     { id: 'weir-target', mode: 'targeting' },
     { id: 'weir-confirm', mode: 'confirm', point: { kind: 'button', button: 'confirm' } },
     { id: 'weir-facing', mode: 'facing', point: { kind: 'button', button: 'endTurn' } },
-    // ゴードを前へ、キリを崖の上へ、フェンの火で合わせ目を割る。キリが崖の上に立った時、測り棒の札（署名「ユナ」。台本 prologueWeirTag）を出す
+    // ゴードを前へ、キリを崖の上へ（手ほどきの文で、測り棒の札の文面を短く思い出させる。札は戦闘の前に見せている）、フェンの火で合わせ目を割る
     { id: 'weir-gord', mode: 'main', unitId: 'gord', point: { kind: 'reachToward', x: 4, z: 3 } },
     { id: 'weir-kiri', mode: 'main', unitId: 'kiri', point: { kind: 'reachToward', x: 8, z: 3 } },
-    { id: 'weir-high', mode: 'afterMove', unitId: 'kiri', minHeight: 3, scriptId: 'prologueWeirTag' },
     { id: 'weir-fen', mode: 'main', unitId: 'fen', point: { kind: 'button', button: 'ability' } },
   ],
 };

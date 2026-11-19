@@ -118,6 +118,8 @@ export interface BattleView {
   changeProp(name: string, model: string): Promise<void>;
   /** 物（置き物を含む）の位置（物の名前の札を出す所） */
   propPoint(name: string): THREE.Vector3 | undefined;
+  /** ユニットか背景の人の持ち物の付く所（手・左手・腰・背）の位置（持っている物の名前の札を出す所） */
+  actorSlot(id: string, slot: 'hand' | 'handL' | 'waist' | 'back'): THREE.Vector3 | undefined;
   /** 物（置き物を含む）を、そのマスへ seconds 秒かけて動かす */
   moveProp(name: string, c: Coord, seconds: number): Promise<void>;
   /** 台本の人物（ユニットか背景の人）の続く姿勢（勝った後の台本の「膝をついたまま」など）。空なら元に戻す */
@@ -861,17 +863,23 @@ export function createBattleView(options: {
         hole.position.copy(origin);
         hole.renderOrder = 5;
         scene.add(hole);
-        await tweens.play(0.7, (t) => {
+        await tweens.play(1.0, (t) => {
           (hole.material as THREE.MeshBasicMaterial).opacity = Math.min(1, t * 1.5);
           hole.position.lerpVectors(origin, target, t);
           hole.scale.setScalar(0.3 + 0.9 * t);
         });
-        await tweens.play(2.4, (t) => {
-          a.puppet.setGlow(glow, Math.min(1, t * 1.6));
-          a.puppet.setOpacity(t < 0.6 ? 1 : 1 - (t - 0.6) / 0.4);
-          a.puppet.body.position.x = x0 + 0.35 * Math.min(1, t * 2);
-          a.puppet.body.rotation.z = -0.9 * t;
-          a.puppet.body.position.y = y0 - 1.6 * t * t;
+        // 沈む所を見届けられるよう、腰まで沈んだ所で一度止める（初見の検査で、ガレスが落ちる所が見えないと言われたため）
+        const sink = (t: number) => {
+          a.puppet.setGlow(glow, Math.min(1, 0.4 + t * 0.6));
+          a.puppet.body.position.x = x0 + 0.25 * Math.min(1, t * 2);
+          a.puppet.body.rotation.z = -0.6 * t;
+          a.puppet.body.position.y = y0 - 1.3 * t;
+        };
+        await tweens.play(1.6, (t) => sink(t * 0.4));
+        await tweens.play(1.2, () => sink(0.4));
+        await tweens.play(1.6, (t) => {
+          sink(0.4 + t * 0.6);
+          a.puppet.setOpacity(t < 0.5 ? 1 : 1 - (t - 0.5) / 0.5);
         });
         a.puppet.group.visible = false;
         a.puppet.setGlow(glow, 0);
@@ -886,12 +894,22 @@ export function createBattleView(options: {
         (hole.material as THREE.MeshBasicMaterial).dispose();
         return;
       }
-      // 門の光へ入っていく: 少しだけ光りながら薄れる（白く光る人影に見えないように）
-      await tweens.play(0.9, (t) => {
-        a.puppet.setGlow(glow, Math.min(0.35, t));
-        a.puppet.setOpacity(1 - t);
-        a.puppet.body.position.y = y0 + 0.5 * t * t;
+      // 門の光に包まれて消える（隊員はだれも同じ見せ方）: 足もとに細い光の柱が立ち、体が白く光りきってから、光とともに薄れる
+      // （光りきる前に薄れると、灰色に透けた像のように見えるため。序章の演出の直し）
+      const wrap = createLightPillar(0xf4f6ff);
+      wrap.group.position.copy(a.puppet.group.position);
+      wrap.group.scale.set(0.55, 1, 0.55);
+      scene.add(wrap.group);
+      await tweens.play(0.45, (t) => {
+        wrap.setOpacity(t);
+        a.puppet.setGlow(glow, t);
       });
+      await tweens.play(0.6, (t) => {
+        wrap.setOpacity(1 - t);
+        a.puppet.setOpacity(1 - t);
+        a.puppet.body.position.y = y0 + 0.3 * t * t;
+      });
+      wrap.dispose();
       a.puppet.group.visible = false;
       a.puppet.setGlow(glow, 0);
     },
@@ -988,6 +1006,9 @@ export function createBattleView(options: {
         old.setOpacity(1 - t);
       });
       old.group.removeFromParent();
+    },
+    actorSlot(id, slot) {
+      return actorPuppet(id)?.puppet.itemPoint?.(slot);
     },
     propPoint(name) {
       const p = props.get(name);

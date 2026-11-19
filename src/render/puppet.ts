@@ -27,6 +27,8 @@ export interface Puppet {
   setPose?(pose: PuppetPose): void;
   /** 持ち物を付け替える（付ける所 → 物の見た目の id。空の文字なら何も持たない。省いた所は見た目の決まりのまま） */
   setItems?(items: Readonly<Partial<Record<LookItemSlot, string>>>): void;
+  /** 持ち物の付く所（手・左手・腰・背）の、3D の世界の位置（物の名前の札を、持っている物のそばに出すため） */
+  itemPoint?(slot: LookItemSlot): THREE.Vector3;
   update(elapsedSeconds: number): void;
 }
 
@@ -72,14 +74,15 @@ export function createPuppet(look: PuppetLook): Puppet {
   const w = look.width ?? 1;
   const materials: THREE.MeshLambertMaterial[] = [];
 
-  const mat = (color: number) => {
-    const m = new THREE.MeshLambertMaterial({ color, flatShading: true, transparent: true });
+  const mat = (color: number, smooth = false) => {
+    const m = new THREE.MeshLambertMaterial({ color, flatShading: !smooth, transparent: true });
     materials.push(m);
     return m;
   };
   const bodyMat = mat(look.body);
   const accentMat = mat(look.accent);
-  const skinMat = mat(SKIN);
+  // 顔は角の影が口ひげのように見えないよう、なめらかに塗る（初見の検査）
+  const skinMat = mat(SKIN, true);
   const darkMat = mat(DARK);
   const legMat = look.legs !== undefined ? mat(look.legs) : darkMat;
 
@@ -123,7 +126,8 @@ export function createPuppet(look: PuppetLook): Puppet {
   const head = new THREE.Group();
   head.position.set(0, 0.62, 0);
   figure.add(head);
-  part(new THREE.IcosahedronGeometry(0.14, 0), skinMat, 0, 0.12, 0, head);
+  // 頭（面を細かくする: 粗い多面体だと、口の下の暗い面が、顔の枠で口ひげのように見えるため）
+  part(new THREE.IcosahedronGeometry(0.14, 1), skinMat, 0, 0.12, 0, head);
   if (look.hair !== undefined) addHair(look, mat(look.hair), part, head);
   if (look.hat) addHat(look.hat, accentMat, part, head);
   else if (look.hair === undefined) part(new THREE.BoxGeometry(0.3, 0.1, 0.3), accentMat, 0, 0.24, 0, head);
@@ -132,17 +136,21 @@ export function createPuppet(look: PuppetLook): Puppet {
   part(new THREE.BoxGeometry(0.03, 0.04, 0.02), darkMat, -0.05, 0.14, 0.13, head);
   part(new THREE.BoxGeometry(0.03, 0.04, 0.02), darkMat, 0.05, 0.14, 0.13, head);
 
-  // 武器
+  // 武器（右手の武器は、右手に物を持つ間は隠す。石を耳に当てる時に剣が棒のように上がって見えないように）
+  let rightWeapon: THREE.Object3D | undefined;
   if (look.weapon === 'sword') {
     const blade = part(new THREE.BoxGeometry(0.05, 0.42, 0.03), mat(STEEL), 0, -0.3, 0.06, rightArm);
     blade.rotation.x = Math.PI / 2.4;
+    rightWeapon = blade;
   } else if (look.weapon === 'staff') {
     // 杖。先に小さな玉
     const staff = part(new THREE.CylinderGeometry(0.018, 0.018, 0.62, 5), mat(WOOD), 0, -0.05, 0.06, rightArm);
     part(new THREE.IcosahedronGeometry(0.05, 0), accentMat, 0, 0.33, 0, staff);
+    rightWeapon = staff;
   } else if (look.weapon === 'spear') {
     const shaft = part(new THREE.CylinderGeometry(0.016, 0.016, 0.9, 5), mat(WOOD), 0, 0.05, 0.06, rightArm);
     part(new THREE.ConeGeometry(0.035, 0.12, 5), mat(STEEL), 0, 0.5, 0, shaft);
+    rightWeapon = shaft;
   } else if (look.weapon === 'bow') {
     const bow = part(new THREE.TorusGeometry(0.2, 0.018, 4, 12, Math.PI), mat(WOOD), 0, -0.08, 0.12, leftArm);
     bow.rotation.set(0, Math.PI / 2, Math.PI / 2);
@@ -169,6 +177,7 @@ export function createPuppet(look: PuppetLook): Puppet {
       const model = slot in items ? items[slot] : defaults[slot];
       if (model) itemMaterials.push(...buildModel(model, a));
     }
+    if (rightWeapon) rightWeapon.visible = !('hand' in items ? items.hand : defaults.hand);
     for (const m of itemMaterials) m.opacity = opacity;
   };
   setItems({});
@@ -210,6 +219,7 @@ export function createPuppet(look: PuppetLook): Puppet {
       rightShoulder.rotation.z = next.spreadR ?? 0;
     },
     setItems,
+    itemPoint: (slot) => anchors[slot].getWorldPosition(new THREE.Vector3()),
     update(elapsed) {
       // 待機中の呼吸のような小さな動き（仕草の腕の姿勢に重ねる。前に上げるのは x の負の向き）
       leftShoulder.rotation.x = Math.sin(elapsed * 2.4) * 0.08 - (pose.armL ?? 0);

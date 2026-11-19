@@ -73,7 +73,8 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
   /** テオ: 十七歳、小柄、柔らかい茶髪、時守の濃紺に白い襟 */
   teo: { body: NAVY, accent: 0xf4f1e8, hair: 0x8a6a4a, hairStyle: 'messy', scale: 0.9, width: 0.9, robe: true },
   /** イェルマ: 背の高い女、銀の長い髪、塔の白と灰（像に見えないよう、帯は濃い青、髪は服より暗い銀。序章の演出の直し） */
-  yelma: { body: 0xd8dce6, accent: 0x5a6a9a, hair: 0x9a9aa8, hairStyle: 'long', scale: 1.1, robe: true, legs: 0x8a90a4 },
+  // 初見の検査で「像に見える」と言われたので、服を温かい白に、帯と裾を濃くして、髪と服の色を分ける
+  yelma: { body: 0xebe3d2, accent: 0x34447a, hair: 0x5e5e70, hairStyle: 'long', scale: 1.1, robe: true, legs: 0x4a5274 },
   /** ハルド: がっしり、刈り込んだ灰茶の髪、時守の濃紺に銀の留め具 */
   hald: { body: NAVY, accent: 0xc0c8d8, hair: 0x7a6a5a, hairStyle: 'cropped', width: 1.16, scale: 1.04, robe: true },
   /** トウマ（ユナの灯を受け取った後）: 腰に真鍮の灯 */

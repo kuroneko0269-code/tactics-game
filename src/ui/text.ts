@@ -126,6 +126,8 @@ export const TEXT = {
     /** 耳に当てて聞く操作（押している間だけ鳴る） */
     listenHint: '押している間だけ、音が聞こえます。指を離すと止まり、押し直すと節の頭から聞こえます。',
     listenDefault: '耳に当てる',
+    /** 文字の案内を出さない聞く操作で、手の絵の下に添える短い字 */
+    listenHandCaption: '押したまま、聞く',
     /** 章の題の画面で、次へ進むための案内 */
     titleNext: 'タップで進む',
   },
@@ -182,8 +184,8 @@ export const TEXT = {
       'weir-confirm': '当たる見込みとダメージを確かめて「確定」を押します。',
       'weir-facing': '最後に向きを選んで「手番を終える」。背中から攻撃されると、大きな痛手になります。',
       'weir-gord': 'ゴードは前へ。番兵を引きつけます。',
-      'weir-kiri': 'キリは崖の上へ。光っているマスから登れます。',
-      /** キリが崖の上に立った時は、測り棒の札（台本 prologueWeirTag の物の文字）を出す。札の文は台本が正（ここには書かない） */
+      // 戦闘の前に見せた測り棒の札の文面を、短く思い出させる（2026-11-19 発注者の決定）
+      'weir-kiri': 'キリは崖の上へ。光っているマスから登れます。高い所からは、矢が遠くまで届きます。',
       'weir-fen': 'フェンの「攻撃魔法」の「炎」で、合わせ目を割ります。唱えてから発動するまで、少し時間がかかります。',
       'hill-finisher': '最後の一撃は、トウマで',
     } as Readonly<Record<string, string>>,
@@ -216,6 +218,8 @@ export const TEXT = {
     hitUnit: (label: string, name: string, count: number, times: number) => `${name}の${label}に、正面以外から攻撃を ${times} 回当てる（${Math.min(count, times)} / ${times}）`,
     hitUnitShort: (label: string, count: number, times: number) => `${label} ${Math.min(count, times)}/${times}`,
     hitUnitDefaultLabel: '体',
+    /** 勝利条件の頭に出す、ひとことの目的（当てる物の id で引く。序章の丘: 任務は討つことではなく、まず剣を折ること） */
+    hitUnitGoal: { oathSword: 'まず、誓いの剣を折る' } as Readonly<Record<string, string>>,
     /** 頭上に出す、数えた回数 */
     tallyPop: (count: number, times: number) => `${Math.min(count, times)} / ${times}`,
     /** 対象物の情報の欄の札 */
@@ -659,6 +663,10 @@ export const TEXT = {
     'e-timeMage-1': '敵の時魔道士',
     'e-summoner-1': '敵の召喚士',
     'r3-boss': '祭壇の主',
+    // 序章の堰の番兵（2026-11-19 物語の作者の直し: 敵の名札は「堰の番兵」）
+    'weir-guard-1': '堰の番兵',
+    'weir-guard-2': '堰の番兵',
+    'weir-guard-3': '堰の番兵',
   } as Readonly<Record<string, string>>,
 
   /** 攻撃対象から見た、攻撃側の位置 */
