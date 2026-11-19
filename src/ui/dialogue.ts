@@ -247,10 +247,11 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
   const nameTagName = el('span', 'dialogue-nametag-name');
   const nameTagTitle = el('span', 'dialogue-nametag-title');
   nameTag.append(nameTagName, nameTagTitle);
-  // 物の名前の札（物の上に、名前だけを短く出す）
-  const objectLabel = el('div', 'dialogue-objlabel');
-  objectLabel.hidden = true;
-  root.append(caption, inscription, control, placard, nameTag, objectLabel, box);
+  // 物の名前の札（物の上に、名前だけを短く出す）。同時にいくつも出せる（食卓の父と母など）
+  const objectLabelLayer = el('div', 'dialogue-objlabels');
+  // 札の層は押す操作を受けない（字幕や台詞の枠を押せるように）
+  objectLabelLayer.style.pointerEvents = 'none';
+  root.append(caption, inscription, control, placard, nameTag, objectLabelLayer, box);
 
   let index = 0;
   let stage: StageState = deps.initial ?? { actors: {}, props: {}, dark: false };
@@ -281,8 +282,8 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
   let placardTimer: number | undefined;
   let nameTagTimer: number | undefined;
   let objectLabelShown = '';
-  let objectLabelTimer: number | undefined;
-  let objectLabelFrame: number | undefined;
+  /** 出ている物の札（対象 → 札と、消す時刻と、追いかけの予約） */
+  const objectLabels = new Map<string, { el: HTMLElement; timer: number; frame?: number }>();
   /** 今待っているもの（タップ・操作）を解決する関数 */
   let release: (() => void) | undefined;
   let walkTap: ((c: readonly Coord[]) => void) | undefined;
@@ -854,35 +855,46 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
     }, fast ? 1500 : 3200);
   }
 
-  /** 物の名前の札を、物（か、それを持つ人物）の上に出し、ms の後に消す（待たない）。物が動いても追う */
+  /**
+   * 物の名前の札を、物（か、それを持つ人物）の上に出し、ms の後に消す（待たない）。物が動いても追う。
+   * 物が画面の中にない間は出さない（映っていない人物の札が、何もない所に浮かないように。初見の検査）
+   */
   function showObjectLabel(target: string, textOf: string, ms: number) {
-    hideObjectLabel();
-    objectLabel.textContent = textOf;
-    objectLabel.hidden = false;
+    hideObjectLabel(target);
+    const label = el('div', 'dialogue-objlabel', textOf);
+    objectLabelLayer.append(label);
     objectLabelShown = textOf;
     deps.onNotice?.('objectLabel', textOf);
+    const entry: { el: HTMLElement; timer: number; frame?: number } = { el: label, timer: 0 };
     const follow = () => {
       const p = port.screenOf?.(target);
       const rootBox = root.getBoundingClientRect();
-      // 物が画面の外なら、画面の縁に寄せて出す（カメラが物へ向かう途中は、物のある方の縁に見える）
-      if (p) {
-        objectLabel.classList.remove('free');
+      const x = p ? p.x - rootBox.left : -1;
+      const y = p ? p.y - rootBox.top : -1;
+      const inside = p !== undefined && x >= 0 && x <= rootBox.width && y >= 0 && y <= rootBox.height;
+      label.style.visibility = inside ? 'visible' : 'hidden';
+      if (inside) {
         // 札の幅の半分と余白の分だけ、画面の縁から離す（長い札「測り棒（崖の高さを測る道具）」が縁で切れないように）
-        const half = Math.max(80, objectLabel.offsetWidth / 2 + 12);
-        objectLabel.style.left = `${Math.round(Math.min(Math.max(p.x - rootBox.left, half), rootBox.width - half))}px`;
-        objectLabel.style.top = `${Math.round(Math.min(Math.max(p.y - rootBox.top, 90), rootBox.height - 230))}px`;
-      } else objectLabel.classList.add('free');
-      objectLabelFrame = window.requestAnimationFrame(follow);
+        const half = Math.max(80, label.offsetWidth / 2 + 12);
+        label.style.left = `${Math.round(Math.min(Math.max(x, half), rootBox.width - half))}px`;
+        label.style.top = `${Math.round(Math.min(Math.max(y, 90), rootBox.height - 230))}px`;
+      }
+      entry.frame = window.requestAnimationFrame(follow);
     };
     follow();
-    objectLabelTimer = window.setTimeout(hideObjectLabel, fast ? Math.min(ms, 1400) : ms);
+    entry.timer = window.setTimeout(() => hideObjectLabel(target), fast ? Math.min(ms, 1400) : ms);
+    objectLabels.set(target, entry);
   }
-  function hideObjectLabel() {
-    window.clearTimeout(objectLabelTimer);
-    if (objectLabelFrame !== undefined) window.cancelAnimationFrame(objectLabelFrame);
-    objectLabelFrame = undefined;
-    objectLabel.hidden = true;
-    objectLabelShown = '';
+  /** 物の札を消す（対象を省くと、すべて） */
+  function hideObjectLabel(target?: string) {
+    for (const [key, entry] of [...objectLabels]) {
+      if (target !== undefined && key !== target) continue;
+      window.clearTimeout(entry.timer);
+      if (entry.frame !== undefined) window.cancelAnimationFrame(entry.frame);
+      entry.el.remove();
+      objectLabels.delete(key);
+    }
+    if (objectLabels.size === 0) objectLabelShown = '';
   }
 
   /** 聞き終えるのを待つ（聞く操作を始めた後の、台詞・操作・台本の終わりの前） */

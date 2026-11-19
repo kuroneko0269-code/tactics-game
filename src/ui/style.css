@@ -3231,7 +3231,7 @@ body.in-dialogue #hud {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: radial-gradient(ellipse at center, rgba(255, 236, 196, 0.08) 30%, rgba(60, 40, 16, 0.45) 100%);
+  background: radial-gradient(ellipse at center, rgba(255, 236, 196, 0.08) 40%, rgba(60, 40, 16, 0.25) 100%);
   mix-blend-mode: multiply;
   transition: opacity 0.18s ease;
 }
@@ -3886,6 +3886,12 @@ body.in-dialogue #hud {
 }
 
 /* 物の名前の札（物の上に、名前だけを短く出す。物を指す小さな三角つき） */
+.dialogue-objlabels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
 .dialogue-objlabel {
   position: absolute;
   transform: translate(-50%, calc(-100% - 14px));

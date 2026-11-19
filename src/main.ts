@@ -915,8 +915,8 @@ function main(): void {
     scene.add(hemi, sun);
     applyLighting(scene, { hemi, sun }, timeLight(tod && tod.kind === 'timeOfDay' ? tod.time : def.time), def.sky);
     // 一瞬の画なので、夜の画でも手もとが見える明るさにする（暗くてユナの手が見分けられないと言われたため。初見の検査）
-    hemi.intensity *= 1.8;
-    sun.intensity *= 1.5;
+    hemi.intensity *= 2.6;
+    sun.intensity *= 2.0;
     const map = createMapView(createMap(def.map));
     scene.add(map.group);
     const oRig = createCameraRig(rigOptions(map, def.map));
@@ -940,7 +940,7 @@ function main(): void {
     await new Promise((r) => requestAnimationFrame(() => r(undefined)));
     shot.style.transitionDuration = `${fade}ms`;
     tint.style.transitionDuration = `${fade}ms`;
-    shot.style.opacity = '0.28';
+    shot.style.opacity = '0.18';
     tint.style.opacity = '1';
     devHistory.overlays++;
     const started = performance.now();
@@ -1135,6 +1135,17 @@ function main(): void {
     },
     setWalkTargets: (tiles, goal) => {
       view.setWalkTargets(tiles, goal);
+      // 歩かせる間は、カメラを高い位置から見下ろす（家の廊下などで、歩く人物が手前の壁に隠れないように。初見の検査）。終わったら元の高さへ
+      const toHeight = (h: 0 | 1 | 2) => {
+        for (let i = 0; i < 3 && rig.heightLevel !== h; i++) rig.cycleHeight();
+      };
+      if (tiles.length > 0) {
+        walkHeightBefore ??= rig.heightLevel;
+        toHeight(2);
+      } else if (walkHeightBefore !== undefined) {
+        toHeight(walkHeightBefore);
+        walkHeightBefore = undefined;
+      }
       // 歩かせる人物と次のマスが見えるように、カメラを寄せる
       const next = tiles[0];
       if (next) void rig.focusOn([mapView.tileTop(next.x, next.z), mapView.tileTop(next.x, next.z).add(new THREE.Vector3(0, 1, 0))]);
@@ -1183,6 +1194,8 @@ function main(): void {
    */
   /** 台本の @攻撃 で、だれがだれに打ちかかったか（「トウマの後ろ」の向きを決めるため） */
   const lastStruck = new Map<string, string>();
+  /** 歩かせる操作の前のカメラの高さ（歩かせる間だけ高くする） */
+  let walkHeightBefore: 0 | 1 | 2 | undefined;
   const battleActorId = (name: string): string | undefined => {
     const fromCast = currentSite?.cast?.[name];
     if (fromCast) return fromCast;
