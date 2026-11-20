@@ -295,8 +295,15 @@ function main(): void {
   let currentSite: BattleSite | undefined;
   /** 開発中だけ: 今の戦闘が決着した時に呼ぶ処理（自動プレイで、ダンジョンの流れを確かめる時に決着を早める） */
   let currentFinish: ((state: BattleState) => void) | undefined;
+  /** 暗転で終わった台本の後、暗いままにしている（次の台本の始めか、会話の場面以外の画面へ移る時に明るくする） */
+  let heldDark = false;
   const setScreen = (name: ScreenName) => {
     screen = name;
+    // 暗転で終わった台本の後、会話の場面以外の画面へ移る時は明るくする（会話の場面は、次の台本の始めで決める）
+    if (heldDark && name !== 'scene') {
+      heldDark = false;
+      void setDark(false, 0);
+    }
     document.body.dataset.screen = name;
     // 戦闘の表示（情報欄・ボタン・頭上の HP）は、戦闘中だけ出す（結果の画面の後ろに透けないように）
     const inBattle = name === 'battle' || name === 'deploy';
@@ -991,7 +998,14 @@ function main(): void {
   const cameraSeconds = (d: Extract<Directive, { kind: 'camera' }>, fast: boolean) => (d.ms ? (fast ? Math.min(d.ms, 300) : d.ms) / 1000 : undefined);
   /** 台本を進める（終わるか飛ばすと解決する） */
   const playScript = async (scriptId: string | Script, port: StagePort, initial?: StageState) => {
-    const run = runDialogue(typeof scriptId === 'string' ? scriptOf(scriptId) : scriptId, {
+    const script = typeof scriptId === 'string' ? scriptOf(scriptId) : scriptId;
+    // 前の台本が暗転で終わって暗いままなら、この台本が暗転から始まる時は暗いまま続け、そうでなければ明るくする
+    if (heldDark) {
+      heldDark = false;
+      const first = script.steps.find((s) => s.kind !== 'directive' || (s.directive.kind !== 'cue' && s.directive.kind !== 'placard'));
+      if (!(first?.kind === 'directive' && first.directive.kind === 'fadeOut')) await setDark(false, 0);
+    }
+    const run = runDialogue(script, {
       root: dialogueEl,
       port,
       ...(initial ? { initial } : {}),
@@ -1021,7 +1035,9 @@ function main(): void {
       if (dialogueRun === run) dialogueRun = undefined;
       speakerMark.setTarget(null);
       battleView?.setActiveMarkerHidden(false);
-      await setDark(false, 0);
+      // 暗転で終わった台本は、次の場面か画面に切り替わるまで暗いままにする（場面の切り替わりに、一瞬だけ前の舞台が明るく映らないように。初見の検査）
+      if (fadeEl.dataset.dark === 'true') heldDark = true;
+      else await setDark(false, 0);
       sound.stopMelody();
     }
   };
