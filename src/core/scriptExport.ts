@@ -184,6 +184,9 @@ export function screenTextOf(script: Script, labels: ControlLabels, light?: Ligh
       case 'pushBack':
         extra('動き', `${pre}${d.actor}が押し返される`);
         return;
+      case 'wrap':
+        extra('動き', `${pre}門の光が帯のように伸びて、${d.actor}に巻きつく`);
+        return;
       case 'light':
         extra('動き', `${pre}光の柱「${d.name}」（${d.color}）を${d.actor ?? `${d.x},${d.z}のマス`}に立てる`);
         return;

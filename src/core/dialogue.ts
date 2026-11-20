@@ -194,6 +194,7 @@ export function applyDirective(stage: StageState, d: Directive): StageState {
     case 'chapterTitle':
     case 'strike':
     case 'pushBack':
+    case 'wrap':
     case 'cue':
     case 'voice':
     case 'cut':

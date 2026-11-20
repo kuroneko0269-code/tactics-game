@@ -111,6 +111,9 @@ export function estimateScriptMs(script: Script, timing: ScriptTiming, initial: 
       case 'strike':
       case 'pushBack':
         return 600;
+      case 'wrap':
+        // 帯が伸びる 1.4秒と、輪が巻きつく 1.0秒（src/render/battleView.ts の wrapWithGate）
+        return 2400;
       default:
         return 0;
     }
