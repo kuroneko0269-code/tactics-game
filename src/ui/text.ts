@@ -667,6 +667,10 @@ export const TEXT = {
     'weir-guard-1': '堰の番兵',
     'weir-guard-2': '堰の番兵',
     'weir-guard-3': '堰の番兵',
+    // 序章の丘（情報の欄に「戦士」とだけ出て、ガレスと同じ人か分からないと言われたため）
+    'hill-gareth': 'ガレス',
+    'hill-sentry-1': '衛士',
+    'hill-sentry-2': '衛士',
   } as Readonly<Record<string, string>>,
 
   /** 攻撃対象から見た、攻撃側の位置 */
