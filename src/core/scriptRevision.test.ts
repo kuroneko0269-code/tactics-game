@@ -111,6 +111,12 @@ describe('見込みの時間（新しい指示）', () => {
   };
   const ms = (text: string) => estimateScriptMs(parseScriptOrThrow('t', text, catalog), timing);
 
+  it('同時の中の @間 は、その後ろの指示をその秒だけ遅らせる（映しながら、1秒後に札を出す）', () => {
+    expect(ms('@同時 @映す 4,3 中 3 @間 1 @映す 4,3 中 1')).toBe(3000);
+    expect(ms('@同時 @映す 4,3 中 1 @間 1 @映す 4,3 中 1.5')).toBe(2500);
+    expect(ms('@同時 @映す 4,3 中 1 @間 2')).toBe(2000);
+  });
+
   it('映すは書いた秒。札と名札は待たない', () => {
     expect(ms('@映す 4,3 中 1.5')).toBe(1500);
     expect(ms('@札 今　暦の塔\n@名札 ガレス 王')).toBe(0);

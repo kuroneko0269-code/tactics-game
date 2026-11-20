@@ -40,8 +40,16 @@ export function estimateScriptMs(script: Script, timing: ScriptTiming, initial: 
   let listening = false;
   const one = (d: Directive, st: StageState): number => {
     switch (d.kind) {
-      case 'together':
-        return d.directives.reduce((max, x) => Math.max(max, one(x, st)), 0);
+      case 'together': {
+        // 中の @間 は、その後ろの指示をその秒だけ遅らせて始める
+        let delay = 0;
+        let end = 0;
+        for (const x of d.directives) {
+          end = Math.max(end, delay + one(x, st));
+          if (x.kind === 'wait') delay += x.ms;
+        }
+        return end;
+      }
       case 'gesture':
         return timing.gestureMs[d.gesture] ?? 1000;
       case 'walk': {

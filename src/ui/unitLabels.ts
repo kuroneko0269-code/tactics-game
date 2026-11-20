@@ -102,6 +102,8 @@ export function createUnitLabels(root: HTMLElement, units: readonly LabelUnit[])
     if (!l) return;
     const p = document.createElement('div');
     p.className = `popup ${className}`;
+    const stacked = l.box.querySelectorAll('.popup').length;
+    if (stacked > 0) p.style.setProperty('--stack', String(Math.min(stacked, 3)));
     for (const line of typeof text === 'string' ? [text] : text) {
       const span = document.createElement('span');
       span.textContent = line;

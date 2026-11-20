@@ -43,6 +43,10 @@ const BATTLE_MS = Number(args.battle ?? 3500);
 /** 効果音の id → 聞こえる音の言葉（中立に） */
 const EFFECT_WORDS = {
   crack: '石の割れる音',
+  // 言葉にしない声（頭上の小さな印と一緒に鳴る。画面の観客にも、鳴っていると分かるように書く）
+  voiceShout: '人の叫び声（言葉ではない）',
+  voiceCall: '物売りの呼び込みの声（言葉ではない）',
+  voiceLaugh: '人の笑い声',
   collapse: '大きな物が崩れる音',
   water: '水の音（強い）',
   waterSoft: '水の音（弱い）',

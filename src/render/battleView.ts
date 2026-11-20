@@ -848,38 +848,72 @@ export function createBattleView(options: {
       const glow = new THREE.Color(0xffffff);
       const y0 = a.puppet.body.position.y;
       if (fall) {
-        // 帰りの門の光（立っている光の柱）の足もとから、同じ色の光が地面を走ってガレスの足もとへ広がり、白い穴（どの時代でもない白）になる。
-        // ガレスは横へ押し流されて傾きながら、白く光ってその中へ沈んでいく（2.4 秒。見届けられる長さ）。「門に落ちた」につながるように、
-        // 新しい光の柱は立てない（柱が2本あると、だれが光に入ったか分からなくなるため）
+        // 門の光にさらわれる（ゲーム脚本 7-22「光が横から、ガレスをさらう」。2026-11-19 発注者の決定）:
+        // 1) 帰りの門の光の柱から、光が帯のように横へ伸びてガレスに届く 2) 帯の先が輪になってガレスに巻きつく
+        // 3) 足もとに白い穴（どの時代でもない白）が開き、巻きついた光ごと引き込まれる（腰まで沈んだ所で一度止まる）。
+        // ガレスが自分から落ちたのでも、トウマが落としたのでもなく、門の光にさらわれたと見えるように
         const x0 = a.puppet.body.position.x;
         const gate = [...lights.values()][0];
-        const target = a.puppet.group.position.clone().add(new THREE.Vector3(0.15, 0.02, 0));
-        const origin = gate ? gate.pillar.group.position.clone().setY(target.y) : target.clone();
-        const hole = new THREE.Mesh(
-          new THREE.CircleGeometry(0.5, 32),
-          new THREE.MeshBasicMaterial({ color: gate?.color ?? 0xffffff, transparent: true, opacity: 0, depthWrite: false }),
-        );
+        const color = gate?.color ?? 0xffffff;
+        const feet = a.puppet.group.position.clone();
+        const chest = feet.clone().add(new THREE.Vector3(0, 0.55, 0));
+        const from = gate ? gate.pillar.group.position.clone().setY(chest.y) : chest.clone().add(new THREE.Vector3(1, 0, 0));
+        const glowMat = () => new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0, depthWrite: false });
+        // 光の帯（門から横へ伸びる）。門とガレスの間に立つトウマの体を通らないよう、頭の上を大きく越える弧にする
+        // （まっすぐだと、トウマの剣や体から光が出たように見えたため。初見の検査）
+        const mid = from.clone().lerp(chest, 0.5).add(new THREE.Vector3(0, 1.5, 0));
+        const curve = new THREE.QuadraticBezierCurve3(from, mid, chest);
+        const SEG = 40;
+        const RADIAL = 8;
+        const bandGeo = new THREE.TubeGeometry(curve, SEG, 0.09, RADIAL, false);
+        const band = new THREE.Mesh(bandGeo, glowMat());
+        band.renderOrder = 6;
+        bandGeo.setDrawRange(0, 0);
+        scene.add(band);
+        const placeBand = (t: number) => bandGeo.setDrawRange(0, Math.ceil(SEG * t) * RADIAL * 6);
+        // ゆっくり伸ばす（写真や一瞬の見落としでも、門から伸びた光だと分かるように）
+        await tweens.play(1.6, (t) => {
+          (band.material as THREE.MeshBasicMaterial).opacity = Math.min(1, t * 2);
+          placeBand(t);
+        });
+        // 帯の先が輪になって、ガレスの胸に巻きつく（回りながら締まる）
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.08, 8, 32), glowMat());
+        ring.rotation.x = Math.PI / 2;
+        ring.position.copy(chest);
+        ring.renderOrder = 6;
+        scene.add(ring);
+        await tweens.play(1.2, (t) => {
+          (ring.material as THREE.MeshBasicMaterial).opacity = Math.min(1, t * 2);
+          ring.scale.setScalar(1.6 - 0.75 * t);
+          ring.rotation.z = t * Math.PI * 2;
+          a.puppet.setGlow(glow, 0.3 * t);
+        });
+        // 足もとに白い穴が開く
+        const hole = new THREE.Mesh(new THREE.CircleGeometry(0.5, 32), glowMat());
         hole.rotation.x = -Math.PI / 2;
-        hole.position.copy(origin);
+        hole.position.copy(feet).add(new THREE.Vector3(0, 0.02, 0));
         hole.renderOrder = 5;
         scene.add(hole);
-        await tweens.play(1.0, (t) => {
+        await tweens.play(0.7, (t) => {
           (hole.material as THREE.MeshBasicMaterial).opacity = Math.min(1, t * 1.5);
-          hole.position.lerpVectors(origin, target, t);
           hole.scale.setScalar(0.3 + 0.9 * t);
         });
-        // 沈む所を見届けられるよう、腰まで沈んだ所で一度止める（初見の検査で、ガレスが落ちる所が見えないと言われたため）
+        // 巻きついた光ごと、穴へ引き込まれる（腰まで沈んだ所で一度止まる）
         const sink = (t: number) => {
-          a.puppet.setGlow(glow, Math.min(1, 0.4 + t * 0.6));
-          a.puppet.body.position.x = x0 + 0.25 * Math.min(1, t * 2);
-          a.puppet.body.rotation.z = -0.6 * t;
+          a.puppet.setGlow(glow, Math.min(1, 0.3 + t * 0.7));
+          a.puppet.body.position.x = x0 + 0.15 * Math.min(1, t * 2);
+          a.puppet.body.rotation.z = -0.4 * t;
           a.puppet.body.position.y = y0 - 1.3 * t;
+          ring.position.copy(chest).add(new THREE.Vector3(0, -1.3 * t, 0));
+          ring.rotation.z += 0.08;
         };
-        await tweens.play(1.6, (t) => sink(t * 0.4));
-        await tweens.play(1.2, () => sink(0.4));
-        await tweens.play(1.6, (t) => {
+        await tweens.play(1.4, (t) => sink(t * 0.4));
+        await tweens.play(1.0, () => sink(0.4));
+        await tweens.play(1.4, (t) => {
           sink(0.4 + t * 0.6);
           a.puppet.setOpacity(t < 0.5 ? 1 : 1 - (t - 0.5) / 0.5);
+          (band.material as THREE.MeshBasicMaterial).opacity = 1 - t;
+          (ring.material as THREE.MeshBasicMaterial).opacity = 1 - t;
         });
         a.puppet.group.visible = false;
         a.puppet.setGlow(glow, 0);
@@ -889,9 +923,11 @@ export function createBattleView(options: {
           (hole.material as THREE.MeshBasicMaterial).opacity = 1 - t;
           hole.scale.setScalar(1.2 - 0.9 * t);
         });
-        hole.removeFromParent();
-        hole.geometry.dispose();
-        (hole.material as THREE.MeshBasicMaterial).dispose();
+        for (const m of [band, ring, hole]) {
+          m.removeFromParent();
+          m.geometry.dispose();
+          (m.material as THREE.MeshBasicMaterial).dispose();
+        }
         return;
       }
       // 門の光に包まれて消える（隊員はだれも同じ見せ方）: 足もとに細い光の柱が立ち、体が白く光りきってから、光とともに薄れる
@@ -904,13 +940,14 @@ export function createBattleView(options: {
         wrap.setOpacity(t);
         a.puppet.setGlow(glow, t);
       });
+      // 体は透かさず、白く光ったまま足もとへ縮む（薄れる途中が、緑のかけらや半分透けた人影に見えたため。初見の検査）
       await tweens.play(0.6, (t) => {
         wrap.setOpacity(1 - t);
-        a.puppet.setOpacity(1 - t);
-        a.puppet.body.position.y = y0 + 0.3 * t * t;
+        a.puppet.group.scale.set(1 - 0.6 * t, Math.max(0.01, 1 - t), 1 - 0.6 * t);
       });
       wrap.dispose();
       a.puppet.group.visible = false;
+      a.puppet.group.scale.set(1, 1, 1);
       a.puppet.setGlow(glow, 0);
     },
     async strikeActor(attackerId, targetId, outcome, onImpact) {

@@ -148,7 +148,10 @@ export const POSTURES: Readonly<Record<string, GesturePose>> = {
   /** 膝をついたまま（遠くから見ても、立っていないと分かる深さ。戦闘不能の膝をついた姿と同じくらい） */
   膝をついたまま: { drop: 0.3, bow: 0.4, head: 0.45, armL: 0.35, armR: 0.35 },
   /** 腰掛けて、手もとの帳面に目を落としたまま（ハルドの「顔を上げずに話す」。話を聞く部屋） */
-  帳面を読む: { drop: 0.2, armL: 0.9, armR: 0.9, head: 0.55, bow: 0.1 },
+  // 上から見ると、深く首を垂れた姿は机に突っ伏して寝ているように見えるので、目だけを落とす程度にする（初見の検査）
+  帳面を読む: { drop: 0.2, armL: 0.75, armR: 0.75, head: 0.28 },
+  /** 剣を振り上げたまま（序章の丘: 門が開いてガレスがさらわれる間、トウマは何もしていないと分かるように） */
+  剣を振り上げたまま: { armR: 2.9, armL: 2.6, head: -0.15 },
   うつむいたまま: { head: 0.6, bow: 0.1 },
   背を丸める: { bow: 0.3, head: 0.2 },
   /** 石を耳に当てたまま（序章の場面9。聞いている間） */
@@ -244,6 +247,7 @@ export const PROP_KINDS: Readonly<Record<string, string>> = {
   机の上の包み一つ: 'deskParcel',
   水の流れる谷: 'wetChannel',
   水の来た土地: 'weirLandFlood',
+  橋の欄干: 'bridgeRails',
   灯のともる村1: 'village1Lamps',
   灯のともる村2: 'village2Lamps',
   灯のともる村3: 'village3Lamps',

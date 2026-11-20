@@ -147,6 +147,7 @@ export const cityStage: StageDefinition = {
     { id: 'パン屋', kind: 'パン屋の店先', x: 1, z: 1 },
     { id: '薬屋', kind: '薬屋の棚', x: 4, z: 0 },
     { id: '露店', kind: '露店', x: 7, z: 2 },
+    { id: '橋', kind: '橋の欄干', x: 4, z: 5 },
     { id: '木1', kind: '木', x: 8, z: 7 },
     { id: '木2', kind: '木', x: 0, z: 7 },
   ],

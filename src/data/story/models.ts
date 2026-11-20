@@ -252,6 +252,14 @@ export const MODELS: Readonly<Record<string, ModelDefinition>> = {
     cyl(0.02, 0.6, 0.02, [-0.45, 0.8, 0.3], WOOD_DARK),
     cyl(0.02, 0.6, 0.02, [0.45, 0.8, 0.3], WOOD_DARK),
   ],
+  /** 都の橋の欄干（川をまたぐ1マスの橋。箱に見えないよう、両わきに柱と手すり、足もとに板の筋） */
+  bridgeRails: [
+    ...[-0.44, 0.44].flatMap((x): ShapePart[] => [
+      box(0.06, 0.04, 1.0, [x, 0.34, 0], WOOD_DARK),
+      ...[-0.45, 0, 0.45].map((z): ShapePart => box(0.06, 0.34, 0.06, [x, 0.17, z], WOOD_DARK)),
+    ]),
+    ...[-0.36, -0.18, 0, 0.18, 0.36].map((z): ShapePart => box(0.86, 0.01, 0.02, [0, 0.005, z], 0x5a3a24)),
+  ],
   /** 家（都の家並み・遠い谷の家） */
   house: [box(0.85, 0.6, 0.8, [0, 0.3, 0], 0xd8c8a8), { shape: 'cone', size: [0.68, 0.45], at: [0, 0.82, 0], color: 0x8a4a3a, rot: [0, Math.PI / 4, 0] }, box(0.18, 0.3, 0.02, [0, 0.15, 0.41], 0x5a3a24)],
   /**

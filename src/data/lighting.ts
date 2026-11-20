@@ -19,7 +19,8 @@ export const TIMES_OF_DAY: Readonly<Record<string, TimeLighting>> = {
   /** 昼: 今までの光（澄んだ青空、白い光） */
   昼: { sky: 0x9fc6e8, hemiSky: 0xdfefff, hemiGround: 0x5a4a3a, hemiIntensity: 1.4, sunColor: 0xffffff, sunIntensity: 2.2 },
   /** 夕方: 茜の空、橙の低い光 */
-  夕方: { sky: 0xe3a27a, hemiSky: 0xffd6b0, hemiGround: 0x4a3a34, hemiIntensity: 1.15, sunColor: 0xff9f62, sunIntensity: 1.6 },
+  // 画面全体が橙一色に見えないよう、空からの光は白に近く、日の光の橙も控えめにする（初見の検査）
+  夕方: { sky: 0xd9ad92, hemiSky: 0xfff4ea, hemiGround: 0x55504c, hemiIntensity: 1.3, sunColor: 0xffc49c, sunIntensity: 1.15 },
   /** 夜: 紺の空、青く弱い光（人物と物は見分けられる明るさ）。灯と星が映える */
   夜: { sky: 0x0c1428, hemiSky: 0x7f92c8, hemiGround: 0x23212c, hemiIntensity: 0.85, sunColor: 0xa8bcff, sunIntensity: 0.5 },
 };

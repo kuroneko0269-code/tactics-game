@@ -210,19 +210,24 @@ export function createSceneView(options: {
         else makeProp(name, p.prop, p);
       }
     },
+    // 現れる・消える時は、体を薄く透かさない（半分透けた人影に見えたため。初見の検査）。
+    // 白く光った姿が足もとから伸びて現れ、消える時は白く光ってから足もとへ縮む
     async enter(name, a) {
       dropActor(name);
       const puppet = makeActor(name, a);
-      await play(0.35, (t) => {
-        puppet.setOpacity(t);
-        puppet.body.position.y = 0.2 * (1 - t);
-      });
-      puppet.body.position.y = 0;
+      const white = new THREE.Color(0xffffff);
+      puppet.setGlow(white, 1);
+      await play(0.35, (t) => puppet.group.scale.set(1, Math.max(0.01, t), 1));
+      puppet.group.scale.set(1, 1, 1);
+      await play(0.25, (t) => puppet.setGlow(white, 1 - t));
+      puppet.setGlow(white, 0);
     },
     async exit(name) {
       const a = actors.get(name);
       if (!a) return;
-      await play(0.35, (t) => a.puppet.setOpacity(1 - t));
+      const white = new THREE.Color(0xffffff);
+      await play(0.2, (t) => a.puppet.setGlow(white, t));
+      await play(0.3, (t) => a.puppet.group.scale.set(1, Math.max(0.01, 1 - t), 1));
       dropActor(name);
     },
     async walk(name, path, pace = 1) {
@@ -288,7 +293,8 @@ export function createSceneView(options: {
       if (tapTarget) props.get(tapTarget)?.model.setGlow(new THREE.Color(0xffffff), 0);
       tapTarget = name;
       const p = name ? props.get(name) : undefined;
-      mapView.setMarks(p ? [{ x: p.coord.x, z: p.coord.z, kind: 'selected' }] : []);
+      // 押す物のマスは塗らない（物に半分隠れた黄色い板が、大きな三角の目印に見えるため。初見の検査）。押す所は物の弱い光と上の目印で示す
+      mapView.setMarks([]);
       setBeacon(p ? mapView.tileTop(p.coord.x, p.coord.z).add(new THREE.Vector3(0, 1.15, 0)) : undefined);
       return p ? { ...p.coord } : undefined;
     },
