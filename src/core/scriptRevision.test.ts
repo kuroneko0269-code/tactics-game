@@ -263,3 +263,14 @@ describe('書き出しの「すべて」の指定と、文字の案内なし', (
     expect(directivesOf('@映す テオの手もと 近 1.5')).toEqual([{ kind: 'shot', actor: 'テオ', hands: true, zoom: 'near', ms: 1500 }]);
   });
 });
+
+describe('門の光が巻きつく（@巻きつく）と、人の高さで映す（@カメラ x,z 人の高さ）', () => {
+  it('@巻きつく は人物の名前だけを持ち、舞台を変えない（人物は残る）', () => {
+    expect(directivesOf('@巻きつく ガレス')).toEqual([{ kind: 'wrap', actor: 'ガレス' }]);
+    expect(parseScript('t', '@巻きつく', catalog).ok).toBe(false);
+  });
+  it('@カメラ のマスに「人の高さ」を添えられる。人物や物の名前には添えられない', () => {
+    expect(directivesOf('@カメラ 7,2 人の高さ 近 1秒')).toEqual([{ kind: 'camera', x: 7, z: 2, standing: true, zoom: 'near', ms: 1000 }]);
+    expect(parseScript('t', '@カメラ ユナ 人の高さ 近', catalog).ok).toBe(false);
+  });
+});

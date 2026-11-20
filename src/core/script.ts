@@ -40,7 +40,8 @@ export type Directive =
    * カメラを、マスか人物・物に向ける（actor は人物か物の名前）。ms があれば、その時間をかけてゆっくり動かす
    */
   /** カメラを向ける。flow なら、動き終わるのを待たずに次へ進む（字幕を読ませながら、堰から下流の村へカメラをたどらせる。@カメラ … 待たない） */
-  | { readonly kind: 'camera'; readonly x?: number; readonly z?: number; readonly actor?: string; readonly hands?: true; readonly zoom?: CameraZoom; readonly ms?: number; readonly flow?: true }
+  /** standing: マスを、そこに人が立っている時と同じ高さ（人物に向ける時と同じ）で狙う（だれもいない所を、人がいた時と同じ構図で映す） */
+  | { readonly kind: 'camera'; readonly x?: number; readonly z?: number; readonly actor?: string; readonly hands?: true; readonly standing?: true; readonly zoom?: CameraZoom; readonly ms?: number; readonly flow?: true }
   /** 暗転（画面を暗くする）と明転（戻す） */
   | { readonly kind: 'fadeOut'; readonly ms: number }
   | { readonly kind: 'fadeIn'; readonly ms: number }
@@ -93,6 +94,11 @@ export type Directive =
   | { readonly kind: 'strike'; readonly actor: string; readonly target: string; readonly outcome: 'hit' | 'miss' | 'parry' }
   /** 戦闘中の台本で、人物を押し返す（見た目だけ。滑るように下がって、戦闘の状態の位置へ戻る）。会話の場面では何もしない */
   | { readonly kind: 'pushBack'; readonly actor: string }
+  /**
+   * 戦闘中の台本で、開いている帰りの門の光が帯のように伸びて、人物に巻きつく（見た目だけ。人物はまだ退場しない）。
+   * 後の `@退場 名前 落ちる` で、巻きついた光ごと白い穴へ引き込まれる。会話の場面では何もしない
+   */
+  | { readonly kind: 'wrap'; readonly actor: string }
   /**
    * 脚本の行の印（ゲーム脚本の「場面-行」。例 2-5）。舞台は変えない。次の印までの手順が、その行を作る。
    * ref が「外」なら、脚本の行ではなく、ゲームとして足した演出（発注者の指定・章の題）
@@ -238,7 +244,7 @@ export const DIRECTIVE_USAGE: Readonly<Record<string, string>> = {
   歩く: '@歩く 名前 x,z [ゆっくり・ふつう・速く・走る]',
   向き: '@向き 名前 向き（北・東・南・西）か、相手の人物・物の名前',
   仕草: '@仕草 名前 仕草の名前',
-  カメラ: '@カメラ x,z [遠・中・近] [秒] か @カメラ 人物か物の名前 [遠・中・近] [秒]（秒を書くと、その時間をかけてゆっくり動く。「待たない」を添えると、動き終わるのを待たずに次の字幕や台詞へ進む）',
+  カメラ: '@カメラ x,z [遠・中・近] [秒] か @カメラ 人物か物の名前 [遠・中・近] [秒]（秒を書くと、その時間をかけてゆっくり動く。「待たない」を添えると、動き終わるのを待たずに次の字幕や台詞へ進む。マスに「人の高さ」を添えると、そこに人が立っている時と同じ構図で映す）',
   暗転: '@暗転 [秒]',
   明転: '@明転 [秒]',
   間: '@間 秒',
@@ -265,6 +271,7 @@ export const DIRECTIVE_USAGE: Readonly<Record<string, string>> = {
   姿勢: '@姿勢 名前 姿勢の名前（立つ で元に戻す）',
   攻撃: '@攻撃 名前 相手の名前 [当たる・外れる・払う]（戦闘中の台本だけ。見た目だけ）',
   押し返す: '@押し返す 名前（戦闘中の台本だけ。戦闘の中の位置へ滑るように戻る）',
+  巻きつく: '@巻きつく 名前（戦闘中の台本だけ。開いている門の光が帯のように伸びて巻きつく。後の @退場 名前 落ちる で引き込まれる）',
   脚本: '@脚本 場面-行（ゲーム脚本の行の印。例 @脚本 2-5。ゲームとして足した演出は @脚本 外）',
   文字: '台詞の形で 物の呼び名「書かれた文」 @文字 [秒]（物に書かれた文字を、読める大きさで出す。秒を書くと、その間だけ出して次へ）',
   声: '@声 名前 声の種類（叫び・呼び込み・笑い。言葉にしない声）',
@@ -499,9 +506,14 @@ function parseDirective(text: string, catalog: ScriptCatalog): Directive | strin
       let zoom: CameraZoom | undefined;
       let ms: number | undefined;
       let flow = false;
+      let standing = false;
       for (const w of args.slice(1)) {
         if (w === '待たない') {
           flow = true;
+          continue;
+        }
+        if (w === '人の高さ') {
+          standing = true;
           continue;
         }
         if (ZOOMS_JA[w]) {
@@ -515,11 +527,12 @@ function parseDirective(text: string, catalog: ScriptCatalog): Directive | strin
           ms = v;
           continue;
         }
-        return bad(`「${w}」は、寄り（遠・中・近）か秒（例: 2秒）か「待たない」で書きます`);
+        return bad(`「${w}」は、寄り（遠・中・近）か秒（例: 2秒）か「待たない」か「人の高さ」で書きます`);
       }
       const extra = { ...(zoom ? { zoom } : {}), ...(ms ? { ms } : {}), ...(flow ? { flow: true as const } : {}) };
       const c = coord(args[0]!);
-      return c ? { kind: 'camera', ...c, ...extra } : { kind: 'camera', actor: args[0]!, ...extra };
+      if (standing && !c) return bad('「人の高さ」は、マス（x,z）に向ける時だけ書けます');
+      return c ? { kind: 'camera', ...c, ...(standing ? { standing: true as const } : {}), ...extra } : { kind: 'camera', actor: args[0]!, ...extra };
     }
     case '暗転':
     case '明転':
@@ -647,6 +660,8 @@ function parseDirective(text: string, catalog: ScriptCatalog): Directive | strin
     }
     case '押し返す':
       return need(1) ?? { kind: 'pushBack', actor: args[0]! };
+    case '巻きつく':
+      return need(1) ?? { kind: 'wrap', actor: args[0]! };
     case '脚本': {
       const e = need(1);
       if (e) return e;

@@ -103,6 +103,8 @@ export interface BattleView {
   /** 人物の頭のてっぺんの位置（会話の話者の印を出す所） */
   actorHead(id: string): THREE.Vector3 | undefined;
   /** 光にさらわれるように消える。fall なら、横から押し流されて、白く光りながら下へ落ちていく（時の外へ落ちる） */
+  /** 開いている門の光が帯のように伸びて巻きつく（人物はまだ消えない。後の vanish(id, true) で引き込まれる） */
+  wrap(id: string): Promise<void>;
   vanish(id: string, fall?: boolean): Promise<void>;
   /**
    * 攻撃の動きを見せる（見た目だけ。序章の丘の始めの演出）。隣なら踏み込んで斬り、離れていれば矢を放つ。
@@ -290,6 +292,53 @@ export function createBattleView(options: {
   };
   const lights = new Map<string, { pillar: LightPillar; actor?: string; color: number }>();
   const props = new Map<string, Puppet>();
+  type GlowMesh = THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
+  /** 門の光が巻きついている人物（@巻きつく の後、@退場 名前 落ちる で引き込まれるまで） */
+  const wraps = new Map<string, { band: GlowMesh; ring: GlowMesh; glowMat: () => THREE.MeshBasicMaterial }>();
+  /**
+   * 開いている帰りの門の光が、帯のように伸びて人物に巻きつく（ゲーム脚本 7-22。2026-11-19・20 発注者の決定）:
+   * 1) 門の光の柱から、光が帯のように伸びて胸に届く（門と人物の間に立つ人の体を通らないよう、頭の上を越える弧）
+   * 2) 帯の先が輪になって胸に巻きつく
+   */
+  const wrapWithGate = async (id: string) => {
+    const a = actorPuppet(id);
+    if (!a) return undefined;
+    const gate = [...lights.values()][0];
+    const color = gate?.color ?? 0xffffff;
+    const chest = a.puppet.group.position.clone().add(new THREE.Vector3(0, 0.55, 0));
+    const from = gate ? gate.pillar.group.position.clone().setY(chest.y) : chest.clone().add(new THREE.Vector3(1, 0, 0));
+    const glowMat = () => new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0, depthWrite: false });
+    const mid = from.clone().lerp(chest, 0.5).add(new THREE.Vector3(0, 1.5, 0));
+    const curve = new THREE.QuadraticBezierCurve3(from, mid, chest);
+    const SEG = 40;
+    const RADIAL = 8;
+    const bandGeo = new THREE.TubeGeometry(curve, SEG, 0.09, RADIAL, false);
+    const band: GlowMesh = new THREE.Mesh(bandGeo, glowMat());
+    band.renderOrder = 6;
+    bandGeo.setDrawRange(0, 0);
+    scene.add(band);
+    // ゆっくり伸ばす（一瞬の見落としでも、門から伸びた光だと分かるように）
+    await tweens.play(1.4, (t) => {
+      band.material.opacity = Math.min(1, t * 2);
+      bandGeo.setDrawRange(0, Math.ceil(SEG * t) * RADIAL * 6);
+    });
+    // 帯の先が輪になって、胸に巻きつく（回りながら締まる）
+    const ring: GlowMesh = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.08, 8, 32), glowMat());
+    ring.rotation.x = Math.PI / 2;
+    ring.position.copy(chest);
+    ring.renderOrder = 6;
+    scene.add(ring);
+    const glow = new THREE.Color(0xffffff);
+    await tweens.play(1.0, (t) => {
+      ring.material.opacity = Math.min(1, t * 2);
+      ring.scale.setScalar(1.6 - 0.75 * t);
+      ring.rotation.z = t * Math.PI * 2;
+      a.puppet.setGlow(glow, 0.3 * t);
+    });
+    const entry = { band, ring, glowMat };
+    wraps.set(id, entry);
+    return entry;
+  };
   for (const d of options.decor ?? []) {
     const p = createPropModel(d.model);
     p.group.position.copy(mapView.tileTop(d.x, d.z));
@@ -842,52 +891,22 @@ export function createBattleView(options: {
         a.coord = { x: path[i]!.x, z: path[i]!.z };
       }
     },
+    async wrap(id) {
+      if (!wraps.has(id)) await wrapWithGate(id);
+    },
     async vanish(id, fall) {
       const a = actorPuppet(id);
       if (!a) return;
       const glow = new THREE.Color(0xffffff);
       const y0 = a.puppet.body.position.y;
       if (fall) {
-        // 門の光にさらわれる（ゲーム脚本 7-22「光が横から、ガレスをさらう」。2026-11-19 発注者の決定）:
-        // 1) 帰りの門の光の柱から、光が帯のように横へ伸びてガレスに届く 2) 帯の先が輪になってガレスに巻きつく
-        // 3) 足もとに白い穴（どの時代でもない白）が開き、巻きついた光ごと引き込まれる（腰まで沈んだ所で一度止まる）。
-        // ガレスが自分から落ちたのでも、トウマが落としたのでもなく、門の光にさらわれたと見えるように
+        // 門の光にさらわれる（ゲーム脚本 7-22「光が横から、ガレスをさらう」）。帯と輪がまだ巻きついていなければ、ここで巻きつける
+        // （台本の @巻きつく で先に巻きつけておけば、その間にガレスがトウマの腕をつかむ動きを見せられる。2026-11-20 発注者の決定）
         const x0 = a.puppet.body.position.x;
-        const gate = [...lights.values()][0];
-        const color = gate?.color ?? 0xffffff;
         const feet = a.puppet.group.position.clone();
         const chest = feet.clone().add(new THREE.Vector3(0, 0.55, 0));
-        const from = gate ? gate.pillar.group.position.clone().setY(chest.y) : chest.clone().add(new THREE.Vector3(1, 0, 0));
-        const glowMat = () => new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0, depthWrite: false });
-        // 光の帯（門から横へ伸びる）。門とガレスの間に立つトウマの体を通らないよう、頭の上を大きく越える弧にする
-        // （まっすぐだと、トウマの剣や体から光が出たように見えたため。初見の検査）
-        const mid = from.clone().lerp(chest, 0.5).add(new THREE.Vector3(0, 1.5, 0));
-        const curve = new THREE.QuadraticBezierCurve3(from, mid, chest);
-        const SEG = 40;
-        const RADIAL = 8;
-        const bandGeo = new THREE.TubeGeometry(curve, SEG, 0.09, RADIAL, false);
-        const band = new THREE.Mesh(bandGeo, glowMat());
-        band.renderOrder = 6;
-        bandGeo.setDrawRange(0, 0);
-        scene.add(band);
-        const placeBand = (t: number) => bandGeo.setDrawRange(0, Math.ceil(SEG * t) * RADIAL * 6);
-        // ゆっくり伸ばす（写真や一瞬の見落としでも、門から伸びた光だと分かるように）
-        await tweens.play(1.6, (t) => {
-          (band.material as THREE.MeshBasicMaterial).opacity = Math.min(1, t * 2);
-          placeBand(t);
-        });
-        // 帯の先が輪になって、ガレスの胸に巻きつく（回りながら締まる）
-        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.08, 8, 32), glowMat());
-        ring.rotation.x = Math.PI / 2;
-        ring.position.copy(chest);
-        ring.renderOrder = 6;
-        scene.add(ring);
-        await tweens.play(1.2, (t) => {
-          (ring.material as THREE.MeshBasicMaterial).opacity = Math.min(1, t * 2);
-          ring.scale.setScalar(1.6 - 0.75 * t);
-          ring.rotation.z = t * Math.PI * 2;
-          a.puppet.setGlow(glow, 0.3 * t);
-        });
+        const { band, ring, glowMat } = wraps.get(id) ?? (await wrapWithGate(id))!;
+        wraps.delete(id);
         // 足もとに白い穴が開く
         const hole = new THREE.Mesh(new THREE.CircleGeometry(0.5, 32), glowMat());
         hole.rotation.x = -Math.PI / 2;

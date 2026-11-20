@@ -104,6 +104,8 @@ const storySites: readonly BattleSite[] = prologueBattles;
 const SCENE_ZOOM = { far: 0.85, mid: 1.25, near: 1.9 } as const;
 /** 人物を映す点（頭の少し下）から、手もとまでの高さの差（@映す 名前の手もと） */
 const HANDS_OFFSET = -0.3;
+/** だれもいないマスを、人が立っている時と同じ高さで映す（@カメラ x,z 人の高さ。舞台の人物を映す点と同じ。src/render/sceneView.ts の actorPoint） */
+const STANDING_OFFSET = 0.6;
 /** 手もとを映す時の、さらに寄る倍率 */
 const HANDS_ZOOM = 1.7;
 
@@ -1087,7 +1089,7 @@ function main(): void {
             ? d.hands
               ? view.actorPoint(d.actor)?.add(new THREE.Vector3(0, HANDS_OFFSET, 0))
               : (view.actorPoint(d.actor) ?? view.propPoint(d.actor))
-            : mapView.tileTop(d.x ?? 0, d.z ?? 0);
+            : mapView.tileTop(d.x ?? 0, d.z ?? 0).add(new THREE.Vector3(0, d.standing ? STANDING_OFFSET : 0, 0));
           // 手もとは、ふつうの寄りより、さらに寄る（守り袋を握らせる手もと）
           const zoom = d.hands ? (zoomOf(d) ?? SCENE_ZOOM.near) * HANDS_ZOOM : zoomOf(d);
           if (point) await rig.lookAt(point, zoom, cameraSeconds(d, fast));
@@ -1251,6 +1253,11 @@ function main(): void {
         case 'exit': {
           const id = battleActorId(d.actor);
           if (id) await view.vanish(id, d.fall === true);
+          return;
+        }
+        case 'wrap': {
+          const id = battleActorId(d.actor);
+          if (id) await view.wrap(id);
           return;
         }
         // 攻撃の動きと押し返し（序章の丘の始めの演出。見た目だけで、戦闘の状態は変えない）
