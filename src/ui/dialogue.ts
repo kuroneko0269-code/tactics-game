@@ -861,6 +861,8 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
    */
   function showObjectLabel(target: string, textOf: string, ms: number) {
     hideObjectLabel(target);
+    // 同じ名前の札は、一度に一つだけ（渡した物の札が、渡す前と後の二か所に同時に出ないように。初見の検査）
+    for (const [other, entry] of objectLabels) if (entry.el.textContent === textOf) hideObjectLabel(other);
     const label = el('div', 'dialogue-objlabel', textOf);
     objectLabelLayer.append(label);
     objectLabelShown = textOf;

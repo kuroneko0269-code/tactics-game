@@ -210,19 +210,24 @@ export function createSceneView(options: {
         else makeProp(name, p.prop, p);
       }
     },
+    // 現れる・消える時は、体を薄く透かさない（半分透けた人影に見えたため。初見の検査）。
+    // 白く光った姿が足もとから伸びて現れ、消える時は白く光ってから足もとへ縮む
     async enter(name, a) {
       dropActor(name);
       const puppet = makeActor(name, a);
-      await play(0.35, (t) => {
-        puppet.setOpacity(t);
-        puppet.body.position.y = 0.2 * (1 - t);
-      });
-      puppet.body.position.y = 0;
+      const white = new THREE.Color(0xffffff);
+      puppet.setGlow(white, 1);
+      await play(0.35, (t) => puppet.group.scale.set(1, Math.max(0.01, t), 1));
+      puppet.group.scale.set(1, 1, 1);
+      await play(0.25, (t) => puppet.setGlow(white, 1 - t));
+      puppet.setGlow(white, 0);
     },
     async exit(name) {
       const a = actors.get(name);
       if (!a) return;
-      await play(0.35, (t) => a.puppet.setOpacity(1 - t));
+      const white = new THREE.Color(0xffffff);
+      await play(0.2, (t) => a.puppet.setGlow(white, t));
+      await play(0.3, (t) => a.puppet.group.scale.set(1, Math.max(0.01, 1 - t), 1));
       dropActor(name);
     },
     async walk(name, path, pace = 1) {

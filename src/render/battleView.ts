@@ -940,13 +940,14 @@ export function createBattleView(options: {
         wrap.setOpacity(t);
         a.puppet.setGlow(glow, t);
       });
+      // 体は透かさず、白く光ったまま足もとへ縮む（薄れる途中が、緑のかけらや半分透けた人影に見えたため。初見の検査）
       await tweens.play(0.6, (t) => {
         wrap.setOpacity(1 - t);
-        a.puppet.setOpacity(1 - t);
-        a.puppet.body.position.y = y0 + 0.3 * t * t;
+        a.puppet.group.scale.set(1 - 0.6 * t, Math.max(0.01, 1 - t), 1 - 0.6 * t);
       });
       wrap.dispose();
       a.puppet.group.visible = false;
+      a.puppet.group.scale.set(1, 1, 1);
       a.puppet.setGlow(glow, 0);
     },
     async strikeActor(attackerId, targetId, outcome, onImpact) {

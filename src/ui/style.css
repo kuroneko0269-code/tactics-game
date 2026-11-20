@@ -234,7 +234,8 @@ body {
 .popup {
   position: absolute;
   left: 0;
-  top: -26px;
+  /* 同じユニットの上に、続けて出た文字は上へ積む（ダメージの数字と「壊れた！」が重ならないように） */
+  top: calc(-26px - var(--stack, 0) * 30px);
   transform: translateX(-50%);
   font-size: 26px;
   font-weight: 900;
