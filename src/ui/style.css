@@ -3011,8 +3011,8 @@ body.in-dialogue #hud {
   border-radius: 12px;
   cursor: pointer;
   touch-action: manipulation;
-  /* 薄いまま読ませないよう、現れるのは短く（初見の検査） */
-  animation: caption-in 0.2s ease-out;
+  /* 薄いまま読ませないよう、字幕は現れる動きなしで出す（初見の検査） */
+  animation: none;
 }
 
 .dialogue-caption[hidden] {

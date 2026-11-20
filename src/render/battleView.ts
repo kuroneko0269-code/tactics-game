@@ -861,7 +861,7 @@ export function createBattleView(options: {
         const glowMat = () => new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0, depthWrite: false });
         // 光の帯（門から横へ伸びる）
         const span = from.distanceTo(chest);
-        const band = new THREE.Mesh(new THREE.BoxGeometry(1, 0.09, 0.09), glowMat());
+        const band = new THREE.Mesh(new THREE.BoxGeometry(1, 0.2, 0.2), glowMat());
         band.renderOrder = 6;
         scene.add(band);
         const placeBand = (t: number) => {
@@ -871,17 +871,18 @@ export function createBattleView(options: {
           band.lookAt(tip);
           band.rotateY(Math.PI / 2);
         };
-        await tweens.play(0.9, (t) => {
+        // ゆっくり伸ばす（写真や一瞬の見落としでも、門から伸びた光だと分かるように）
+        await tweens.play(1.6, (t) => {
           (band.material as THREE.MeshBasicMaterial).opacity = Math.min(1, t * 2);
           placeBand(t);
         });
         // 帯の先が輪になって、ガレスの胸に巻きつく（回りながら締まる）
-        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.045, 8, 32), glowMat());
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.08, 8, 32), glowMat());
         ring.rotation.x = Math.PI / 2;
         ring.position.copy(chest);
         ring.renderOrder = 6;
         scene.add(ring);
-        await tweens.play(0.9, (t) => {
+        await tweens.play(1.2, (t) => {
           (ring.material as THREE.MeshBasicMaterial).opacity = Math.min(1, t * 2);
           ring.scale.setScalar(1.6 - 0.75 * t);
           ring.rotation.z = t * Math.PI * 2;

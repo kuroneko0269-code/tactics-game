@@ -247,6 +247,7 @@ export const PROP_KINDS: Readonly<Record<string, string>> = {
   机の上の包み一つ: 'deskParcel',
   水の流れる谷: 'wetChannel',
   水の来た土地: 'weirLandFlood',
+  橋の欄干: 'bridgeRails',
   灯のともる村1: 'village1Lamps',
   灯のともる村2: 'village2Lamps',
   灯のともる村3: 'village3Lamps',
