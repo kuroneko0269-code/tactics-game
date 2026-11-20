@@ -3126,7 +3126,8 @@ body.in-dialogue #hud {
   pointer-events: none;
   z-index: 3;
   animation: placard-in 0.45s ease-out;
-  transition: opacity 0.4s ease;
+  /* 消える時は短く（薄れる途中が、文字のない空の枠に見えたため。初見の検査） */
+  transition: opacity 0.2s ease;
 }
 
 .dialogue-placard[hidden] {
@@ -3595,6 +3596,11 @@ body.in-dialogue #hud {
 
 .sound-mark[hidden] {
   display: none;
+}
+
+/* 戦闘中は、上の行動順の欄に重ならないよう、その下に出す（初見の検査） */
+:root:has(.turn-order:not([hidden])) .sound-mark {
+  top: calc(max(10px, env(safe-area-inset-top)) + 58px);
 }
 
 @keyframes sound-sway {

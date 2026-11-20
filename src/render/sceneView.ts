@@ -288,7 +288,8 @@ export function createSceneView(options: {
       if (tapTarget) props.get(tapTarget)?.model.setGlow(new THREE.Color(0xffffff), 0);
       tapTarget = name;
       const p = name ? props.get(name) : undefined;
-      mapView.setMarks(p ? [{ x: p.coord.x, z: p.coord.z, kind: 'selected' }] : []);
+      // 押す物のマスは塗らない（物に半分隠れた黄色い板が、大きな三角の目印に見えるため。初見の検査）。押す所は物の弱い光と上の目印で示す
+      mapView.setMarks([]);
       setBeacon(p ? mapView.tileTop(p.coord.x, p.coord.z).add(new THREE.Vector3(0, 1.15, 0)) : undefined);
       return p ? { ...p.coord } : undefined;
     },

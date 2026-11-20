@@ -859,18 +859,18 @@ export function createBattleView(options: {
         const chest = feet.clone().add(new THREE.Vector3(0, 0.55, 0));
         const from = gate ? gate.pillar.group.position.clone().setY(chest.y) : chest.clone().add(new THREE.Vector3(1, 0, 0));
         const glowMat = () => new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0, depthWrite: false });
-        // 光の帯（門から横へ伸びる）
-        const span = from.distanceTo(chest);
-        const band = new THREE.Mesh(new THREE.BoxGeometry(1, 0.2, 0.2), glowMat());
+        // 光の帯（門から横へ伸びる）。門とガレスの間に立つトウマの体を通らないよう、頭の上を大きく越える弧にする
+        // （まっすぐだと、トウマの剣や体から光が出たように見えたため。初見の検査）
+        const mid = from.clone().lerp(chest, 0.5).add(new THREE.Vector3(0, 1.5, 0));
+        const curve = new THREE.QuadraticBezierCurve3(from, mid, chest);
+        const SEG = 40;
+        const RADIAL = 8;
+        const bandGeo = new THREE.TubeGeometry(curve, SEG, 0.09, RADIAL, false);
+        const band = new THREE.Mesh(bandGeo, glowMat());
         band.renderOrder = 6;
+        bandGeo.setDrawRange(0, 0);
         scene.add(band);
-        const placeBand = (t: number) => {
-          const tip = from.clone().lerp(chest, t);
-          band.position.copy(from).add(tip).multiplyScalar(0.5);
-          band.scale.set(Math.max(0.01, span * t), 1, 1);
-          band.lookAt(tip);
-          band.rotateY(Math.PI / 2);
-        };
+        const placeBand = (t: number) => bandGeo.setDrawRange(0, Math.ceil(SEG * t) * RADIAL * 6);
         // ゆっくり伸ばす（写真や一瞬の見落としでも、門から伸びた光だと分かるように）
         await tweens.play(1.6, (t) => {
           (band.material as THREE.MeshBasicMaterial).opacity = Math.min(1, t * 2);

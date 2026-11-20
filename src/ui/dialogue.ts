@@ -836,7 +836,7 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       placardTimer = window.setTimeout(() => {
         placard.hidden = true;
         placardShown = '';
-      }, 400);
+      }, 200);
     }, ms);
   }
 
@@ -928,12 +928,17 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
     // 場面が切り替わる前（暗転・場所を移す・遠景・短い画を重ねる）と、人物が消える時・光が立つ時には、前の台詞の枠を閉じる
     // （台詞の枠が、暗転や場所の切り替え、話した人物が消えた後まで残らないように。早送り・読み返し・スキップのボタンは残す）
     if (CLOSES_LINE.has(d.kind) && !box.hidden && !box.classList.contains('tools-only')) hideLine(true);
-    // 同時: 中の指示を一斉に始め、すべて終わるまで待つ
+    // 同時: 中の指示を一斉に始め、すべて終わるまで待つ。中の @間 は、少なくともその秒は待ち、その後ろの指示をその秒だけ遅らせて始める
+    // （例: 映しながら、1秒後に手渡す）
     if (d.kind === 'together') {
       let st = before;
+      let delay = 0;
       const all: Promise<void>[] = [];
       for (const x of d.directives) {
-        all.push(runDirective(x, st));
+        const start = delay;
+        const from = st;
+        all.push(start > 0 ? wait(start).then(() => runDirective(x, from)) : runDirective(x, from));
+        if (x.kind === 'wait') delay += fast ? Math.min(x.ms, 120) : x.ms;
         st = applyDirective(st, x);
       }
       await Promise.all(all);

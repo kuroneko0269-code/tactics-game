@@ -915,8 +915,8 @@ function main(): void {
     scene.add(hemi, sun);
     applyLighting(scene, { hemi, sun }, timeLight(tod && tod.kind === 'timeOfDay' ? tod.time : def.time), def.sky);
     // 一瞬の画なので、夜の画でも手もとが見える明るさにする（暗くてユナの手が見分けられないと言われたため。初見の検査）
-    hemi.intensity *= 2.6;
-    sun.intensity *= 2.0;
+    hemi.intensity *= 3.2;
+    sun.intensity *= 2.4;
     const map = createMapView(createMap(def.map));
     scene.add(map.group);
     const oRig = createCameraRig(rigOptions(map, def.map));
@@ -940,7 +940,7 @@ function main(): void {
     await new Promise((r) => requestAnimationFrame(() => r(undefined)));
     shot.style.transitionDuration = `${fade}ms`;
     tint.style.transitionDuration = `${fade}ms`;
-    shot.style.opacity = '0.18';
+    shot.style.opacity = '0.12';
     tint.style.opacity = '1';
     devHistory.overlays++;
     const started = performance.now();
