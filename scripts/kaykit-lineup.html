@@ -79,6 +79,24 @@
           }
         span = (i - 1) * 0.5 + 0.7 + 0.7;
         step(1.2);
+      } else if (mode === 'closeup') {
+        // 1人を5つの向き（正面・斜め前・横・斜め後ろ・後ろ）から近くで（frame=head で頭と肩、body で全身）
+        const id = q.get('who') ?? 'yuna';
+        const views = [
+          ['正面', 0],
+          ['斜め前', 0.7],
+          ['横', Math.PI / 2],
+          ['斜め後ろ', 2.4],
+          ['後ろ', Math.PI],
+        ];
+        const gap = q.get('frame') === 'body' ? 0.5 : 0.46;
+        views.forEach(([label, yaw], i) => {
+          const p = place(make(id), i * gap);
+          p.setYaw(yaw);
+          labels.push({ x: i * gap, text: `${names[id] ?? id}・${label}` });
+        });
+        span = (views.length - 1) * gap + gap;
+        step(1.2);
       } else if (mode === 'motions') {
         // 仕草ごとの姿（動きの途中で止めた画）。1人の人物で、横に並べる
         const id = q.get('who') ?? 'yuna';
@@ -163,12 +181,19 @@
       }
       // 並びの幅が画面の横に収まる距離から、少し見下ろす
       const camera = new THREE.PerspectiveCamera(20, W / H, 0.1, 100);
+      const headShot = mode === 'closeup' && q.get('frame') !== 'body';
       const xs = puppets.length ? puppets.map((p) => p.group.position.x) : labels.map((l) => l.x);
       const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
       const hfov = 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(10)) * (W / H));
       const dist = Math.max(span / 2 / Math.tan(hfov / 2), 2.2);
-      camera.position.set(cx, 0.5 + dist * 0.12, dist);
-      camera.lookAt(cx, 0.45, 0);
+      if (headShot) {
+        // 頭と肩: ほぼ水平に、頭の高さを見る
+        camera.position.set(cx, 0.78, dist);
+        camera.lookAt(cx, 0.68, 0);
+      } else {
+        camera.position.set(cx, 0.5 + dist * 0.12, dist);
+        camera.lookAt(cx, 0.45, 0);
+      }
       renderer.render(scene, camera);
       // 名前の札（画面の下に）
       const ctx = document.createElement('canvas').getContext('2d');
@@ -176,6 +201,7 @@
         const v = new THREE.Vector3(l.x, 0, 0).project(camera);
         const d = document.createElement('div');
         d.textContent = l.text;
+        if (headShot) v.copy(new THREE.Vector3(l.x, 0.5, 0).project(camera));
         d.style.cssText = `position:absolute;top:${H - 30}px;left:${((v.x + 1) / 2) * W}px;transform:translateX(-50%);background:#000a;padding:2px 6px;border-radius:4px;white-space:nowrap`;
         document.body.append(d);
       }

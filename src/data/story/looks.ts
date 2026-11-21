@@ -122,6 +122,10 @@ export interface KayKitLook {
   readonly apron?: { readonly color: number; readonly bib?: boolean };
   /** 差し色（結い紐・襟巻き・首の布。1色まで） */
   readonly accent?: number;
+  /** スカート（腰から膝の上まで。脚の動きに付いてくる） */
+  readonly skirt?: { readonly color: number };
+  /** 顔（省くと素材の顔の目を小さくしたもの）。eyes は目の大きさの倍率（横・縦）、lashes でまつ毛、round で輪郭を丸く、blush で頬の赤み */
+  readonly face?: { readonly eyes?: readonly [number, number]; readonly lashes?: boolean; readonly round?: boolean; readonly blush?: boolean };
 }
 
 // 色は、彩度を落とした土の色（布・革・くすんだ金属）。人形は描く時にさらに彩度を落とす（puppet.ts の muted）。
@@ -143,7 +147,8 @@ const TOUMA_KAYKIT: KayKitLook = {
   leather: LEATHER_DARK,
   pants: 0x2e2c2c,
   boots: LEATHER_DARK,
-  hair: { style: 'short', color: 0x1b1a1e },
+  // 髪は、外套と分かれて見えるように、真っ黒より明るく暖かい黒（茶に寄せた黒。髪の作り直しと観客の検査）
+  hair: { style: 'short', color: 0x382c28 },
   // 外套は、今の人形の濃紺より少し明るく（夜の部屋で、髪と外套が1つの黒い塊に見えないように。観客の検査）
   cloak: { color: 0x34405a, length: 'long', hoodDown: true },
   accent: 0x5c7f80,
@@ -219,15 +224,17 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
       base: 'rogue',
       height: 0.86,
       width: 0.94,
-      skin: 0xc6a790,
-      cloth: 0xc2b496,
-      cloth2: 0xa89a7c,
-      leather: 0x5a4230,
-      pants: 0x54463a,
-      boots: 0x45342a,
-      hair: { style: 'tied', color: 0x18151a },
-      apron: { color: 0x5e4632 },
-      accent: 0x9a4a32,
+      skin: 0xc8a993,
+      cloth: 0xd2c3a3,
+      cloth2: 0xb9a888,
+      leather: 0x6a4e38,
+      pants: 0x6a5446,
+      boots: 0x4e3a2e,
+      hair: { style: 'tied', color: 0x1e1a1e },
+      skirt: { color: 0xa88f74 },
+      apron: { color: 0x6e5038 },
+      accent: 0xa4503a,
+      face: { eyes: [1.02, 0.98], lashes: true, round: true, blush: true },
     },
   },
   /** テオ: 十七歳、小柄、柔らかい茶髪、時守の濃紺に白い襟 */

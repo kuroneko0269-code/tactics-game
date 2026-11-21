@@ -43,7 +43,15 @@ export function showSettingsSheet(root: HTMLElement, current: () => GameSettings
     );
     if (s.muted) mute.append(el('p', 'screen-note', TEXT.settings.mutedNote));
     /** 選び肢のボタンの列（押されているものが今の値）。読み上げの名前は「文字の大きさ: 中」のように、どの列かを添える */
-    const choices = <T extends string>(group: string, list: readonly T[], labels: Readonly<Record<T, string>>, value: T, pick: (v: T) => void, key: string) => {
+    const choices = <T extends string>(
+      group: string,
+      list: readonly T[],
+      labels: Readonly<Record<T, string>>,
+      value: T,
+      pick: (v: T) => void,
+      key: string,
+      notes: Readonly<Partial<Record<string, string>>> = {},
+    ) => {
       const row = el('div', `settings-row settings-choices settings-${key}`);
       row.append(el('span', 'settings-label', group));
       const buttons = el('div', 'settings-choice-buttons');
@@ -51,6 +59,8 @@ export function showSettingsSheet(root: HTMLElement, current: () => GameSettings
         const b = screenButton(labels[v], () => pick(v), { className: 'settings-choice', pressed: v === value });
         b.setAttribute('aria-label', TEXT.settings.choiceLabel(group, labels[v]));
         b.dataset.value = v;
+        const note = notes[v];
+        if (note) b.append(el('span', 'settings-choice-note', note));
         buttons.append(b);
       }
       row.append(buttons);
@@ -58,7 +68,7 @@ export function showSettingsSheet(root: HTMLElement, current: () => GameSettings
     };
     const look = el('div', 'settings-look');
     look.append(
-      choices(TEXT.settings.font, STORY_FONTS, TEXT.settings.fonts, s.storyFont, (v) => set({ storyFont: v }), 'font'),
+      choices(TEXT.settings.font, STORY_FONTS, TEXT.settings.fonts, s.storyFont, (v) => set({ storyFont: v }), 'font', TEXT.settings.fontNotes),
       choices(TEXT.settings.textSize, TEXT_SIZES, TEXT.settings.textSizes, s.textSize, (v) => set({ textSize: v }), 'text-size'),
     );
     if (s.checkTools) look.append(choices(TEXT.settings.puppetKind, PUPPET_KINDS, TEXT.settings.puppetKinds, s.puppetKind, (v) => set({ puppetKind: v }), 'puppet'));

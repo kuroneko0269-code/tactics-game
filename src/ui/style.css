@@ -43,6 +43,11 @@
   --kr-mincho: 'Shippori Mincho', 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif;
 }
 
+/* ヒラギノ明朝: 同梱せず、端末に入っている書体を使う（iPhone・iPad・Mac）。無い端末では Zen Old Mincho で出る */
+:root[data-story-font='hiraginoMincho'] {
+  --kr-mincho: 'Hiragino Mincho ProN', 'Hiragino Mincho Pro', 'Zen Old Mincho', 'Yu Mincho', 'Noto Serif JP', serif;
+}
+
 /* 文字の大きさ「小」（中の 1 割小さく） */
 :root[data-text-size='small'] {
   --kr-text-size: 14.5px;
@@ -4044,6 +4049,18 @@ body.in-dialogue #hud {
 
 .settings-font .screen-button.settings-choice {
   font-size: 12px;
+}
+
+/* 書体は4つあるので、2つずつ2段に並べる（小さめのスマホでも名前と説明が読めるように） */
+.settings-font .settings-choice-buttons {
+  grid-auto-flow: row;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-choice-note {
+  display: block;
+  font-size: 10px;
+  color: #b8b0a0;
 }
 
 .settings-choice[aria-pressed='true'] {

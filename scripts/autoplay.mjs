@@ -2544,6 +2544,13 @@ async function storyRun(browser, baseUrl, name, core) {
     await choice(text.settings.font, text.settings.fonts.shipporiMincho);
     check((await root()).textSize === 'large' && (await root()).storyFont === 'shipporiMincho', '文字の大きさか書体の切り替えが画面に効いていません');
     check((await T(() => window.__tactics.settings().textSize)) === 'large', '文字の大きさが設定に残っていません');
+    // ヒラギノ明朝（端末の書体。無い端末では Zen Old Mincho で出る）: 書体の指定の順を確かめる
+    await choice(text.settings.font, text.settings.fonts.hiraginoMincho);
+    const family = await T(() => getComputedStyle(document.documentElement).getPropertyValue('--kr-mincho'));
+    check(
+      (await root()).storyFont === 'hiraginoMincho' && /^\s*'Hiragino Mincho ProN',\s*'Hiragino Mincho Pro',\s*'Zen Old Mincho'/.test(family),
+      `ヒラギノ明朝の書体の指定が違います: ${family}`,
+    );
     await choice(text.settings.textSize, text.settings.textSizes.medium);
     await choice(text.settings.font, text.settings.fonts.zenOldMincho);
     check((await T(() => window.__tactics.settings().puppetKind)) === 'kaykit', '人形の初めの値が KayKit ではありません');

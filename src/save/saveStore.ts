@@ -150,7 +150,8 @@ export interface GameSettings {
   readonly puppetKind: PuppetKind;
 }
 
-export const STORY_FONTS = ['zenOldMincho', 'shipporiAntique', 'shipporiMincho'] as const;
+/** hiraginoMincho は同梱せず、端末に入っている書体を使う（iPhone・iPad・Mac。無い端末では Zen Old Mincho で出る） */
+export const STORY_FONTS = ['zenOldMincho', 'shipporiAntique', 'shipporiMincho', 'hiraginoMincho'] as const;
 export type StoryFont = (typeof STORY_FONTS)[number];
 export const TEXT_SIZES = ['small', 'medium', 'large'] as const;
 export type TextSize = (typeof TEXT_SIZES)[number];

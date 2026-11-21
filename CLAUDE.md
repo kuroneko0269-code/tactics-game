@@ -62,7 +62,7 @@ TypeScript / Vite（開発サーバーとビルド）/ Three.js（3D描画）/ V
   同じシード値なら同じ結果になるので、リプレイや巻き戻しで結果を再現できる。
 - **ジョブやアビリティの数値はコードに直接書かず `src/data` に置く。** core は引数で受け取ったデータで計算するだけにする。
 - キャラクターは、コードで組み立てた部品の人形（`src/render/puppet.ts`。約 3.4 頭身、小さい目とまばたき、3段の陰と細い輪郭線、骨で動かす1つの形。部品と衣装の組み合わせは `src/data/story/looks.ts`）。
-  序章の場面4だけ、外部の3D素材 KayKit（CC0）の体・骨・動きに自作の髪・衣装・色を足した人形を試している（`src/render/kaykit.ts`・`kaykitParts.ts`、見た目は `looks.ts` の `kaykit`、設定の「人形」で切り替え。docs/KAYKIT.md、素材の出どころは docs/CREDITS.md）。
+  序章の場面4だけ、外部の3D素材 KayKit（CC0）の体・骨・動きに自作の髪・衣装・色を足した人形を試している（`src/render/kaykit.ts`・`kaykitHair.ts`（髪）・`kaykitParts.ts`、見た目は `looks.ts` の `kaykit`、設定の「人形」で切り替え。docs/KAYKIT.md、素材の出どころは docs/CREDITS.md）。
   外部の素材を足す時は、配布物の使用条件の文面を読んで確かめ、docs/CREDITS.md に書く。
 - スマホのブラウザでも遊べること。操作はタップ（クリックも同じ扱い）、縦向き・横向きどちらでも崩れないこと。
   ボタンは指で押せる大きさ（目安 48px 以上）にする。

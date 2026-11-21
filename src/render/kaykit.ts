@@ -3,7 +3,8 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import type { Direction } from '../core/geometry';
 import type { KayKitBase, KayKitLook, LookDefinition, LookItemSlot } from '../data/story/looks';
 import { GESTURES } from '../data/story/stageDefs';
-import { BONE, customParts, PART_CELLS, type PartCell } from './kaykitParts';
+import { hairParts } from './kaykitHair';
+import { BONE, customParts, finish, PART_CELLS, type PartCell, type PartPiece } from './kaykitParts';
 import { buildModel } from './props';
 import { YAW_OF, type Puppet, type PuppetPose } from './puppet';
 
@@ -152,6 +153,14 @@ function roleColors(look: KayKitLook): Record<Role, number> {
   };
 }
 
+/** 明るい束の色: 髪の色を明るくする（黒い髪は、少し暖かい灰へ） */
+function hairLightOf(hex: number): number {
+  const c = new THREE.Color(hex);
+  const hsl = { h: 0, s: 0, l: 0 };
+  c.getHSL(hsl);
+  return c.setHSL(hsl.h, hsl.s, Math.min(0.6, hsl.l * 1.3 + 0.035)).getHex();
+}
+
 /** 人物の色の画像（64×128。区画は横 8・縦 32 画素）。区画ごとに、上が明るく下が暗い縦の濃淡で塗る */
 function paletteTexture(look: KayKitLook): THREE.Texture {
   const canvas = document.createElement('canvas');
@@ -169,25 +178,36 @@ function paletteTexture(look: KayKitLook): THREE.Texture {
     accent: look.accent ?? look.cloth,
     // 下ろした頭巾は外套より明るく（外套と髪の境目を見せる）
     cloakInner: new THREE.Color(look.cloak?.color ?? look.cloth).multiplyScalar(1.45).getHex(),
-    hairDark: new THREE.Color(look.hair.color).multiplyScalar(0.75).getHex(),
+    hairDark: new THREE.Color(look.hair.color).multiplyScalar(0.62).getHex(),
+    // 明るい束（髪の色を明るくし、少し暖かく。黒い髪でも束の段差が見えるように）
+    hairLight: hairLightOf(look.hair.color),
+    // 頬の赤み（肌にごく薄く赤を混ぜる）
+    blush: new THREE.Color(look.skin).lerp(new THREE.Color(0xd77a6e), 0.3).getHex(),
+    skirt: look.skirt?.color ?? look.cloth,
+    eye: 0x17110d,
+    shine: 0xf4eee2,
   };
-  const fill = (cx: number, cy: number, hex: number) => {
+  const fill = (cx: number, cy: number, hex: number, side?: string, strong = false) => {
     // 画像には sRGB の値で塗る（three.js の色は、内部では直線の値で持っている）
     const c = muted(hex).convertLinearToSRGB();
     const grad = g.createLinearGradient(0, cy * 32, 0, cy * 32 + 32);
-    const at = (k: number) => `rgb(${Math.round(Math.min(1, c.r * k) * 255)},${Math.round(Math.min(1, c.g * k) * 255)},${Math.round(Math.min(1, c.b * k) * 255)})`;
-    // 素材の濃淡に合わせる（上 1.1 倍 → 下 0.78 倍）
-    grad.addColorStop(0, at(1.1));
-    grad.addColorStop(1, at(0.78));
+    // 暗い色でも濃淡が見えるように、明るくする時は少し足す
+    const at = (k: number) => {
+      const add = k > 1 ? (k - 1) * 0.12 : 0;
+      return `rgb(${Math.round(Math.min(1, c.r * k + add) * 255)},${Math.round(Math.min(1, c.g * k + add) * 255)},${Math.round(Math.min(1, c.b * k + add) * 255)})`;
+    };
+    // 素材の濃淡に合わせる（上 1.1 倍 → 下 0.78 倍）。髪の束は濃淡を強く（根もと 1.35 倍 → 毛先 0.7 倍。重なった束の段差が見えるように）
+    grad.addColorStop(0, at(strong ? 1.35 : 1.1));
+    grad.addColorStop(1, at(strong ? 0.7 : 0.78));
     g.fillStyle = grad;
-    g.fillRect(cx * 8, cy * 32, 8, 32);
+    g.fillRect(cx * 8 + (side === 'r' ? 4 : 0), cy * 32, side ? 4 : 8, 32);
   };
   for (let cy = 0; cy < 4; cy++)
     for (let cx = 0; cx < 8; cx++) {
       const role = map[`${cx},${cy}`];
       fill(cx, cy, role ? roles[role] : look.cloth);
     }
-  for (const [part, [cx, cy]] of Object.entries(PART_CELLS) as [PartCell, readonly [number, number]][]) fill(cx, cy, partColor[part]);
+  for (const [part, ref] of Object.entries(PART_CELLS) as [PartCell, readonly (number | string)[]][]) fill(ref[0] as number, ref[1] as number, partColor[part], ref[2] as string | undefined, part === 'hair' || part === 'hairLight');
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.flipY = false;
@@ -236,26 +256,139 @@ function dropCells(g: THREE.BufferGeometry, cells: readonly string[]): void {
   g.setIndex(keep);
 }
 
-/** 目を小さくする: 目の区画の点を、左右の目ごとの中心へ寄せる */
-function shrinkEyes(g: THREE.BufferGeometry): void {
+/** 目の大きさを変える: 目の区画の点を、左右の目ごとの中心から scale 倍にする（ふつうは小さく。ユナは少し大きく） */
+function scaleEyes(g: THREE.BufferGeometry, scale: { readonly x: number; readonly y: number }): void {
+  for (const s of eyeSides(g)) {
+    const p = g.attributes.position!;
+    // 少し前へ出して、顔の面に埋もれないようにする
+    for (const i of s.list) p.setXYZ(i, s.cx + (p.getX(i) - s.cx) * scale.x, s.cy + (p.getY(i) - s.cy) * scale.y, p.getZ(i) + 0.004);
+  }
+}
+
+/** 左右の目（目の区画の点）の中心と点の一覧。sign は +x の側が 1 */
+function eyeSides(g: THREE.BufferGeometry): { sign: number; cx: number; cy: number; list: number[] }[] {
   const uv = g.attributes.uv!;
   const p = g.attributes.position!;
-  const sides: Record<string, { x: number; y: number; n: number; list: number[] }> = { l: { x: 0, y: 0, n: 0, list: [] }, r: { x: 0, y: 0, n: 0, list: [] } };
+  const out = [1, -1].map((sign) => ({ sign, cx: 0, cy: 0, n: 0, list: [] as number[] }));
   for (let i = 0; i < p.count; i++) {
     if (cellOf(uv.getX(i), uv.getY(i)) !== '2,0') continue;
-    const s = sides[p.getX(i) > 0 ? 'l' : 'r']!;
-    s.x += p.getX(i);
-    s.y += p.getY(i);
+    const s = out[p.getX(i) > 0 ? 0 : 1]!;
+    s.cx += p.getX(i);
+    s.cy += p.getY(i);
     s.n++;
     s.list.push(i);
   }
-  for (const s of Object.values(sides)) {
-    if (!s.n) continue;
-    const cx = s.x / s.n;
-    const cy = s.y / s.n;
-    // 少し前へ出して、顔の面に埋もれないようにする
-    for (const i of s.list) p.setXYZ(i, cx + (p.getX(i) - cx) * EYE_SCALE.x, cy + (p.getY(i) - cy) * EYE_SCALE.y, p.getZ(i) + 0.004);
+  return out.filter((s) => s.n > 0).map((s) => ({ sign: s.sign, cx: s.cx / s.n, cy: s.cy / s.n, list: s.list }));
+}
+
+/** 顔の輪郭を丸くする: 目より下の点を、下ほど内へ寄せる（あごの角を落とす） */
+function roundFace(g: THREE.BufferGeometry): void {
+  const p = g.attributes.position!;
+  for (let i = 0; i < p.count; i++) {
+    const y = p.getY(i);
+    const k = Math.min(1, Math.max(0, (1.66 - y) / 0.42));
+    if (k <= 0) continue;
+    const s = k * k;
+    p.setXYZ(i, p.getX(i) * (1 - 0.12 * s), y + 0.03 * s, p.getZ(i) * (1 - (p.getZ(i) > 0 ? 0.03 : 0.06) * s));
   }
+}
+
+/**
+ * 平たい帯（まつ毛）: 点の列に沿って、顔の面の上に幅 width の帯を貼る（目尻の側が太く、目頭へ細く）。
+ * 輪郭線を付けないように、厚みのない片面の形にする（輪郭線は裏面を膨らませて描くので、前を向いた片面の形には出ない）
+ */
+function flatRibbon(points: readonly THREE.Vector3[], width: number): THREE.BufferGeometry {
+  const pos: number[] = [];
+  const index: number[] = [];
+  const n = points.length;
+  for (let i = 0; i < n; i++) {
+    const a = points[Math.max(0, i - 1)]!;
+    const b = points[Math.min(n - 1, i + 1)]!;
+    const tan = b.clone().sub(a).normalize();
+    const side = new THREE.Vector3(-tan.y, tan.x, 0).normalize();
+    const w = (width * (1 - i / (n - 1)) ** 0.8) / 2 + 0.002;
+    const p = points[i]!;
+    pos.push(p.x + side.x * w, p.y + side.y * w, p.z, p.x - side.x * w, p.y - side.y * w, p.z);
+  }
+  for (let i = 0; i < n - 1; i++) {
+    const k = i * 2;
+    index.push(k, k + 1, k + 2, k + 2, k + 1, k + 3);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(index);
+  // 前（+z）を向いた面にそろえる
+  g.computeVertexNormals();
+  if (g.attributes.normal!.getZ(0) < 0) {
+    const arr = g.index!.array as Uint16Array | Uint32Array;
+    for (let t = 0; t < arr.length; t += 3) [arr[t + 1], arr[t + 2]] = [arr[t + 2]!, arr[t + 1]!];
+  }
+  return g;
+}
+
+/** まつ毛（目の上の縁に沿った弧と、目尻で上へはねる先）と、目の光（小さな白い点） */
+function lashParts(g: THREE.BufferGeometry): PartPiece[] {
+  const p = g.attributes.position!;
+  const out: PartPiece[] = [];
+  for (const s of eyeSides(g)) {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    let maxZ = -Infinity;
+    for (const i of s.list) {
+      minX = Math.min(minX, p.getX(i));
+      maxX = Math.max(maxX, p.getX(i));
+      maxY = Math.max(maxY, p.getY(i));
+      maxZ = Math.max(maxZ, p.getZ(i));
+    }
+    const a = (maxX - minX) / 2;
+    const b = maxY - s.cy;
+    const z = maxZ + 0.006;
+    // 目尻の先 → 目の上の縁 → 目頭
+    const pts = [new THREE.Vector3(s.cx + s.sign * a * 1.42, s.cy + b * 1.12, z - 0.015)];
+    for (const t of [0.12, 0.35, 0.6, 0.85, 1.02]) {
+      const ang = t * Math.PI * 0.82;
+      pts.push(new THREE.Vector3(s.cx + s.sign * Math.cos(ang) * a * 1.04, s.cy + Math.sin(ang) * b * 1.0, z - (1 - Math.sin(ang)) * 0.012));
+    }
+    out.push(finish(flatRibbon(pts, 0.03), 'eye', { a: BONE.head }, true));
+    // 目の光: 目の上の外寄り
+    const shine = new THREE.CircleGeometry(0.018, 8);
+    shine.translate(s.cx + s.sign * a * 0.32, s.cy + b * 0.38, z + 0.002);
+    out.push(finish(shine, 'shine', { a: BONE.head }, true));
+  }
+  return out;
+}
+
+/** 頬の赤み: 頬の面（前から当てた線と頭の面の交わる所）に、薄い楕円を貼る */
+function blushParts(g: THREE.BufferGeometry): PartPiece[] {
+  const p = g.attributes.position!;
+  const idx = g.index!.array;
+  const out: PartPiece[] = [];
+  const va = new THREE.Vector3();
+  const vb = new THREE.Vector3();
+  const vc = new THREE.Vector3();
+  const hit = new THREE.Vector3();
+  for (const sign of [1, -1]) {
+    const ray = new THREE.Ray(new THREE.Vector3(sign * 0.3, 1.49, 2), new THREE.Vector3(0, 0, -1));
+    let best: { point: THREE.Vector3; normal: THREE.Vector3 } | undefined;
+    for (let t = 0; t < idx.length; t += 3) {
+      va.fromBufferAttribute(p, idx[t]!);
+      vb.fromBufferAttribute(p, idx[t + 1]!);
+      vc.fromBufferAttribute(p, idx[t + 2]!);
+      if (!ray.intersectTriangle(va, vb, vc, false, hit)) continue;
+      if (best && hit.z <= best.point.z) continue;
+      const normal = new THREE.Vector3().crossVectors(vb.clone().sub(va), vc.clone().sub(va)).normalize();
+      if (normal.z < 0) normal.negate();
+      best = { point: hit.clone(), normal };
+    }
+    if (!best) continue;
+    const disk = new THREE.CircleGeometry(0.07, 12);
+    disk.scale(1.3, 0.72, 1);
+    disk.lookAt(best.normal);
+    disk.translate(best.point.x + best.normal.x * 0.007, best.point.y + best.normal.y * 0.007, best.point.z + best.normal.z * 0.007);
+    out.push(finish(disk, 'blush', { a: BONE.head }, true));
+  }
+  return out;
 }
 
 /** 頭の骨に付く点を、首の付け根（頭の骨）から縮める */
@@ -327,9 +460,13 @@ export function createKayKitPuppet(look: LookDefinition): Puppet {
   const headMesh = A.heads[k.head ?? 'knight'];
   const head = normalized(headMesh.geometry, boneMapOf(headMesh));
   if ((k.head ?? 'knight') === 'knight') dropCells(head, ['1,0']);
-  shrinkEyes(head);
+  const face = k.face ?? {};
+  if (face.round) roundFace(head);
+  scaleEyes(head, face.eyes ? { x: face.eyes[0], y: face.eyes[1] } : EYE_SCALE);
   pieces.push(head);
-  for (const p of customParts(k)) pieces.push(normalized(p.geometry, null));
+  const faceParts = [...(face.lashes ? lashParts(head) : []), ...(face.blush ? blushParts(head) : [])];
+  for (const f of faceParts) pieces.push(normalized(f.geometry, null));
+  for (const p of [...hairParts(k), ...customParts(k)]) pieces.push(normalized(p.geometry, null));
   const merged = mergeGeometries(pieces)!;
   for (const p of pieces) p.dispose();
   // 頭（頭の骨に付く点）を、首の付け根から縮める
