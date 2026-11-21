@@ -13,7 +13,7 @@
     <script type="module">
       // KayKit の人形の試し: 作り分けと動きの確かめの写真を撮るための、開発用サーバーだけで開くページ（scripts/kaykit-lineup.mjs）。
       // ?mode=views 4人を正面・横・後ろ / mode=motions 仕草ごとの姿 / mode=parts 自作の部品の見本 / mode=skeleton 骸骨
-      // &puppet=current で今の人形 &shade=plain で素材そのままの陰影
+      // &puppet=current で今の人形 &shade=plain で素材そのままの陰影 &yh=b でユナの髪を案 B に &light=dinner|night で場面4の光
       import * as THREE from 'three';
       import { createKayKitPuppet, loadKayKit, setKayKitShading } from '/src/render/kaykit.ts';
       import { createPuppet } from '/src/render/puppet.ts';
@@ -37,13 +37,24 @@
       const sun = new THREE.DirectionalLight(0xffe2bc, 2.2);
       sun.position.set(1.5, 3, 4);
       scene.add(sun);
+      // &light=dinner（夕方の室内と灯）・night（夜の室内と灯）: 場面4の光に近づけて撮る（目と髪が光に沈まないかの確かめ）
+      const lightMode = q.get('light');
+      if (lightMode) {
+        const { TIMES_OF_DAY } = await import('/src/data/lighting.ts');
+        const { applyLighting } = await import('/src/render/lighting.ts');
+        const hemi = scene.children.find((o) => o.isHemisphereLight);
+        applyLighting(scene, { hemi, sun }, TIMES_OF_DAY[lightMode === 'night' ? '夜' : '夕方'], undefined, lightMode === 'night' ? 0.55 : 0.7);
+        const lamp = new THREE.PointLight(0xffb070, lightMode === 'night' ? 3.2 : 2.2, 6, 1.4);
+        lamp.position.set(2, 1.4, 1.6);
+        scene.add(lamp);
+      }
       const ground = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshLambertMaterial({ color: 0x6a5e4c }));
       ground.rotation.x = -Math.PI / 2;
       scene.add(ground);
       await loadKayKit();
       const make = (id, overrides) => {
         const look = { ...LOOKS[id], ...(overrides ?? {}) };
-        return q.get('puppet') === 'current' ? createPuppet(look) : createKayKitPuppet(look);
+        return q.get('puppet') === 'current' ? createPuppet(look) : createKayKitPuppet(look, q.get('yh') ?? 'a');
       };
       const tweens = createTweens();
       const puppets = [];
@@ -136,10 +147,10 @@
         // 自作の部品の見本: 髪の4種類・頭巾・帽子・肩掛け・マント・前掛け
         const base = LOOKS.touma.kaykit;
         const samples = [
-          ['髪: 短い', { hair: { style: 'short', color: 0x2a2220 } }],
-          ['髪: 結ぶ', { hair: { style: 'tied', color: 0x2a2220 }, accent: 0x9a4a32 }],
-          ['髪: まとめ髪', { hair: { style: 'bun', color: 0x4a3426 } }],
-          ['髪: 刈り込み', { hair: { style: 'cropped', color: 0x2a2220 } }],
+          ['髪: knight', { hair: { kit: 'knight', color: 0x2a2220 } }],
+          ['髪: rogue', { head: 'rogue', hair: { kit: 'rogue', color: 0x2a2220 } }],
+          ['髪: mage', { head: 'mage', hair: { kit: 'mage', color: 0x4a3426 } }],
+          ['髪: はげ頭に knight の髪', { head: 'barbarian', hair: { kit: 'knight', color: 0x5a4430 } }],
           ['頭巾', { headwear: { kind: 'hood', color: 0x5a5244 } }],
           ['帽子', { headwear: { kind: 'hat', color: 0x5e4430 }, accent: 0x8a6a3a }],
           ['肩掛け', { mantle: 0x6a604e }],
@@ -147,7 +158,7 @@
           ['前掛け', { apron: { color: 0xbdb091, bib: true } }],
         ];
         samples.forEach(([label, o], i) => {
-          const k = { base: 'rogue', skin: base.skin, cloth: 0x7a6c5c, hair: { style: 'short', color: 0x2a2220 }, ...o };
+          const k = { base: 'rogue', skin: base.skin, cloth: 0x7a6c5c, hair: { kit: 'knight', color: 0x2a2220 }, ...o };
           const p = place(make('touma', { kaykit: k }), i * 0.55);
           p.setYaw(i % 2 ? 0.6 : -0.6);
           labels.push({ x: i * 0.55, text: label });

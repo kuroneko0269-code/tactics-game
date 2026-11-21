@@ -1,4 +1,4 @@
-import { PUPPET_KINDS, STORY_FONTS, TEXT_SIZES, type GameSettings } from '../save/saveStore';
+import { PUPPET_KINDS, STORY_FONTS, TEXT_SIZES, YUNA_HAIRS, type GameSettings } from '../save/saveStore';
 import { el, screenButton, showSheet } from './dom';
 import { TEXT } from './text';
 
@@ -74,7 +74,11 @@ export function showSettingsSheet(root: HTMLElement, current: () => GameSettings
       choices(TEXT.settings.font, STORY_FONTS, TEXT.settings.fonts, s.storyFont, (v) => set({ storyFont: v }), 'font', TEXT.settings.fontNotes),
       choices(TEXT.settings.textSize, TEXT_SIZES, TEXT.settings.textSizes, s.textSize, (v) => set({ textSize: v }), 'text-size'),
     );
-    if (s.checkTools) look.append(choices(TEXT.settings.puppetKind, PUPPET_KINDS, TEXT.settings.puppetKinds, s.puppetKind, (v) => set({ puppetKind: v }), 'puppet'));
+    if (s.checkTools)
+      look.append(
+        choices(TEXT.settings.puppetKind, PUPPET_KINDS, TEXT.settings.puppetKinds, s.puppetKind, (v) => set({ puppetKind: v }), 'puppet'),
+        choices(TEXT.settings.yunaHair, YUNA_HAIRS, TEXT.settings.yunaHairs, s.yunaHair, (v) => set({ yunaHair: v }), 'yuna-hair'),
+      );
     body.append(
       look,
       volumeRow,

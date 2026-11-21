@@ -37,6 +37,12 @@ const shots = [
     [`head-${who}`, `mode=closeup&who=${who}&w=1500&h=420`],
     [`body-${who}`, `mode=closeup&who=${who}&frame=body&w=1500&h=520`],
   ]),
+  ['head-yuna-b', 'mode=closeup&who=yuna&w=1500&h=420&yh=b'],
+  ...['touma', 'yuna', 'father', 'mother'].flatMap((who) => [
+    [`dinner-${who}`, `mode=closeup&who=${who}&w=1500&h=420&light=dinner`],
+    [`night-${who}`, `mode=closeup&who=${who}&w=1500&h=420&light=night`],
+  ]),
+  ['body-yuna-b', 'mode=closeup&who=yuna&frame=body&w=1500&h=520&yh=b'],
 ];
 const only = args.only ? args.only.split(',') : null;
 for (let i = shots.length - 1; i >= 0; i--) if (only && !only.some((o) => shots[i][0].startsWith(o))) shots.splice(i, 1);

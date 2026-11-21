@@ -8,7 +8,7 @@
 //
 // 出来るもの:
 //   rogue.glb・mage.glb・barbarian.glb … 体・腕・脚の形と骨（色の画像・持ち物・兜・マント・動きは外す）
-//   heads.glb … 頭の形（Knight の頭と Barbarian の頭。どちらも骨は共通）
+//   heads.glb … 頭の形（Knight・Barbarian・Rogue・Mage の頭。どれも骨は共通。髪は頭と一体）
 //   motions.glb … 骨と、使う動きだけ（形は持たない）
 // 色の画像は入れない。色は、遊ぶ時に人物ごとに小さな画像を作って塗る（src/render/kaykit.ts）。
 import { NodeIO } from '@gltf-transform/core';
@@ -95,23 +95,28 @@ await write(await strip('Rogue.glb', BODY('Rogue')), 'rogue.glb');
 await write(await strip('Mage.glb', BODY('Mage')), 'mage.glb');
 await write(await strip('Barbarian.glb', BODY('Barbarian')), 'barbarian.glb');
 
-// 頭: Knight の頭（髪は遊ぶ時に色の区画で切り取る）と Barbarian の頭（ひげ）を、1つのファイルにまとめる
+// 頭: Knight の頭（短い髪）・Barbarian の頭（ひげ）・Rogue の頭（中くらいの長さの髪）・Mage の頭（長い髪）を、1つのファイルにまとめる。
+// 髪は、作者が頭と一体で作った形を、遊ぶ時に色の区画で取り出して使う（場面4の KayKit の人形の髪の作り直し）
 {
   const knight = await strip('Knight.glb', ['Knight_Head']);
-  const barbarian = await strip('Barbarian.glb', ['Barbarian_Head']);
-  // Barbarian の頭の形を、Knight のファイルの骨に付け直す（骨の名前と順番は5人で同じ）
   const { mergeDocuments } = await import('@gltf-transform/functions');
-  mergeDocuments(knight, barbarian);
   const root = knight.getRoot();
-  const scenes = root.listScenes();
-  const skins = root.listSkins();
-  const head = root.listNodes().find((n) => n.getName() === 'Barbarian_Head');
-  head.setSkin(skins[0]);
-  const rig = root.listNodes().find((n) => n.getName() === 'Rig' && n.listChildren().some((c) => c.getName() === 'Knight_Head'));
-  rig.addChild(head);
-  for (const s of scenes.slice(1)) s.dispose();
-  for (const s of skins.slice(1)) s.dispose();
-  // 2つのファイルの中身を、1つの入れ物にまとめる（glb は入れ物が1つ）
+  for (const [file, name] of [
+    ['Barbarian.glb', 'Barbarian_Head'],
+    ['Rogue.glb', 'Rogue_Head'],
+    ['Mage.glb', 'Mage_Head'],
+  ]) {
+    // 頭の形を、Knight のファイルの骨に付け直す（骨の名前と順番は5人で同じ）
+    mergeDocuments(knight, await strip(file, [name]));
+    const skins = root.listSkins();
+    const head = root.listNodes().find((n) => n.getName() === name);
+    head.setSkin(skins[0]);
+    const rig = root.listNodes().find((n) => n.getName() === 'Rig' && n.listChildren().some((c) => c.getName() === 'Knight_Head'));
+    rig.addChild(head);
+    for (const sc of root.listScenes().slice(1)) sc.dispose();
+    for (const sk of skins.slice(1)) sk.dispose();
+  }
+  // 中身を、1つの入れ物にまとめる（glb は入れ物が1つ）
   const buffer = root.listBuffers()[0];
   for (const a of root.listAccessors()) a.setBuffer(buffer);
   for (const b of root.listBuffers().slice(1)) b.dispose();

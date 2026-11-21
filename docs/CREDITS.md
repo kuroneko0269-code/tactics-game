@@ -12,7 +12,7 @@
 | 入手元 | 作者の GitHub「KayKit-Game-Assets」の `KayKit-Character-Pack-Adventures-1.0`（`addons/kaykit_character_pack_adventures/Characters/gltf/`）。配布ページは https://kaylousberg.itch.io/kaykit-adventurers |
 | 使用条件 | CC0 1.0 Universal（パブリックドメイン。商用可・表記不要・改造可）。配布物の `LICENSE.txt` に「License: (Creative Commons Zero, CC0) … This content is free to use in personal, educational and commercial projects. … crediting Kay Lousberg … (this is not mandatory)」と書かれていることを、取り込む前に読んで確かめた |
 | 取り込んだ日 | 2026-11-21 |
-| 取り込んだ物 | Rogue・Mage・Barbarian の体・腕・脚の形、Knight と Barbarian の頭の形、骨（41本。5人で共通）、動き 12 種（`public/models/kaykit/`。`scripts/kaykit-prepare.mjs` で、使う物だけを取り出して軽くした。色の画像・持ち物・兜・帽子・マントは取り込んでいない） |
+| 取り込んだ物 | Rogue・Mage・Barbarian の体・腕・脚の形、Knight・Barbarian・Rogue・Mage の頭の形（髪は頭と一体。2026-11-21 の髪の作り直しで Rogue と Mage の頭を足し、作者の髪をそのまま使うようにした。使用条件の `LICENSE.txt` は足す前に読み直した）、骨（41本。5人で共通）、動き 12 種（`public/models/kaykit/`。`scripts/kaykit-prepare.mjs` で、使う物だけを取り出して軽くした。色の画像・持ち物・兜・帽子・マントは取り込んでいない） |
 | 使っている所 | KayKit の人形の試し（序章の場面4。`src/render/kaykit.ts`） |
 
 ## KayKit Character Pack : Skeletons 1.0

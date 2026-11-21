@@ -180,6 +180,8 @@ export const TEXT = {
     textSizes: { small: '小', medium: '中', large: '大' },
     puppetKind: '人形',
     puppetKinds: { kaykit: 'KayKit', current: '今の人形' },
+    yunaHair: 'ユナの髪',
+    yunaHairs: { a: 'A おさげ', b: 'B リボン' },
     choiceLabel: (group: string, choice: string) => `${group}: ${choice}`,
     close: '閉じる',
   },

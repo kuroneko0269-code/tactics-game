@@ -292,7 +292,7 @@ export function apronParts(look: KayKitLook): PartPiece[] {
 
 /** 首の布（差し色。外套のない人物の差し色を見せる所） */
 export function scarfParts(look: KayKitLook): PartPiece[] {
-  if (look.accent === undefined || look.cloak || look.hair.style === 'tied') return [];
+  if (look.accent === undefined || look.cloak || (look.hair.extras?.length ?? 0) > 0) return [];
   const b = BODY_SIZE[look.base];
   const g = new THREE.TorusGeometry(0.25, 0.06, 5, 12);
   g.rotateX(Math.PI / 2);

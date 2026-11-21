@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { Direction } from '../core/geometry';
-import type { KayKitBase, KayKitLook, LookDefinition, LookItemSlot } from '../data/story/looks';
+import type { KayKitBase, KayKitHead, KayKitLook, LookDefinition, LookItemSlot } from '../data/story/looks';
 import { GESTURES } from '../data/story/stageDefs';
 import { hairParts } from './kaykitHair';
 import { BONE, customParts, finish, PART_CELLS, type PartCell, type PartPiece } from './kaykitParts';
@@ -58,7 +58,7 @@ const GESTURE_NAME = new Map<object, string>(Object.entries(GESTURES).map(([name
 
 interface Assets {
   readonly bodies: Readonly<Record<KayKitBase, THREE.Object3D>>;
-  readonly heads: Readonly<Record<'knight' | 'barbarian', THREE.SkinnedMesh>>;
+  readonly heads: Readonly<Record<KayKitHead, THREE.SkinnedMesh>>;
   readonly clips: ReadonlyMap<string, THREE.AnimationClip>;
   /** 骨の名前（共通の順番）と、骨を付けた時の逆行列 */
   readonly boneNames: readonly string[];
@@ -99,7 +99,7 @@ export function loadKayKit(): Promise<boolean> {
       };
       assets = {
         bodies: { rogue: rogue!.scene, mage: mage!.scene, barbarian: barbarian!.scene },
-        heads: { knight: headOf('Knight_Head'), barbarian: headOf('Barbarian_Head') },
+        heads: { knight: headOf('Knight_Head'), barbarian: headOf('Barbarian_Head'), rogue: headOf('Rogue_Head'), mage: headOf('Mage_Head') },
         clips: new Map(motions!.animations.map((a) => [a.name, a])),
         boneNames: ref.skeleton.bones.map((b) => b.name),
         boneInverses: ref.skeleton.boneInverses,
@@ -309,6 +309,7 @@ function flattenEyes(g: THREE.BufferGeometry): void {
  */
 function dropHiddenFaces(g: THREE.BufferGeometry): void {
   const p = g.attributes.position!;
+  const uvs = g.attributes.uv!;
   const idx = g.index!.array;
   const keep: number[] = [];
   const a = new THREE.Vector3();
@@ -321,7 +322,8 @@ function dropHiddenFaces(g: THREE.BufferGeometry): void {
     const cx = (a.x + b.x + c.x) / 3;
     const cy = (a.y + b.y + c.y) / 3;
     const cz = (a.z + b.z + c.z) / 3;
-    if (Math.abs(cx) < 0.3 && cy > 1.36 && cy < 1.72 && cz > 0.3) {
+    const cell = cellOf(uvs.getX(idx[t]!), uvs.getY(idx[t]!));
+    if ((cell === '0,0' || cell === '2,0') && Math.abs(cx) < 0.3 && cy > 1.36 && cy < 1.72 && cz > 0.3) {
       const n = new THREE.Vector3().crossVectors(b.clone().sub(a), c.clone().sub(a));
       // 面積のない面と、前から見て裏を向いた面を外す
       if (n.length() < 1e-7 || n.z / n.length() < 0.15) continue;
@@ -331,6 +333,62 @@ function dropHiddenFaces(g: THREE.BufferGeometry): void {
     keep.push(idx[t]!, idx[t + 1]!, idx[t + 2]!);
   }
   g.setIndex(keep);
+}
+
+/**
+ * ほかの頭の髪（色の区画 1,0 と 1,1）だけを取り出した形。noBrows で、knight の髪に含まれる眉（顔の前の小さな塊）を外す
+ * （父の barbarian の頭には、自分の眉があるため）
+ */
+/** 髪の区画のうち、顔の前の眉（額の下の小さな塊）を外す */
+function dropBrows(g: THREE.BufferGeometry): void {
+  const uv = g.attributes.uv!;
+  const p = g.attributes.position!;
+  const idx = g.index!.array;
+  const keep: number[] = [];
+  for (let t = 0; t < idx.length; t += 3) {
+    const a = idx[t]!;
+    const cy = (p.getY(a) + p.getY(idx[t + 1]!) + p.getY(idx[t + 2]!)) / 3;
+    const cz = (p.getZ(a) + p.getZ(idx[t + 1]!) + p.getZ(idx[t + 2]!)) / 3;
+    const cx = (p.getX(a) + p.getX(idx[t + 1]!) + p.getX(idx[t + 2]!)) / 3;
+    if (cellOf(uv.getX(a), uv.getY(a)) === '1,0' && cy < 1.78 && cz > 0.25 && Math.abs(cx) < 0.4) continue;
+    keep.push(a, idx[t + 1]!, idx[t + 2]!);
+  }
+  g.setIndex(keep);
+}
+
+/** Mage の頭の後ろの結い目（色の区画 1,1）を、髪の区画へ移す（体の区画 1,1 は服の色なので、そのままでは服の色になる） */
+function hairTieAsHair(g: THREE.BufferGeometry): void {
+  const uv = g.attributes.uv!;
+  for (let i = 0; i < uv.count; i++) if (cellOf(uv.getX(i), uv.getY(i)) === '1,1') uv.setY(i, uv.getY(i) - 0.25);
+}
+
+function hairShell(g: THREE.BufferGeometry, noBrows: boolean): THREE.BufferGeometry {
+  const uv = g.attributes.uv!;
+  const p = g.attributes.position!;
+  const idx = g.index!.array;
+  const keep: number[] = [];
+  for (let t = 0; t < idx.length; t += 3) {
+    const a = idx[t]!;
+    const cell = cellOf(uv.getX(a), uv.getY(a));
+    if (cell !== '1,0' && cell !== '1,1') continue;
+    if (noBrows) {
+      const cy = (p.getY(idx[t]!) + p.getY(idx[t + 1]!) + p.getY(idx[t + 2]!)) / 3;
+      const cz = (p.getZ(idx[t]!) + p.getZ(idx[t + 1]!) + p.getZ(idx[t + 2]!)) / 3;
+      if (cy < 1.8 && cz > 0.2) continue;
+    }
+    keep.push(idx[t]!, idx[t + 1]!, idx[t + 2]!);
+  }
+  g.setIndex(keep);
+  if (noBrows) {
+    // barbarian の頭は knight の頭より頭頂が低く小さいので、髪を頭の形に合わせて縮める（浮いて箱に見えないように）
+    const p2 = g.attributes.position!;
+    for (let i = 0; i < p2.count; i++) {
+      const y = p2.getY(i);
+      p2.setXYZ(i, p2.getX(i) * 1.02, y > 1.8 ? 1.8 + (y - 1.8) * 0.82 : y, p2.getZ(i) * 1.02 + 0.01);
+    }
+  }
+  smoothNormals(g);
+  return g;
 }
 
 /** 陰の向きを計り直し、同じ位置にある点（色の区画の境目で分かれた点）の向きを平均してそろえる */
@@ -535,10 +593,11 @@ const BLOB_OPACITY = 0.34;
 let blobShape: THREE.BufferGeometry | undefined;
 
 /** KayKit の人形を作る。素材を読み込み済みで、見た目に kaykit がある時だけ使う */
-export function createKayKitPuppet(look: LookDefinition): Puppet {
+export function createKayKitPuppet(look: LookDefinition, hairVariant: 'a' | 'b' = 'a'): Puppet {
   if (!assets || !look.kaykit) throw new Error('KayKit の素材が読み込まれていないか、見た目に kaykit がありません');
   const A = assets;
-  const k = look.kaykit;
+  // 髪の案がある人物（ユナ）は、設定で選んだ案の髪にする
+  const k = look.kaykit.hairVariants ? { ...look.kaykit, hair: look.kaykit.hairVariants[hairVariant] } : look.kaykit;
 
   // ---- 骨: 土台の体の骨を写す（骨だけ。形は下で作り直す） ----
   const src = A.bodies[k.base];
@@ -560,12 +619,29 @@ export function createKayKitPuppet(look: LookDefinition): Puppet {
     const m = o as THREE.SkinnedMesh;
     if (m.isSkinnedMesh) pieces.push(normalized(m.geometry, boneMapOf(m)));
   });
-  const headMesh = A.heads[k.head ?? 'knight'];
-  const head = normalized(headMesh.geometry, boneMapOf(headMesh));
-  const knight = (k.head ?? 'knight') === 'knight';
-  // knight の頭は髪と眉を外す。どちらの頭も、素材の目（顔に埋めた暗い円柱）を外して、顔の面に描いた目に替える
-  if (knight) dropCells(head, ['1,0']);
+  const headName = k.head ?? 'knight';
+  const head = normalized(A.heads[headName].geometry, boneMapOf(A.heads[headName]));
+  // 髪: 作者が頭と一体で作った髪（色の区画 1,0）を使う。kit が顔の頭と違う時は、顔の頭の髪を外し、kit の頭の髪を移す
+  // （Rogue の頭の耳飾り（3,0）は外す。Mage の頭の後ろの結い目（1,1）は差し色にする）
+  const kit = k.hair.kit;
+  dropCells(head, ['3,0']);
+  hairTieAsHair(head);
+  let browsFromHair = headName !== 'barbarian';
+  if (!kit || kit !== headName) {
+    if (headName !== 'barbarian') dropCells(head, ['1,0', '1,1']);
+    browsFromHair = false;
+  }
+  if (kit && kit !== headName) {
+    const shell = normalized(A.heads[kit].geometry, boneMapOf(A.heads[kit]));
+    hairTieAsHair(shell);
+    pieces.push(hairShell(shell, headName === 'barbarian'));
+  }
   const face = k.face ?? {};
+  // 細い眉にする人物は、髪と一体の太い眉を外す（下で細い眉を足す）
+  if (face.thinBrows && browsFromHair) {
+    dropBrows(head);
+    browsFromHair = false;
+  }
   flattenNose(head);
   flattenEyes(head);
   dropHiddenFaces(head);
@@ -574,7 +650,7 @@ export function createKayKitPuppet(look: LookDefinition): Puppet {
   smoothNormals(head);
   pieces.push(head);
   const large = face.eyes === 'large';
-  const faceParts = [...eyeParts(head, large), ...(knight ? browParts(head, large) : []), ...(face.blush ? blushParts(head) : [])];
+  const faceParts = [...eyeParts(head, large), ...(!browsFromHair && headName !== 'barbarian' ? browParts(head, large) : []), ...(face.blush ? blushParts(head) : [])];
   for (const f of faceParts) pieces.push(normalized(f.geometry, null));
   for (const p of [...hairParts(k), ...customParts(k)]) pieces.push(normalized(p.geometry, null));
   const merged = mergeGeometries(pieces)!;

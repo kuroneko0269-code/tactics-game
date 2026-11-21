@@ -82,6 +82,8 @@ export interface LookDefinition {
 
 /** KayKit の土台の体（素材の5人のうち、服の形が違う3人の体。docs/KAYKIT.md） */
 export type KayKitBase = 'rogue' | 'mage' | 'barbarian';
+/** KayKit の頭（素材の4人の頭。knight 短い髪・rogue 中くらいの長さの髪・mage 長い髪・barbarian はげ頭とひげ） */
+export type KayKitHead = 'knight' | 'barbarian' | 'rogue' | 'mage';
 
 /**
  * KayKit の体で作る人物の見た目。体・骨・動きは KayKit のまま使い、髪・かぶり物・マント・肩掛け・前掛けと色だけを自作する。
@@ -90,8 +92,8 @@ export type KayKitBase = 'rogue' | 'mage' | 'barbarian';
 export interface KayKitLook {
   /** 土台の体（rogue 短い上着と革の籠手・mage 膝までの長衣・barbarian がっしりした体と毛皮の縁） */
   readonly base: KayKitBase;
-  /** 頭（knight 髪を外した頭・barbarian ひげの頭。省くと knight） */
-  readonly head?: 'knight' | 'barbarian';
+  /** 顔の頭（knight・rogue・mage は髪と一体の頭、barbarian ひげのはげ頭。省くと knight） */
+  readonly head?: KayKitHead;
   /** 背丈の倍率（1 が大人。体を小さくする時は、頭も同じ割合で小さくなる） */
   readonly height?: number;
   /** 肩幅の倍率（1 がふつう） */
@@ -110,8 +112,16 @@ export interface KayKitLook {
   readonly pants?: number;
   /** 靴の色 */
   readonly boots?: number;
+  /** 髪の案（設定の「ユナの髪：A／B」で選ぶ。ある時は hair の代わりに使う） */
+  readonly hairVariants?: { readonly a: KayKitLook['hair']; readonly b: KayKitLook['hair'] };
   /** 髪の形と色（束のある形。short 短い・tied 後ろで結ぶ・bun まとめ髪・cropped 刈り込み）。ひげの頭では、ひげも同じ色 */
-  readonly hair: { readonly style: 'short' | 'tied' | 'bun' | 'cropped'; readonly color: number };
+  readonly hair: {
+    /** 作者が頭と一体で作った髪のどれを使うか（knight 短い・rogue 中くらいの長さ・mage 長い） */
+    readonly kit: Exclude<KayKitHead, 'barbarian'>;
+    readonly color: number;
+    /** 自作で足す、なめらかな大きな塊（bun 後ろのまとめ・twinTails 二つ結びのおさげ・bob 肩までの髪・ribbon リボン） */
+    readonly extras?: readonly ('bun' | 'twinTails' | 'bob' | 'ribbon')[];
+  };
   /** かぶり物（hood 頭巾・hat 帽子） */
   readonly headwear?: { readonly kind: 'hood' | 'hat'; readonly color: number };
   /** 背のマント・外套（long 足もとまで・short 腰まで）。hoodDown で首の後ろに下ろした頭巾を付ける */
@@ -125,7 +135,7 @@ export interface KayKitLook {
   /** スカート（腰から膝の上まで。脚の動きに付いてくる） */
   readonly skirt?: { readonly color: number };
   /** 顔（目は顔の面に描く白目と瞳。省くと落ち着いた大人の目）。eyes: 'large' で少し大きくまつ毛のある目、iris で瞳の色、round で輪郭を丸く、blush で頬の赤み */
-  readonly face?: { readonly eyes?: 'large'; readonly iris?: number; readonly round?: boolean; readonly blush?: boolean };
+  readonly face?: { readonly eyes?: 'large'; readonly iris?: number; readonly round?: boolean; readonly blush?: boolean; readonly thinBrows?: boolean };
 }
 
 // 色は、彩度を落とした土の色（布・革・くすんだ金属）。人形は描く時にさらに彩度を落とす（puppet.ts の muted）。
@@ -148,7 +158,7 @@ const TOUMA_KAYKIT: KayKitLook = {
   pants: 0x2e2c2c,
   boots: LEATHER_DARK,
   // 髪は、外套と分かれて見えるように、真っ黒より明るく暖かい黒（茶に寄せた黒。髪の作り直しと観客の検査）
-  hair: { style: 'short', color: 0x382c28 },
+  hair: { kit: 'knight', color: 0x382c28 },
   // 外套は、今の人形の濃紺より少し明るく（夜の部屋で、髪と外套が1つの黒い塊に見えないように。観客の検査）
   cloak: { color: 0x34405a, length: 'long', hoodDown: true },
   accent: 0x5c7f80,
@@ -222,6 +232,7 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
     scarf: LEATHER_DARK,
     kaykit: {
       base: 'rogue',
+      head: 'rogue',
       height: 0.86,
       width: 0.94,
       skin: 0xc8a993,
@@ -230,11 +241,13 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
       leather: 0x6a4e38,
       pants: 0x6a5446,
       boots: 0x4e3a2e,
-      hair: { style: 'tied', color: 0x1e1a1e },
+      hair: { kit: 'rogue', color: 0x1e1a1e, extras: ['twinTails'] },
+      // A: 二つ結びのおさげ・B: 肩までの髪とリボン（設計書は「黒髪をひとつに結ぶ（仮）」。発注者の依頼で2案を作り、設定で切り替える）
+      hairVariants: { a: { kit: 'rogue', color: 0x1e1a1e, extras: ['twinTails'] }, b: { kit: 'rogue', color: 0x1e1a1e, extras: ['bob', 'ribbon'] } },
       skirt: { color: 0xa88f74 },
       apron: { color: 0x6e5038 },
       accent: 0xa4503a,
-      face: { eyes: 'large', iris: 0x553624, round: true, blush: true },
+      face: { eyes: 'large', iris: 0x553624, round: true, blush: true, thinBrows: true },
     },
   },
   /** テオ: 十七歳、小柄、柔らかい茶髪、時守の濃紺に白い襟 */
@@ -292,6 +305,7 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
     sleeves: 'rolled',
     kaykit: {
       base: 'mage',
+      head: 'mage',
       height: 0.97,
       skin: 0xc2a18a,
       cloth: 0x6b4a42,
@@ -300,7 +314,8 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
       leather: 0x4a3530,
       pants: 0x4a3530,
       boots: 0x3e2e26,
-      hair: { style: 'bun', color: 0x3a2a22 },
+      hair: { kit: 'mage', color: 0x3a2a22, extras: ['bun'] },
+      face: { thinBrows: true },
       mantle: 0x6a604e,
       apron: { color: 0xbdb091, bib: true },
     },
@@ -333,7 +348,7 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
       leather: LEATHER,
       pants: 0x4a3e30,
       boots: LEATHER_DARK,
-      hair: { style: 'cropped', color: 0x5a4430 },
+      hair: { kit: 'knight', color: 0x5a4430 },
       accent: 0x8a7040,
     },
   },
