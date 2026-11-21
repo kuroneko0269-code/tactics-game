@@ -5,7 +5,8 @@
  *
  * 出来るもの（どれも jpg）:
  *   views.jpg（4人を正面・横・後ろ）・views-current.jpg（今の人形で同じ並び）・views-plain.jpg（素材そのままの陰影）・
- *   motions-<人物>.jpg（仕草ごとの、動きの途中の姿）・parts.jpg（自作の部品の見本）・skeletons.jpg（--skeletons を渡した時）
+ *   motions-<人物>.jpg（仕草ごとの、動きの途中の姿）・parts.jpg（自作の部品の見本）・skeletons.jpg（--skeletons を渡した時）・
+ *   head-<人物>.jpg（頭と肩を5つの向きから）・body-<人物>.jpg（全身を5つの向きから）。--only=head,views のように、撮る物を名前の頭で選べる
  */
 import { createServer } from 'vite';
 import { chromium } from 'playwright';
@@ -32,7 +33,19 @@ const shots = [
   ['motions-father', 'mode=motions&who=father&w=1400&h=440'],
   ['motions-mother', 'mode=motions&who=mother&w=1400&h=440'],
   ['parts', 'mode=parts&w=1400&h=440'],
+  ...['touma', 'yuna', 'father', 'mother'].flatMap((who) => [
+    [`head-${who}`, `mode=closeup&who=${who}&w=1500&h=420`],
+    [`body-${who}`, `mode=closeup&who=${who}&frame=body&w=1500&h=520`],
+  ]),
+  ['head-yuna-b', 'mode=closeup&who=yuna&w=1500&h=420&yh=b'],
+  ...['touma', 'yuna', 'father', 'mother'].flatMap((who) => [
+    [`dinner-${who}`, `mode=closeup&who=${who}&w=1500&h=420&light=dinner`],
+    [`night-${who}`, `mode=closeup&who=${who}&w=1500&h=420&light=night`],
+  ]),
+  ['body-yuna-b', 'mode=closeup&who=yuna&frame=body&w=1500&h=520&yh=b'],
 ];
+const only = args.only ? args.only.split(',') : null;
+for (let i = shots.length - 1; i >= 0; i--) if (only && !only.some((o) => shots[i][0].startsWith(o))) shots.splice(i, 1);
 if (args.skeletons) shots.push(['skeletons', `mode=skeleton&w=1000&h=440&dir=/@fs${path.resolve(args.skeletons)}/`]);
 for (const [name, query] of shots) {
   const [w, h] = [Number(/w=(\d+)/.exec(query)[1]), Number(/h=(\d+)/.exec(query)[1])];

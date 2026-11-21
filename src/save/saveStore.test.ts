@@ -173,6 +173,7 @@ describe('端末ごとの設定（序章に足りない仕組み）', () => {
       storyFont: 'shipporiAntique',
       textSize: 'large',
       puppetKind: 'current',
+      yunaHair: 'b',
     } as const;
     store.save(saved);
     expect(store.load()).toEqual(saved);
@@ -184,6 +185,9 @@ describe('端末ごとの設定（序章に足りない仕組み）', () => {
     expect(normalizeSettings({ storyFont: 'gothic', textSize: 'huge', puppetKind: 3 })).toEqual(DEFAULT_SETTINGS);
     // 外した「人形の描き方」（ドット風）が残った設定も、読み込める
     expect(normalizeSettings({ puppetStyle: 'pixel' })).toEqual(DEFAULT_SETTINGS);
+    // ユナの髪の案（髪の作り直し）: 書体のヒラギノ明朝も読める。知らない値は初期値
+    expect(normalizeSettings({ yunaHair: 'b', storyFont: 'hiraginoMincho' })).toEqual({ ...DEFAULT_SETTINGS, yunaHair: 'b', storyFont: 'hiraginoMincho' });
+    expect(normalizeSettings({ yunaHair: 'c' }).yunaHair).toBe(DEFAULT_SETTINGS.yunaHair);
     text = '{壊れた';
     expect(store.load()).toEqual(DEFAULT_SETTINGS);
   });

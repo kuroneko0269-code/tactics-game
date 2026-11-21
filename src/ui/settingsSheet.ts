@@ -1,4 +1,4 @@
-import { PUPPET_KINDS, STORY_FONTS, TEXT_SIZES, type GameSettings } from '../save/saveStore';
+import { PUPPET_KINDS, STORY_FONTS, TEXT_SIZES, YUNA_HAIRS, type GameSettings } from '../save/saveStore';
 import { el, screenButton, showSheet } from './dom';
 import { TEXT } from './text';
 
@@ -43,9 +43,22 @@ export function showSettingsSheet(root: HTMLElement, current: () => GameSettings
     );
     if (s.muted) mute.append(el('p', 'screen-note', TEXT.settings.mutedNote));
     /** 選び肢のボタンの列（押されているものが今の値）。読み上げの名前は「文字の大きさ: 中」のように、どの列かを添える */
-    const choices = <T extends string>(group: string, list: readonly T[], labels: Readonly<Record<T, string>>, value: T, pick: (v: T) => void, key: string) => {
+    const choices = <T extends string>(
+      group: string,
+      list: readonly T[],
+      labels: Readonly<Record<T, string>>,
+      value: T,
+      pick: (v: T) => void,
+      key: string,
+      notes: Readonly<Partial<Record<string, string>>> = {},
+    ) => {
       const row = el('div', `settings-row settings-choices settings-${key}`);
-      row.append(el('span', 'settings-label', group));
+      const label = el('span', 'settings-label', group);
+      for (const v of list) {
+        const note = notes[v];
+        if (note) label.append(el('span', 'settings-label-note', TEXT.settings.choiceNote(labels[v], note)));
+      }
+      row.append(label);
       const buttons = el('div', 'settings-choice-buttons');
       for (const v of list) {
         const b = screenButton(labels[v], () => pick(v), { className: 'settings-choice', pressed: v === value });
@@ -58,10 +71,18 @@ export function showSettingsSheet(root: HTMLElement, current: () => GameSettings
     };
     const look = el('div', 'settings-look');
     look.append(
-      choices(TEXT.settings.font, STORY_FONTS, TEXT.settings.fonts, s.storyFont, (v) => set({ storyFont: v }), 'font'),
+      choices(TEXT.settings.font, STORY_FONTS, TEXT.settings.fonts, s.storyFont, (v) => set({ storyFont: v }), 'font', TEXT.settings.fontNotes),
       choices(TEXT.settings.textSize, TEXT_SIZES, TEXT.settings.textSizes, s.textSize, (v) => set({ textSize: v }), 'text-size'),
     );
-    if (s.checkTools) look.append(choices(TEXT.settings.puppetKind, PUPPET_KINDS, TEXT.settings.puppetKinds, s.puppetKind, (v) => set({ puppetKind: v }), 'puppet'));
+    if (s.checkTools) {
+      // 人形とユナの髪（確認用の機能）は、2つの列を1段に並べる（欄が画面の高さに収まるように）
+      const pair = el('div', 'settings-pair');
+      pair.append(
+        choices(TEXT.settings.puppetKind, PUPPET_KINDS, TEXT.settings.puppetKinds, s.puppetKind, (v) => set({ puppetKind: v }), 'puppet'),
+        choices(TEXT.settings.yunaHair, YUNA_HAIRS, TEXT.settings.yunaHairs, s.yunaHair, (v) => set({ yunaHair: v }), 'yuna-hair'),
+      );
+      look.append(pair);
+    }
     body.append(
       look,
       volumeRow,

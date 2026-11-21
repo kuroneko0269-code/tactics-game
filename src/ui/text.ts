@@ -172,11 +172,16 @@ export const TEXT = {
     checkNote: '入にすると、物語の場面を選ぶ・物語の戦闘を勝ったことにする、が使えます（確かめるための機能）',
     // 見た目の見本の2回目: 書体と文字の大きさ（いつでも）。KayKit の人形の試し: 人形（確認用の機能が入の時だけ）
     font: '書体',
-    fonts: { zenOldMincho: 'Zen Old Mincho', shipporiAntique: 'Shippori Antique', shipporiMincho: 'Shippori Mincho' },
+    fonts: { zenOldMincho: 'Zen Old Mincho', shipporiAntique: 'Shippori Antique', shipporiMincho: 'Shippori Mincho', hiraginoMincho: 'ヒラギノ明朝' },
+    /** 書体の選び肢に添える短い説明（端末に入っている書体を使うもの） */
+    fontNotes: { hiraginoMincho: 'iPhone・iPad・Mac だけ' } as Readonly<Partial<Record<string, string>>>,
+    choiceNote: (name: string, note: string) => `${name}は${note}`,
     textSize: '文字の大きさ',
     textSizes: { small: '小', medium: '中', large: '大' },
     puppetKind: '人形',
     puppetKinds: { kaykit: 'KayKit', current: '今の人形' },
+    yunaHair: 'ユナの髪',
+    yunaHairs: { a: 'A おさげ', b: 'B リボン' },
     choiceLabel: (group: string, choice: string) => `${group}: ${choice}`,
     close: '閉じる',
   },

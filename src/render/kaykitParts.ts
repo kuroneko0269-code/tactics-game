@@ -3,7 +3,7 @@ import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { KayKitLook } from '../data/story/looks';
 
 /**
- * KayKit の体に付ける自作の部品（KayKit の人形の試し）: 髪（束のある形）・頭巾・帽子・肩掛け・マント（外套）・前掛け。
+ * KayKit の体に付ける自作の部品（KayKit の人形の試し）: 頭巾・帽子・肩掛け・マント（外套）・前掛け・スカート。髪は src/render/kaykitHair.ts。
  * 形は KayKit の絵柄に合わせる（面の少ない、角を丸めた形。色は1つの部品に1色で、上から下へ少し暗くなる）。
  *
  * 座標は KayKit の体の「骨を付けた時の姿勢」の座標（足もとが 0、正面が +z、背丈がおよそ 2.3。頭の骨は y 1.241）。
@@ -11,21 +11,34 @@ import type { KayKitLook } from '../data/story/looks';
  * 部品は骨に付けて（形の各点に骨の番号と重さを持たせて）、体の形と1つにまとめるので、動きに付いてくる。
  */
 
-/** 部品の色の区画（色の画像の、素材の体が使っていない一番下の段。src/render/kaykit.ts の色の画像と合わせる） */
+/**
+ * 部品の色の区画（色の画像の、素材の体が使っていない一番下の段。src/render/kaykit.ts の色の画像と合わせる）。
+ * 3つ目に 'l'・'r' がある区画は、区画の左半分・右半分だけを使う（1つの区画に2色を入れる）
+ */
 export const PART_CELLS = {
-  hair: [0, 3],
+  hair: [0, 3, 'l'],
+  hairLight: [0, 3, 'r'],
   cloak: [1, 3],
-  apron: [2, 3],
-  mantle: [3, 3],
-  headwear: [4, 3],
+  apron: [2, 3, 'l'],
+  // 白目と瞳（顔の面に描く目）
+  sclera: [2, 3, 'r'],
+  mantle: [3, 3, 'l'],
+  // 目の光（ユナの目に入れる小さな白い点）
+  shine: [3, 3, 'r'],
+  headwear: [4, 3, 'l'],
+  blush: [4, 3, 'r'],
   accent: [5, 3],
-  cloakInner: [6, 3],
-  hairDark: [7, 3],
-} as const satisfies Record<string, readonly [number, number]>;
+  cloakInner: [6, 3, 'l'],
+  skirt: [6, 3, 'r'],
+  hairDark: [7, 3, 'l'],
+  iris: [7, 3, 'r'],
+  // 素材の頭の目の区画（まつ毛を目と同じ色にする）
+  eye: [2, 0],
+} as const satisfies Record<string, readonly [number, number] | readonly [number, number, 'l' | 'r']>;
 export type PartCell = keyof typeof PART_CELLS;
 
 /** 骨の番号（KayKit の5人で共通の骨の順番） */
-export const BONE = { hips: 1, spine: 2, chest: 3, head: 14 } as const;
+export const BONE = { hips: 1, spine: 2, chest: 3, head: 14, upperlegL: 15, upperlegR: 19 } as const;
 
 /** 1つの部品: 形と、付く骨（2つまで。重さは高さで決める） */
 export interface PartPiece {
@@ -40,7 +53,7 @@ type V3 = readonly [number, number, number];
  * 形に、色の区画の UV と骨を付ける。UV の縦は、形の上ほど区画の上（明るい所）を指す（素材と同じ、上から下へ暗くなる塗り）。
  * bones が2つの時は、y が lowY 以下で2つ目の骨へ重さを移す（長いマントの裾を腰に付けて、歩く時に足と離れすぎないように）
  */
-function finish(
+export function finish(
   g: THREE.BufferGeometry,
   cell: PartCell,
   bones: { a: number; b?: number; topY?: number; lowY?: number },
@@ -54,7 +67,10 @@ function finish(
   const n = pos.count;
   geo.computeBoundingBox();
   const box = geo.boundingBox!;
-  const [cx, cy] = PART_CELLS[cell];
+  const ref: readonly (number | string)[] = PART_CELLS[cell];
+  const [cx, cy] = ref as readonly [number, number];
+  const side = ref[2];
+  const u = side === 'l' ? 0.25 : side === 'r' ? 0.75 : 0.45;
   const uv = new Float32Array(n * 2);
   const si = new Uint16Array(n * 4);
   const sw = new Float32Array(n * 4);
@@ -62,7 +78,7 @@ function finish(
   for (let i = 0; i < n; i++) {
     const y = pos.getY(i);
     const t = (box.max.y - y) / span;
-    uv[i * 2] = (cx + 0.45) / 8;
+    uv[i * 2] = (cx + u) / 8;
     uv[i * 2 + 1] = (cy + 0.12 + t * 0.76) / 4;
     si[i * 4] = bones.a;
     if (bones.b !== undefined && bones.topY !== undefined && bones.lowY !== undefined) {
@@ -108,7 +124,7 @@ function bothSides(g: THREE.BufferGeometry, inset = 0.012): THREE.BufferGeometry
 }
 
 /** 面を、重心が keep を満たすものだけ残す（髪の生え際・頭巾の顔の開き） */
-function clip(g: THREE.BufferGeometry, keep: (x: number, y: number, z: number) => boolean): THREE.BufferGeometry {
+export function clip(g: THREE.BufferGeometry, keep: (x: number, y: number, z: number) => boolean): THREE.BufferGeometry {
   const src = g.index ? g.toNonIndexed() : g;
   const p = src.attributes.position!;
   const kept: number[] = [];
@@ -125,7 +141,7 @@ function clip(g: THREE.BufferGeometry, keep: (x: number, y: number, z: number) =
 }
 
 /** 角を丸めた箱のような殻（球を、指数 e の超楕円体に寄せる。e が小さいほど箱に近い） */
-function roundedShell(center: V3, radii: V3, e = 0.6, ws = 14, hs = 10): THREE.BufferGeometry {
+export function roundedShell(center: V3, radii: V3, e = 0.6, ws = 14, hs = 10): THREE.BufferGeometry {
   const g = new THREE.SphereGeometry(1, ws, hs);
   const p = g.attributes.position!;
   const f = (v: number) => Math.sign(v) * Math.pow(Math.abs(v), e);
@@ -133,124 +149,6 @@ function roundedShell(center: V3, radii: V3, e = 0.6, ws = 14, hs = 10): THREE.B
     p.setXYZ(i, center[0] + f(p.getX(i)) * radii[0], center[1] + f(p.getY(i)) * radii[1], center[2] + f(p.getZ(i)) * radii[2]);
   }
   return g;
-}
-
-/**
- * 髪の束: 根もとが太く先が細い、角を丸めた花びらのような形（面の少ない玉を伸ばし、先の側を細くする）。
- * 根もと base から dir の向きへ len だけ伸ばす。w は幅、t は厚み。KayKit の髪のように、束を大きな面で見せる（尖った針の形にしない）
- */
-function lock(base: V3, dir: V3, len: number, w: number, t = w * 0.55, twist = 0): THREE.BufferGeometry {
-  const g = new THREE.IcosahedronGeometry(0.5, 1);
-  const p = g.attributes.position!;
-  for (let i = 0; i < p.count; i++) {
-    const y = p.getY(i);
-    // 下（先）へ行くほど細く（-0.5 で 0.35 倍）
-    const k = y < 0 ? 1 + y * 1.3 : 1;
-    p.setXYZ(i, p.getX(i) * k, y, p.getZ(i) * k);
-  }
-  g.scale(w, len, t);
-  g.rotateY(twist);
-  g.translate(0, -len * 0.42, 0);
-  const d = new THREE.Vector3(...dir).normalize();
-  const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, -1, 0), d);
-  g.applyQuaternion(q);
-  g.translate(base[0], base[1], base[2]);
-  return g;
-}
-
-/** 頭の中心と大きさ（素材の頭の大きさ。Knight と Barbarian で同じ） */
-const HEAD_C: V3 = [0, 1.8, -0.01];
-
-/** 髪の土台（頭の上と後ろを覆う殻）。生え際は、額は高く、横は耳の上、後ろは襟足まで */
-function hairCap(style: KayKitLook['hair']['style']): THREE.BufferGeometry {
-  const thin = style === 'cropped' ? 0.94 : 1;
-  const shell = roundedShell([HEAD_C[0], HEAD_C[1] + 0.02, HEAD_C[2] - 0.015], [0.585 * thin, 0.535 * thin, 0.55 * thin], 0.62, 16, 12);
-  const front = style === 'cropped' ? 2.06 : style === 'bun' ? 2.08 : 2.0;
-  return clip(shell, (x, y, z) => {
-    // 生え際の高さ: 前（z が大きい）ほど高い
-    const line = z > 0.25 ? front : z > -0.1 ? 1.62 + ((z + 0.1) / 0.35) * (front - 1.62) : style === 'cropped' ? 1.5 : 1.4;
-    // 耳のまわりは空ける
-    if (Math.abs(x) > 0.48 && y < 1.58 && z > -0.05) return false;
-    return y > line;
-  });
-}
-
-/**
- * 髪（束のある形）。数種類: short 短い（前髪を片側へ流す）・tied 後ろで結ぶ（前髪を分け、耳の前に長い束）・
- * bun まとめ髪（前髪なしで額を出し、真ん中で分けて、頭の上の後ろに丸いまとめ）・cropped 刈り込み（短い束だけ）。
- * 正面から見た輪郭が人物ごとに違うように、前髪と耳の前の束の形を変える
- */
-export function hairParts(look: KayKitLook): PartPiece[] {
-  const style = look.hair.style;
-  const geos: THREE.BufferGeometry[] = [hairCap(style)];
-  const ties: THREE.BufferGeometry[] = [];
-  // 頭の中を埋める玉（髪を切り取った頭の、後ろと上の空いた所から、向こう側が透けて見えないように）
-  const fill = new THREE.SphereGeometry(1, 10, 8);
-  fill.scale(0.5, 0.5, 0.5);
-  fill.translate(0, 1.8, -0.1);
-  if (style === 'cropped') {
-    // 刈り込んだ髪: 額の上の短い束だけ
-    for (const x of [-0.24, 0, 0.24]) geos.push(lock([x, 2.2, 0.32], [x * 0.5, 0.2, 1], 0.2, 0.28, 0.12));
-    // 頭頂と後ろの短い束（つるりとした帽子に見えないように。観客の検査）
-    for (const [x, z] of [
-      [-0.3, -0.1],
-      [0.3, -0.1],
-      [0, -0.3],
-      [-0.2, -0.45],
-      [0.2, -0.45],
-    ] as const)
-      geos.push(lock([x, 2.18 - (z < -0.3 ? 0.14 : 0), z], [x, -0.2, -1], 0.18, 0.22, 0.1));
-  } else if (style === 'short') {
-    // 前髪を、向かって右へ流す（大きな束を重ねる）
-    for (const [x, y, lean] of [
-      [-0.34, 2.16, 0.55],
-      [-0.12, 2.2, 0.6],
-      [0.1, 2.18, 0.5],
-      [0.32, 2.12, 0.2],
-    ] as const)
-      geos.push(lock([x, y, 0.36], [lean, -1, 0.55], 0.34, 0.3, 0.13, lean * 0.5));
-    // 耳の上の束・頭頂から後ろへ流れる束・襟足
-    for (const s of [-1, 1]) geos.push(lock([s * 0.5, 1.98, 0.12], [s * 0.25, -1, 0.1], 0.28, 0.24, 0.12));
-    geos.push(lock([-0.2, 2.3, 0.05], [-0.4, 0.15, -1], 0.36, 0.3, 0.13));
-    geos.push(lock([0.18, 2.31, -0.02], [0.45, 0.1, -1], 0.36, 0.3, 0.13));
-    for (const x of [-0.24, 0.02, 0.26]) geos.push(lock([x, 1.66, -0.48], [x * 0.6, -1, -0.3], 0.3, 0.26, 0.12));
-    // 後ろ頭の束（後ろから見て、兜をかぶったように見えないように。観客の検査）
-    for (const x of [-0.34, -0.1, 0.14, 0.36]) geos.push(lock([x, 2.12, -0.5], [x * 0.5, -1, -0.45], 0.36, 0.24, 0.12, x));
-    for (const s of [-1, 1]) geos.push(lock([s * 0.52, 1.86, -0.22], [s * 0.35, -1, -0.25], 0.26, 0.22, 0.11));
-  } else if (style === 'tied') {
-    // 前髪を真ん中で分けて左右へ流し、耳の前に長い束を垂らす
-    for (const s of [-1, 1]) {
-      geos.push(lock([s * 0.1, 2.2, 0.38], [s * 0.9, -1, 0.5], 0.34, 0.3, 0.12, s * 0.4));
-      geos.push(lock([s * 0.32, 2.1, 0.32], [s * 0.4, -1, 0.35], 0.3, 0.26, 0.12));
-      geos.push(lock([s * 0.5, 1.96, 0.18], [s * 0.08, -1, 0.06], 0.46, 0.22, 0.12));
-    }
-    // 後ろでひとつに結ぶ（結い紐は差し色）。束は首の後ろへ垂らす
-    const tie = new THREE.TorusGeometry(0.06, 0.03, 5, 8);
-    tie.rotateX(0.35);
-    tie.translate(0, 1.84, -0.6);
-    ties.push(tie);
-    geos.push(lock([0, 1.84, -0.62], [0, -1, -0.5], 0.5, 0.26, 0.2));
-    // 後ろ頭から結い目へ集まる束（後ろから見て、兜をかぶったように見えないように。観客の検査）
-    for (const s of [-1, 1]) {
-      geos.push(lock([s * 0.36, 2.2, -0.36], [-s * 0.55, -1, -0.5], 0.4, 0.24, 0.11));
-      geos.push(lock([s * 0.5, 1.98, -0.3], [-s * 0.7, -0.6, -0.6], 0.36, 0.22, 0.11));
-    }
-    geos.push(lock([0.04, 1.7, -0.78], [0.12, -1, -0.15], 0.38, 0.2, 0.16));
-  } else {
-    // まとめ髪: 前髪なし。真ん中で分けた髪を、こめかみから後ろへなでつけ、頭の上の後ろに丸いまとめ
-    for (const s of [-1, 1]) {
-      geos.push(lock([s * 0.14, 2.24, 0.34], [s * 1, -0.35, -0.15], 0.4, 0.34, 0.12));
-      geos.push(lock([s * 0.46, 2.02, 0.16], [s * 0.2, -0.6, -1], 0.36, 0.26, 0.12));
-    }
-    const bun = new THREE.IcosahedronGeometry(0.25, 1);
-    bun.scale(1, 0.85, 0.9);
-    bun.translate(0, 2.28, -0.42);
-    geos.push(bun);
-  }
-  const out: PartPiece[] = geos.map((g) => finish(g, 'hair', { a: BONE.head }, true));
-  out.push(finish(fill, 'hairDark', { a: BONE.head }, true));
-  for (const t of ties) out.push(finish(t, 'accent', { a: BONE.head }, true));
-  return out;
 }
 
 /** 頭巾（かぶる）と帽子 */
@@ -332,15 +230,53 @@ export function mantleParts(look: KayKitLook): PartPiece[] {
   return [finish(bothSides(g), 'mantle', { a: BONE.chest }, false)];
 }
 
+/**
+ * スカート（腰から膝の上まで、裾が広がる）。上の縁は腰の骨に、裾は左右の腿の骨にも付けて、歩く・座る時に脚に付いてくるようにする
+ */
+export function skirtParts(look: KayKitLook): PartPiece[] {
+  if (!look.skirt) return [];
+  const b = BODY_SIZE[look.base];
+  const top = 0.8;
+  const bottom = 0.34;
+  const g = new THREE.CylinderGeometry(b.halfW - 0.02, b.halfW + 0.15, top - bottom, 16, 3, true);
+  g.scale(1, 1, 0.92);
+  // 裾に、ゆるい波（布のひだ）を付ける
+  const p = g.attributes.position!;
+  for (let i = 0; i < p.count; i++) {
+    const y = p.getY(i);
+    const k = (0.5 - y / (top - bottom)) * 0.5;
+    const a = Math.atan2(p.getX(i), p.getZ(i));
+    const r = 1 + Math.sin(a * 8) * 0.035 * k;
+    p.setXYZ(i, p.getX(i) * r, y, p.getZ(i) * r);
+  }
+  g.translate(0, (top + bottom) / 2, (b.front + b.back) / 2);
+  const piece = finish(bothSides(g), 'skirt', { a: BONE.hips }, false);
+  // 裾ほど腿の骨へ重さを移す（右と左は x の向きで分け、前と後ろの真ん中は両方の腿へ）
+  const pos = piece.geometry.attributes.position!;
+  const si = piece.geometry.attributes.skinIndex!;
+  const sw = piece.geometry.attributes.skinWeight!;
+  for (let i = 0; i < pos.count; i++) {
+    const down = Math.min(1, Math.max(0, (top - 0.08 - pos.getY(i)) / (top - 0.08 - bottom)));
+    const leg = down * 0.75;
+    const x = pos.getX(i);
+    const l = Math.min(1, Math.max(0, 0.5 + x / 0.3));
+    si.setXYZW(i, BONE.hips, BONE.upperlegL, BONE.upperlegR, 0);
+    sw.setXYZW(i, 1 - leg, leg * l, leg * (1 - l), 0);
+  }
+  return [piece];
+}
+
 /** 前掛け（bib で胸当てつき）と、腰の紐 */
 export function apronParts(look: KayKitLook): PartPiece[] {
   const a = look.apron;
   if (!a) return [];
   const b = BODY_SIZE[look.base];
-  const r = b.front + 0.06;
+  // スカートの上に掛ける時は、スカートより外へ、短めに
+  const over = look.skirt !== undefined;
+  const r = b.front + (over ? 0.08 : 0.06);
   const top = 0.74;
-  const bottom = Math.max(0.3, b.hem - 0.04);
-  const skirt = new THREE.CylinderGeometry(r, r + 0.08, top - bottom, 10, 2, true, -0.85, 1.7);
+  const bottom = over ? 0.45 : Math.max(0.3, b.hem - 0.04);
+  const skirt = new THREE.CylinderGeometry(r, r + (over ? 0.12 : 0.08), top - bottom, 10, 2, true, -0.85, 1.7);
   skirt.translate(0, (top + bottom) / 2, 0.0);
   const pieces: PartPiece[] = [finish(bothSides(skirt), 'apron', { a: BONE.hips }, false)];
   const band = new THREE.CylinderGeometry(r - 0.01, r - 0.01, 0.06, 14, 1, true);
@@ -356,7 +292,7 @@ export function apronParts(look: KayKitLook): PartPiece[] {
 
 /** 首の布（差し色。外套のない人物の差し色を見せる所） */
 export function scarfParts(look: KayKitLook): PartPiece[] {
-  if (look.accent === undefined || look.cloak || look.hair.style === 'tied') return [];
+  if (look.accent === undefined || look.cloak || (look.hair.extras?.length ?? 0) > 0) return [];
   const b = BODY_SIZE[look.base];
   const g = new THREE.TorusGeometry(0.25, 0.06, 5, 12);
   g.rotateX(Math.PI / 2);
@@ -366,6 +302,6 @@ export function scarfParts(look: KayKitLook): PartPiece[] {
 
 /** 人物の自作の部品をすべて */
 export function customParts(look: KayKitLook): PartPiece[] {
-  // 頭巾をかぶる時は、髪を作らない（頭巾の中に隠れるため）
-  return [...(look.headwear?.kind === 'hood' ? [] : hairParts(look)), ...headwearParts(look), ...cloakParts(look), ...mantleParts(look), ...apronParts(look), ...scarfParts(look)];
+  // 髪は src/render/kaykitHair.ts（頭巾をかぶる時は作らない）
+  return [...headwearParts(look), ...cloakParts(look), ...mantleParts(look), ...skirtParts(look), ...apronParts(look), ...scarfParts(look)];
 }

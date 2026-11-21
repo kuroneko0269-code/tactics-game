@@ -148,14 +148,19 @@ export interface GameSettings {
   readonly textSize: TextSize;
   /** 人形（KayKit の人形の試し: KayKit・今の人形。確認用の機能が入の時だけ、設定の欄に出す。KayKit は序章の場面4だけに効く） */
   readonly puppetKind: PuppetKind;
+  /** ユナの髪の案（A 二つ結びのおさげ・B 肩までの髪とリボン。確認用の機能が入の時だけ、設定の欄に出す。KayKit の人形だけに効く） */
+  readonly yunaHair: YunaHair;
 }
 
-export const STORY_FONTS = ['zenOldMincho', 'shipporiAntique', 'shipporiMincho'] as const;
+/** hiraginoMincho は同梱せず、端末に入っている書体を使う（iPhone・iPad・Mac。無い端末では Zen Old Mincho で出る） */
+export const STORY_FONTS = ['zenOldMincho', 'shipporiAntique', 'shipporiMincho', 'hiraginoMincho'] as const;
 export type StoryFont = (typeof STORY_FONTS)[number];
 export const TEXT_SIZES = ['small', 'medium', 'large'] as const;
 export type TextSize = (typeof TEXT_SIZES)[number];
 export const PUPPET_KINDS = ['kaykit', 'current'] as const;
 export type PuppetKind = (typeof PUPPET_KINDS)[number];
+export const YUNA_HAIRS = ['a', 'b'] as const;
+export type YunaHair = (typeof YUNA_HAIRS)[number];
 
 export const DEFAULT_SETTINGS: GameSettings = {
   volume: 70,
@@ -166,6 +171,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   storyFont: 'zenOldMincho',
   textSize: 'medium',
   puppetKind: 'kaykit',
+  yunaHair: 'a',
 };
 
 /** 決まった選び肢のどれかなら、その値。違えば初期値 */
@@ -194,6 +200,7 @@ export function normalizeSettings(raw: unknown): GameSettings {
     textSize: oneOf(TEXT_SIZES, r.textSize, DEFAULT_SETTINGS.textSize),
     // 前の版の「人形の描き方」（puppetStyle）は外した。残っていても読まない
     puppetKind: oneOf(PUPPET_KINDS, r.puppetKind, DEFAULT_SETTINGS.puppetKind),
+    yunaHair: oneOf(YUNA_HAIRS, r.yunaHair, DEFAULT_SETTINGS.yunaHair),
   };
 }
 
