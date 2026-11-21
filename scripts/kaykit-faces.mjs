@@ -1,11 +1,10 @@
 /**
  * KayKit の人形の試し: 場面4の実際の画面（夕食と夜の光）で、人物の顔を寄せた写真を撮る（目・鼻・髪の確かめ）。
  *
- *   node scripts/kaykit-faces.mjs --out=フォルダ [--root=別の版の写し] [--yh=b] [--puppet=current]
+ *   node scripts/kaykit-faces.mjs --out=フォルダ [--root=別の版の写し] [--puppet=current]
  *
  * スマホ縦向き（画素の密度 4）で「場面を選ぶ」から場面4を始め、夕食（4-13）と夜（4-18）の行で画面を撮り、
  * 映っている人物（トウマ・ユナ・父・母）の頭のまわりを切り抜いて、1枚に並べる（faces-<所>.png）。全体の画（whole-<所>.png）も残す。
- * --yh=b で、ユナの髪を案 B にする（設定の「ユナの髪」。確認用の機能を入にして選ぶ）。
  */
 import { createServer } from 'vite';
 import { chromium, devices } from 'playwright';
@@ -45,7 +44,6 @@ await until(() => window.__tactics?.screen() === 'title');
 await press(text.settings.open);
 await press(text.settings.checkOff);
 if (args.puppet) await press(text.settings.choiceLabel(text.settings.puppetKind, text.settings.puppetKinds[args.puppet]));
-if (args.yh && text.settings.yunaHairs) await press(text.settings.choiceLabel(text.settings.yunaHair, text.settings.yunaHairs[args.yh]));
 await press(text.settings.close);
 await press(text.title.story);
 await until(() => window.__tactics.screen() === 'story-menu');

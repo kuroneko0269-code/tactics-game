@@ -13,7 +13,7 @@
     <script type="module">
       // KayKit の人形の試し: 作り分けと動きの確かめの写真を撮るための、開発用サーバーだけで開くページ（scripts/kaykit-lineup.mjs）。
       // ?mode=views 4人を正面・横・後ろ / mode=motions 仕草ごとの姿 / mode=parts 自作の部品の見本 / mode=skeleton 骸骨
-      // &puppet=current で今の人形 &shade=plain で素材そのままの陰影 &yh=b でユナの髪を案 B に &light=dinner|night で場面4の光
+      // &puppet=current で今の人形 &shade=plain で素材そのままの陰影 &light=dinner|night で場面4の光
       import * as THREE from 'three';
       import { createKayKitPuppet, loadKayKit, setKayKitShading } from '/src/render/kaykit.ts';
       import { createPuppet } from '/src/render/puppet.ts';
@@ -54,7 +54,7 @@
       await loadKayKit();
       const make = (id, overrides) => {
         const look = { ...LOOKS[id], ...(overrides ?? {}) };
-        return q.get('puppet') === 'current' ? createPuppet(look) : createKayKitPuppet(look, q.get('yh') ?? 'a');
+        return q.get('puppet') === 'current' ? createPuppet(look) : createKayKitPuppet(look);
       };
       const tweens = createTweens();
       const puppets = [];
@@ -107,6 +107,25 @@
           labels.push({ x: i * gap, text: `${names[id] ?? id}・${label}` });
         });
         span = (views.length - 1) * gap + gap;
+        step(1.2);
+      } else if (mode === 'face') {
+        // 顔を寄せて: 4人（who=touma,yuna,... で選べる）を、正面・斜め・横の3つの向きから。目・眉・鼻の確かめ
+        const ids = (q.get('who') ?? people.join(',')).split(',');
+        const views = [
+          ['正面', 0],
+          ['斜め', 0.75],
+          ['横', Math.PI / 2],
+        ];
+        const gap = 0.3;
+        let i = 0;
+        for (const id of ids)
+          for (const [label, yaw] of views) {
+            const p = place(make(id), i * gap + Math.floor(i / 3) * 0.08);
+            p.setYaw(yaw);
+            labels.push({ x: p.group.position.x, text: `${names[id] ?? id}・${label}` });
+            i++;
+          }
+        span = (i - 1) * gap + Math.floor((i - 1) / 3) * 0.08 + gap;
         step(1.2);
       } else if (mode === 'motions') {
         // 仕草ごとの姿（動きの途中で止めた画）。1人の人物で、横に並べる
@@ -192,12 +211,17 @@
       }
       // 並びの幅が画面の横に収まる距離から、少し見下ろす
       const camera = new THREE.PerspectiveCamera(20, W / H, 0.1, 100);
-      const headShot = mode === 'closeup' && q.get('frame') !== 'body';
+      const headShot = (mode === 'closeup' && q.get('frame') !== 'body') || mode === 'face';
       const xs = puppets.length ? puppets.map((p) => p.group.position.x) : labels.map((l) => l.x);
       const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
       const hfov = 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(10)) * (W / H));
-      const dist = Math.max(span / 2 / Math.tan(hfov / 2), 2.2);
-      if (headShot) {
+      const dist = Math.max(span / 2 / Math.tan(hfov / 2), mode === 'face' ? Number(q.get('dist') ?? 1.75) : 2.2);
+      if (mode === 'face') {
+        // 顔: 目の高さから、ほぼ水平に
+        const eye = Number(q.get('cy') ?? 0.74);
+        camera.position.set(cx, eye, dist);
+        camera.lookAt(cx, eye - 0.02, 0);
+      } else if (headShot) {
         // 頭と肩: ほぼ水平に、頭の高さを見る
         camera.position.set(cx, 0.78, dist);
         camera.lookAt(cx, 0.68, 0);
@@ -213,6 +237,7 @@
         const d = document.createElement('div');
         d.textContent = l.text;
         if (headShot) v.copy(new THREE.Vector3(l.x, 0.5, 0).project(camera));
+        if (mode === 'face') v.copy(new THREE.Vector3(l.x, 0.6, 0).project(camera));
         d.style.cssText = `position:absolute;top:${H - 30}px;left:${((v.x + 1) / 2) * W}px;transform:translateX(-50%);background:#000a;padding:2px 6px;border-radius:4px;white-space:nowrap`;
         document.body.append(d);
       }

@@ -112,8 +112,6 @@ export interface KayKitLook {
   readonly pants?: number;
   /** 靴の色 */
   readonly boots?: number;
-  /** 髪の案（設定の「ユナの髪：A／B」で選ぶ。ある時は hair の代わりに使う） */
-  readonly hairVariants?: { readonly a: KayKitLook['hair']; readonly b: KayKitLook['hair'] };
   /** 髪の形と色（束のある形。short 短い・tied 後ろで結ぶ・bun まとめ髪・cropped 刈り込み）。ひげの頭では、ひげも同じ色 */
   readonly hair: {
     /** 作者が頭と一体で作った髪のどれを使うか（knight 短い・rogue 中くらいの長さ・mage 長い） */
@@ -121,6 +119,8 @@ export interface KayKitLook {
     readonly color: number;
     /** 自作で足す、なめらかな大きな塊（bun 後ろのまとめ・twinTails 二つ結びのおさげ・bob 肩までの髪・ribbon リボン） */
     readonly extras?: readonly ('bun' | 'twinTails' | 'bob' | 'ribbon')[];
+    /** 作者の髪の形を変える（長さ・量・前髪・分け目・立たせる） */
+    readonly shape?: KayKitHairShape;
   };
   /** かぶり物（hood 頭巾・hat 帽子） */
   readonly headwear?: { readonly kind: 'hood' | 'hat'; readonly color: number };
@@ -134,8 +134,34 @@ export interface KayKitLook {
   readonly accent?: number;
   /** スカート（腰から膝の上まで。脚の動きに付いてくる） */
   readonly skirt?: { readonly color: number };
-  /** 顔（目は顔の面に描く白目と瞳。省くと落ち着いた大人の目）。eyes: 'large' で少し大きくまつ毛のある目、iris で瞳の色、round で輪郭を丸く、blush で頬の赤み */
-  readonly face?: { readonly eyes?: 'large'; readonly iris?: number; readonly round?: boolean; readonly blush?: boolean; readonly thinBrows?: boolean };
+  /**
+   * 顔（目と眉は顔の面に沿わせて描く。省くと落ち着いた大人の目と、ふつうの太さの眉）。eyes: 'large' で少し大きくまつ毛のある目、'narrow' で切れ長の目、iris で瞳の色、
+   * round で輪郭を丸く、slim で目より下を細く（0.1 で 1 割）、blush で頬の赤み、brows で眉の太さ、browLift で眉の高さ
+   */
+  readonly face?: {
+    readonly eyes?: 'large' | 'narrow';
+    readonly iris?: number;
+    readonly round?: boolean;
+    readonly slim?: number;
+    readonly blush?: boolean;
+    readonly brows?: 'thin' | 'normal' | 'thick';
+    /** 眉の高さ（負で目に近づける。素材の頭の座標で） */
+    readonly browLift?: number;
+  };
+}
+
+/** 作者の髪の形の変え方（src/render/kaykit.ts の reshapeHair） */
+export interface KayKitHairShape {
+  /** 耳の上より下の長さの割合（1 がそのまま。前髪は変えない） */
+  readonly length?: number;
+  /** 量（頭の中心から外へふくらませる割合。1 がそのまま） */
+  readonly volume?: number;
+  /** 前髪の長さの割合（1 がそのまま。1 より大きいと額へ下ろす） */
+  readonly fringe?: number;
+  /** 分け目を左右反対にする */
+  readonly mirror?: boolean;
+  /** 立たせる量（頭のてっぺんの髪を上へ伸ばす。0 がそのまま） */
+  readonly lift?: number;
 }
 
 // 色は、彩度を落とした土の色（布・革・くすんだ金属）。人形は描く時にさらに彩度を落とす（puppet.ts の muted）。
@@ -150,6 +176,8 @@ const IRON = 0x6f7272;
 /** トウマの KayKit の見た目: 時守の濃紺の外套（足もとまで。首の後ろに下ろした頭巾）、黒の短髪。差し色は襟の鈍い青緑 */
 const TOUMA_KAYKIT: KayKitLook = {
   base: 'rogue',
+  // 顔は髪と同じ rogue の頭（knight の頭は rogue の髪より頭頂が高く、髪から肌が透けるため）
+  head: 'rogue',
   skin: 0xbd9e88,
   cloth: 0x2e3546,
   cloth2: 0x262c3a,
@@ -157,8 +185,12 @@ const TOUMA_KAYKIT: KayKitLook = {
   leather: LEATHER_DARK,
   pants: 0x2e2c2c,
   boots: LEATHER_DARK,
-  // 髪は、外套と分かれて見えるように、真っ黒より明るく暖かい黒（茶に寄せた黒。髪の作り直しと観客の検査）
-  hair: { kit: 'knight', color: 0x382c28 },
+  // 青年らしく（場面4の顔の直し。設計書「二十歳前後・中背の細身・黒の短髪」）: 作者の中くらいの長さの髪（rogue）を、横と後ろを短くし、
+  // 分け目をユナと反対にして使う（前髪が額にかかり、生え際が下がる）。色は、外套と分かれて見えるように、真っ黒より明るく暖かい黒
+  hair: { kit: 'rogue', color: 0x382c28, shape: { length: 0.22, mirror: true } },
+  // 切れ長の目と、目に近いまっすぐな眉（怒った角度にしない）。あごを細く
+  face: { eyes: 'narrow', brows: 'normal', browLift: -0.01, slim: 0.1 },
+  width: 0.9,
   // 外套は、今の人形の濃紺より少し明るく（夜の部屋で、髪と外套が1つの黒い塊に見えないように。観客の検査）
   cloak: { color: 0x34405a, length: 'long', hoodDown: true },
   accent: 0x5c7f80,
@@ -241,13 +273,12 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
       leather: 0x6a4e38,
       pants: 0x6a5446,
       boots: 0x4e3a2e,
+      // 二つ結びのおさげ（発注者が案 A に決めた。設計書は「黒髪をひとつに結ぶ（仮）」なので、作者への確かめが要る）
       hair: { kit: 'rogue', color: 0x1e1a1e, extras: ['twinTails'] },
-      // A: 二つ結びのおさげ・B: 肩までの髪とリボン（設計書は「黒髪をひとつに結ぶ（仮）」。発注者の依頼で2案を作り、設定で切り替える）
-      hairVariants: { a: { kit: 'rogue', color: 0x1e1a1e, extras: ['twinTails'] }, b: { kit: 'rogue', color: 0x1e1a1e, extras: ['bob', 'ribbon'] } },
       skirt: { color: 0xa88f74 },
       apron: { color: 0x6e5038 },
       accent: 0xa4503a,
-      face: { eyes: 'large', iris: 0x553624, round: true, blush: true, thinBrows: true },
+      face: { eyes: 'large', iris: 0x553624, round: true, blush: true, brows: 'thin' },
     },
   },
   /** テオ: 十七歳、小柄、柔らかい茶髪、時守の濃紺に白い襟 */
@@ -315,7 +346,7 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
       pants: 0x4a3530,
       boots: 0x3e2e26,
       hair: { kit: 'mage', color: 0x3a2a22, extras: ['bun'] },
-      face: { thinBrows: true },
+      face: { brows: 'thin' },
       mantle: 0x6a604e,
       apron: { color: 0xbdb091, bib: true },
     },

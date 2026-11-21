@@ -1,4 +1,5 @@
-import { PUPPET_KINDS, STORY_FONTS, TEXT_SIZES, YUNA_HAIRS, type GameSettings } from '../save/saveStore';
+import { PUPPET_KINDS, STORY_FONTS, TEXT_SIZES, type GameSettings } from '../save/saveStore';
+import { deviceHasFont } from './storyLook';
 import { el, screenButton, showSheet } from './dom';
 import { TEXT } from './text';
 
@@ -71,18 +72,14 @@ export function showSettingsSheet(root: HTMLElement, current: () => GameSettings
     };
     const look = el('div', 'settings-look');
     look.append(
-      choices(TEXT.settings.font, STORY_FONTS, TEXT.settings.fonts, s.storyFont, (v) => set({ storyFont: v }), 'font', TEXT.settings.fontNotes),
+      // ヒラギノ明朝（同梱しない端末の書体）には、この端末にあるかを添える（文字の幅を測って調べる）
+      choices(TEXT.settings.font, STORY_FONTS, TEXT.settings.fonts, s.storyFont, (v) => set({ storyFont: v }), 'font', {
+        hiraginoMincho: deviceHasFont('hiraginoMincho') ? TEXT.settings.fontOnDevice : TEXT.settings.fontNotOnDevice,
+      }),
       choices(TEXT.settings.textSize, TEXT_SIZES, TEXT.settings.textSizes, s.textSize, (v) => set({ textSize: v }), 'text-size'),
     );
-    if (s.checkTools) {
-      // 人形とユナの髪（確認用の機能）は、2つの列を1段に並べる（欄が画面の高さに収まるように）
-      const pair = el('div', 'settings-pair');
-      pair.append(
-        choices(TEXT.settings.puppetKind, PUPPET_KINDS, TEXT.settings.puppetKinds, s.puppetKind, (v) => set({ puppetKind: v }), 'puppet'),
-        choices(TEXT.settings.yunaHair, YUNA_HAIRS, TEXT.settings.yunaHairs, s.yunaHair, (v) => set({ yunaHair: v }), 'yuna-hair'),
-      );
-      look.append(pair);
-    }
+    // 人形（確認用の機能）
+    if (s.checkTools) look.append(choices(TEXT.settings.puppetKind, PUPPET_KINDS, TEXT.settings.puppetKinds, s.puppetKind, (v) => set({ puppetKind: v }), 'puppet'));
     body.append(
       look,
       volumeRow,

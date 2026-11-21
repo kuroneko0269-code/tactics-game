@@ -2544,7 +2544,12 @@ async function storyRun(browser, baseUrl, name, core) {
     await choice(text.settings.font, text.settings.fonts.shipporiMincho);
     check((await root()).textSize === 'large' && (await root()).storyFont === 'shipporiMincho', '文字の大きさか書体の切り替えが画面に効いていません');
     check((await T(() => window.__tactics.settings().textSize)) === 'large', '文字の大きさが設定に残っていません');
-    // ヒラギノ明朝（端末の書体。無い端末では Zen Old Mincho で出る）: 書体の指定の順を確かめる
+    // ヒラギノ明朝（端末の書体。無い端末では Zen Old Mincho で出る）: この端末にあるかの説明（文字の幅で調べる。この環境には無い）
+    check(
+      (await T(() => document.querySelector('.settings-font .settings-label')?.textContent ?? '')).includes(text.settings.fontNotOnDevice),
+      'ヒラギノ明朝が「この端末では使えません」と出ていません',
+    );
+    // 書体の指定の順を確かめる
     await choice(text.settings.font, text.settings.fonts.hiraginoMincho);
     const family = await T(() => getComputedStyle(document.documentElement).getPropertyValue('--kr-mincho'));
     check(
@@ -2557,11 +2562,8 @@ async function storyRun(browser, baseUrl, name, core) {
     await choice(text.settings.puppetKind, text.settings.puppetKinds.current);
     check((await T(() => window.__tactics.settings().puppetKind)) === 'current', '人形を「今の人形」に切り替えられません');
     await choice(text.settings.puppetKind, text.settings.puppetKinds.kaykit);
-    // ユナの髪の案（髪の作り直し）: 初めは A、B に切り替えて戻せる
-    check((await T(() => window.__tactics.settings().yunaHair)) === 'a', 'ユナの髪の初めの値が A ではありません');
-    await choice(text.settings.yunaHair, text.settings.yunaHairs.b);
-    check((await T(() => window.__tactics.settings().yunaHair)) === 'b', 'ユナの髪を B に切り替えられません');
-    await choice(text.settings.yunaHair, text.settings.yunaHairs.a);
+    // ユナの髪の切り替えは外した（案 A に決めた）
+    check((await T(() => document.querySelector('.settings-yuna-hair'))) === null, 'ユナの髪の切り替えが残っています');
     await press(text.settings.close);
     check((await T(() => window.__tactics.settings().checkTools)) === true, '設定で確認用の機能を入にできません');
     check(await T(() => !document.querySelector('.check-badge').hidden), '確認用の機能が入なのに、画面の隅の印が出ていません');
