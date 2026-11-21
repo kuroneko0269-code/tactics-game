@@ -223,7 +223,7 @@ export function createBattleView(options: {
     const personal = isObject ? undefined : options.lookOf?.(unit);
     const puppet = isObject
       ? createPropModel(unit.jobId.replace(/^object:/, ''))
-      : createPuppet(personal ?? { ...look, body: TEAM_COLORS[unit.team].body });
+      : createPuppet(personal ?? { ...look, body: TEAM_COLORS[unit.team].body }, { detail: 'low' });
     puppet.group.add(teamRing(TEAM_COLORS[unit.team].ring));
     if (!isObject) puppet.group.add(facingPointer(TEAM_COLORS[unit.team].ring));
     puppet.group.userData.unitId = unit.id;
@@ -277,7 +277,7 @@ export function createBattleView(options: {
   // 戦わない背景の人々（序章に足りない仕組み）: 人形だけを立てる（タップの対象にしない。陣営の輪も付けない）
   const bystanders = new Map<string, { puppet: Puppet; coord: Coord }>();
   for (const b of options.initial.bystanders ?? []) {
-    const puppet = createPuppet(options.bystanderLook?.(b.look) ?? { body: 0x8a7a6a, accent: 0xd8c8a8, hair: 0x3a3028 });
+    const puppet = createPuppet(options.bystanderLook?.(b.look) ?? { body: 0x8a7a6a, accent: 0xd8c8a8, hair: 0x3a3028 }, { detail: 'low' });
     puppet.group.position.copy(mapView.tileTop(b.x, b.z));
     puppet.setFacing(b.facing);
     puppet.group.traverse((o) => (o.raycast = () => {}));

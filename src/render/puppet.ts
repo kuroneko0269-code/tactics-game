@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Direction } from '../core/geometry';
 import type { LookDefinition, LookItemSlot } from '../data/story/looks';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { buildModel } from './props';
 
 /**
@@ -93,13 +94,37 @@ const shared = (key: string, make: () => THREE.BufferGeometry) => {
   }
   return g;
 };
-const sphere = (r: number, w = 16, h = 12) => shared(`s${r}-${w}-${h}`, () => new THREE.SphereGeometry(r, w, h));
-const capsule = (r: number, len: number) => shared(`c${r}-${len}`, () => new THREE.CapsuleGeometry(r, len, 4, 10));
-const cylinder = (rt: number, rb: number, h: number, seg = 16) => shared(`y${rt}-${rb}-${h}-${seg}`, () => new THREE.CylinderGeometry(rt, rb, h, seg));
-const cone = (r: number, h: number, seg = 12) => shared(`k${r}-${h}-${seg}`, () => new THREE.ConeGeometry(r, h, seg));
+/**
+ * 形の細かさ（1 がふつう。戦闘の駒は 0.5 で、球や円柱の分割を粗くする。駒が十体以上並ぶ戦闘でも軽くするため）。
+ * createPuppet の中で一時的に切り替える
+ */
+let detail = 1;
+const seg = (n: number, min: number) => Math.max(min, Math.round(n * detail));
+const sphere = (r: number, w = 16, h = 12) => {
+  const [sw, sh] = [seg(w, 6), seg(h, 4)];
+  return shared(`s${r}-${sw}-${sh}`, () => new THREE.SphereGeometry(r, sw, sh));
+};
+const capsule = (r: number, len: number) => {
+  const [c, rs] = [seg(3, 2), seg(8, 5)];
+  return shared(`c${r}-${len}-${c}-${rs}`, () => new THREE.CapsuleGeometry(r, len, c, rs));
+};
+const cylinder = (rt: number, rb: number, h: number, n = 16) => {
+  const sn = seg(n, 6);
+  return shared(`y${rt}-${rb}-${h}-${sn}`, () => new THREE.CylinderGeometry(rt, rb, h, sn));
+};
+const cone = (r: number, h: number, n = 12) => {
+  const sn = seg(n, 5);
+  return shared(`k${r}-${h}-${sn}`, () => new THREE.ConeGeometry(r, h, sn));
+};
 /** 頭の上と後ろを覆う髪の帽子（球の上の部分） */
-const hairCap = (r: number, theta: number) => shared(`h${r}-${theta}`, () => new THREE.SphereGeometry(r, 18, 12, 0, Math.PI * 2, 0, theta));
-const roundBox = (w: number, h: number, d: number) => shared(`b${w}-${h}-${d}`, () => new THREE.CapsuleGeometry(Math.min(w, d) / 2, Math.max(0.001, h - Math.min(w, d)), 4, 10));
+const hairCap = (r: number, theta: number) => {
+  const [sw, sh] = [seg(18, 8), seg(12, 5)];
+  return shared(`h${r}-${theta}-${sw}-${sh}`, () => new THREE.SphereGeometry(r, sw, sh, 0, Math.PI * 2, 0, theta));
+};
+const roundBox = (w: number, h: number, d: number) => {
+  const [c, rs] = [seg(3, 2), seg(8, 5)];
+  return shared(`b${w}-${h}-${d}-${c}-${rs}`, () => new THREE.CapsuleGeometry(Math.min(w, d) / 2, Math.max(0.001, h - Math.min(w, d)), c, rs));
+};
 
 /** 名前から決まる小さな数（まばたきの間を人形ごとにずらす。乱数は使わない） */
 function phaseOf(look: PuppetLook): number {
@@ -107,7 +132,22 @@ function phaseOf(look: PuppetLook): number {
   return (n / 997) * 3;
 }
 
-export function createPuppet(look: PuppetLook): Puppet {
+/** 人形の作り方の選び方。low は戦闘の駒（形の分割を粗くし、頬の赤みと眉を省く） */
+export interface PuppetOptions {
+  readonly detail?: 'high' | 'low';
+}
+
+export function createPuppet(look: PuppetLook, options: PuppetOptions = {}): Puppet {
+  const low = options.detail === 'low';
+  detail = low ? 0.5 : 1;
+  try {
+    return buildPuppet(look, low);
+  } finally {
+    detail = 1;
+  }
+}
+
+function buildPuppet(look: PuppetLook, low: boolean): Puppet {
   const group = new THREE.Group();
   const body = new THREE.Group();
   group.add(body);
@@ -166,13 +206,13 @@ export function createPuppet(look: PuppetLook): Puppet {
   const torsoW = 0.115 * w;
   const torsoD = 0.82;
   // 胴（服の形で変える）。少し平たい円柱
-  const torso = part(cylinder(torsoW * 0.92, torsoW * 1.08, TORSO_H, 18), bodyMat, 0, TORSO_H / 2, 0, upper);
+  const torso = part(cylinder(torsoW * 0.92, torsoW * 1.08, TORSO_H, 14), bodyMat, 0, TORSO_H / 2, 0, upper);
   torso.scale.z = torsoD;
   // 肩の丸み
   const shoulders = part(sphere(torsoW * 0.98, 18, 10), bodyMat, 0, TORSO_H - 0.01, 0, upper);
   shoulders.scale.set(1, 0.42, torsoD);
   // 帯
-  const belt = part(cylinder(torsoW * 1.06, torsoW * 1.07, 0.035, 18), accentMat, 0, 0.06, 0, upper);
+  const belt = part(cylinder(torsoW * 1.06, torsoW * 1.07, 0.035, 14), accentMat, 0, 0.06, 0, upper);
   belt.scale.z = torsoD + 0.02;
   // 襟（帯と同じ色の細い輪）
   const collar = part(cylinder(0.05, 0.068, 0.03, 14), accentMat, 0, TORSO_H + 0.005, 0, upper);
@@ -213,7 +253,7 @@ export function createPuppet(look: PuppetLook): Puppet {
     part(capsule(armR * 0.9, ARM * 0.36), bodyMat, 0, -ARM * 0.2, 0, elbow);
     // 袖口（帯の色）と手
     part(cylinder(armR * 1.05, armR * 1.1, 0.02, 10), accentMat, 0, -ARM * 0.4, 0, elbow);
-    const hand = part(sphere(0.036, 12, 10), skinMat, 0, -ARM * 0.47, 0, elbow);
+    const hand = part(sphere(0.036, 10, 8), skinMat, 0, -ARM * 0.47, 0, elbow);
     hand.scale.set(0.9, 1.05, 0.85);
     return { shoulder, elbow };
   };
@@ -228,7 +268,7 @@ export function createPuppet(look: PuppetLook): Puppet {
   // ---- 頭（首を軸に回る） ----
   const head = pivot(upper, 0, NECK_Y - HIP_Y, 0);
   part(cylinder(0.035, 0.04, 0.05, 10), skinMat, 0, 0.01, 0, head);
-  const skull = part(sphere(HEAD_R, 22, 16), skinMat, 0, HEAD_Y - NECK_Y, 0, head);
+  const skull = part(sphere(HEAD_R, 18, 13), skinMat, 0, HEAD_Y - NECK_Y, 0, head);
   skull.scale.set(1.04, 0.98, 0.98);
   const face = pivot(head, 0, HEAD_Y - NECK_Y, 0);
   // 目（黒目の楕円と、小さな光）。まばたきは目のグループを縦に縮める
@@ -243,21 +283,22 @@ export function createPuppet(look: PuppetLook): Puppet {
     const zOn = Math.sqrt(HEAD_R * HEAD_R - eyeX * eyeX - eyeY * eyeY) * 0.98 - 0.004;
     g.position.z = zOn;
     g.rotation.y = sx * Math.asin(eyeX / HEAD_R);
-    const eye = part(sphere(0.026, 12, 10), eyeMat, 0, 0, 0, g);
+    const eye = part(sphere(0.026, 10, 8), eyeMat, 0, 0, 0, g);
     eye.scale.set(0.82, 1.15, 0.42);
     eye.castShadow = false;
     const shine = new THREE.Mesh(sphere(0.008, 8, 6), shineMat);
     shine.position.set(0.006 * sx, 0.01, 0.009);
     g.add(shine);
     eyes.push(g);
-    // 眉（髪の色の細い線）
+    // 眉（髪の色の細い線。戦闘の駒では省く）
+    if (low) continue;
     const brow = part(roundBox(0.036, 0.009, 0.009), hairMat ?? darkMat, sx * 0.002, 0.042, -0.004, g);
     brow.rotation.z = Math.PI / 2 + sx * 0.12;
     brow.castShadow = false;
   }
   // 頬の赤み（ごく淡く）
   const blushMat = new THREE.MeshBasicMaterial({ color: 0xf08a7a, transparent: true, opacity: 0.22, depthWrite: false });
-  for (const sx of [-1, 1]) {
+  for (const sx of low ? [] : [-1, 1]) {
     const b = new THREE.Mesh(sphere(0.022, 10, 8), blushMat);
     b.position.set(sx * 0.085, -0.055, Math.sqrt(HEAD_R ** 2 - 0.085 ** 2 - 0.055 ** 2) - 0.006);
     b.scale.set(1.2, 0.6, 0.3);
@@ -267,6 +308,7 @@ export function createPuppet(look: PuppetLook): Puppet {
   const mouthMat = mat(0x8a3a32);
   const mouth = part(sphere(0.016, 10, 8), mouthMat, 0, -0.072, Math.sqrt(HEAD_R ** 2 - 0.072 ** 2) - 0.008, face);
   mouth.castShadow = false;
+  mouth.userData.keep = true;
   const mouthClosed = { x: 1.15, y: 0.28 };
   mouth.scale.set(mouthClosed.x, mouthClosed.y, 0.4);
 
@@ -310,6 +352,8 @@ export function createPuppet(look: PuppetLook): Puppet {
     back: anchor(upper, 0.03, 0.04, -torsoW * torsoD - 0.03),
   };
   anchors.back.rotation.z = -0.35;
+  // 同じグループの中の、同じ材質の部品を1つの形にまとめる（描く回数を減らして、戦闘で駒が多い時やスマホでも軽くするため）
+  mergeParts(figure);
   const defaults: Partial<Record<LookItemSlot, string>> = {};
   for (const item of look.items ?? []) defaults[item.slot] = item.model;
   /** 付けている持ち物の材質（透明度と光り方を体と合わせるため） */
@@ -430,6 +474,42 @@ export function createPuppet(look: PuppetLook): Puppet {
   };
 }
 
+/**
+ * グループごとに、子を持たない部品のうち同じ材質のものを、形を合わせて1つの部品にする（動かす部品と口は残す）。
+ * 合わせる前の部品の位置・向き・大きさは、形に焼き込む
+ */
+function mergeParts(root: THREE.Object3D): void {
+  const groups: THREE.Object3D[] = [];
+  root.traverse((o) => {
+    if (!(o instanceof THREE.Mesh)) groups.push(o);
+  });
+  for (const g of groups) {
+    const byMaterial = new Map<THREE.Material, THREE.Mesh[]>();
+    for (const c of g.children) {
+      if (!(c instanceof THREE.Mesh) || c.children.length > 0 || c.userData.keep || Array.isArray(c.material)) continue;
+      const list = byMaterial.get(c.material) ?? [];
+      list.push(c);
+      byMaterial.set(c.material, list);
+    }
+    for (const [material, meshes] of byMaterial) {
+      if (meshes.length < 2) continue;
+      const parts = meshes.map((m) => {
+        m.updateMatrix();
+        const geo = (m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone()).applyMatrix4(m.matrix);
+        for (const name of Object.keys(geo.attributes)) if (name !== 'position' && name !== 'normal') geo.deleteAttribute(name);
+        return geo;
+      });
+      const merged = mergeGeometries(parts);
+      for (const p of parts) p.dispose();
+      if (!merged) continue;
+      const mesh = new THREE.Mesh(merged, material);
+      mesh.castShadow = meshes.some((m) => m.castShadow);
+      for (const m of meshes) g.remove(m);
+      g.add(mesh);
+    }
+  }
+}
+
 function anchor(parent: THREE.Object3D, x: number, y: number, z: number): THREE.Group {
   const g = new THREE.Group();
   g.position.set(x, y, z);
@@ -467,13 +547,13 @@ function addHair(look: PuppetLook, hairMat: THREE.Material, accentMat: THREE.Mat
           ];
     for (const [x, y, rot] of tufts) {
       const z = Math.sqrt(Math.max(0, r * r - x * x - y * y)) - 0.008;
-      const t = part(sphere(0.042, 12, 10), hairMat, x, y, z, face);
+      const t = part(sphere(0.042, 10, 8), hairMat, x, y, z, face);
       t.scale.set(0.95, 1.25, 0.45);
       t.rotation.z = rot;
     }
     // 耳の前に垂れる髪（顔の横）
     for (const sx of [-1, 1]) {
-      const side = part(sphere(0.045, 12, 10), hairMat, sx * (r - 0.02), -0.02, 0.02, face);
+      const side = part(sphere(0.045, 10, 8), hairMat, sx * (r - 0.02), -0.02, 0.02, face);
       side.scale.set(0.45, style === 'long' ? 1.9 : 1.2, 0.8);
     }
   }
