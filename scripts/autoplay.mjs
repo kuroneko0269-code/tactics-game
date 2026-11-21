@@ -2295,7 +2295,8 @@ async function presentationDrill(page, check, screenshot) {
   check(seen.length === 6, `試しの台本の台詞と語りの数が違います（${seen.length}）`);
   check(yuna.face === 'ユナ' && yuna.view.portrait === 'ユナ' && yuna.drawn > 1500 && yuna.view.mark, `顔の枠か話者の印が出ていません（${JSON.stringify(yuna.view)}・${yuna.drawn}）`);
   check(yuna.plateBg === 'rgb(201, 187, 155)' && touma.plateBg === 'rgb(43, 51, 70)', `名前の左の印が人物の服の色になっていません（${yuna.plateBg} / ${touma.plateBg}）`);
-  check(yuna.nameSize >= 18, `名前の文字が小さい（${yuna.nameSize}px）`);
+  // 名前は 17px（見た目の見本の2回目で、文字の大きさ「中」を小さくした。「大」は 20px）
+  check(yuna.nameSize >= 15, `名前の文字が小さい（${yuna.nameSize}px）`);
   for (const x of [yuna, touma]) {
     const inside = (r) => r && r.top >= -1 && r.left >= -1 && r.bottom <= x.vh + 1 && r.right <= vw + 1;
     check(inside(x.faceRect) && inside(x.plateRect) && x.faceRect.width >= 56, `顔の枠か名前の札が画面に収まっていません（${JSON.stringify([x.faceRect, x.plateRect])}）`);

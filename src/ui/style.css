@@ -4054,12 +4054,14 @@ body.in-dialogue #hud {
 
 /* 書体の選び肢は、その書体の名前の書体ではなく、ふつうの文字で出す（選ばれていない書体は読み込まないため） */
 
-/* 横向きの低い画面: 書体・文字の大きさ・人形の描き方の列を2つずつ横に並べる（欄が画面の高さに収まるように） */
+/* 横向きの低い画面: 書体・文字の大きさ・人形の描き方の列を横に1段に並べる（欄が画面の高さに収まるように） */
 @media (orientation: landscape) and (max-height: 500px) {
   .settings-look {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 6px 12px;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1.5fr);
+    gap: 6px 10px;
   }
 
   .settings-body .settings-look .settings-row {
