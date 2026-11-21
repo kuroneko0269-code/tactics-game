@@ -175,6 +175,7 @@ export const TEXT = {
     fonts: { zenOldMincho: 'Zen Old Mincho', shipporiAntique: 'Shippori Antique', shipporiMincho: 'Shippori Mincho', hiraginoMincho: 'ヒラギノ明朝' },
     /** 書体の選び肢に添える短い説明（端末に入っている書体を使うもの） */
     fontNotes: { hiraginoMincho: 'iPhone・iPad・Mac だけ' } as Readonly<Partial<Record<string, string>>>,
+    choiceNote: (name: string, note: string) => `${name}は${note}`,
     textSize: '文字の大きさ',
     textSizes: { small: '小', medium: '中', large: '大' },
     puppetKind: '人形',

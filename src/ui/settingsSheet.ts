@@ -53,14 +53,17 @@ export function showSettingsSheet(root: HTMLElement, current: () => GameSettings
       notes: Readonly<Partial<Record<string, string>>> = {},
     ) => {
       const row = el('div', `settings-row settings-choices settings-${key}`);
-      row.append(el('span', 'settings-label', group));
+      const label = el('span', 'settings-label', group);
+      for (const v of list) {
+        const note = notes[v];
+        if (note) label.append(el('span', 'settings-label-note', TEXT.settings.choiceNote(labels[v], note)));
+      }
+      row.append(label);
       const buttons = el('div', 'settings-choice-buttons');
       for (const v of list) {
         const b = screenButton(labels[v], () => pick(v), { className: 'settings-choice', pressed: v === value });
         b.setAttribute('aria-label', TEXT.settings.choiceLabel(group, labels[v]));
         b.dataset.value = v;
-        const note = notes[v];
-        if (note) b.append(el('span', 'settings-choice-note', note));
         buttons.append(b);
       }
       row.append(buttons);

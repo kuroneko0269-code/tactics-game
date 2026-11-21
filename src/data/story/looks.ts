@@ -124,8 +124,8 @@ export interface KayKitLook {
   readonly accent?: number;
   /** スカート（腰から膝の上まで。脚の動きに付いてくる） */
   readonly skirt?: { readonly color: number };
-  /** 顔（省くと素材の顔の目を小さくしたもの）。eyes は目の大きさの倍率（横・縦）、lashes でまつ毛、round で輪郭を丸く、blush で頬の赤み */
-  readonly face?: { readonly eyes?: readonly [number, number]; readonly lashes?: boolean; readonly round?: boolean; readonly blush?: boolean };
+  /** 顔（目は顔の面に描く白目と瞳。省くと落ち着いた大人の目）。eyes: 'large' で少し大きくまつ毛のある目、iris で瞳の色、round で輪郭を丸く、blush で頬の赤み */
+  readonly face?: { readonly eyes?: 'large'; readonly iris?: number; readonly round?: boolean; readonly blush?: boolean };
 }
 
 // 色は、彩度を落とした土の色（布・革・くすんだ金属）。人形は描く時にさらに彩度を落とす（puppet.ts の muted）。
@@ -234,7 +234,7 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
       skirt: { color: 0xa88f74 },
       apron: { color: 0x6e5038 },
       accent: 0xa4503a,
-      face: { eyes: [1.02, 0.98], lashes: true, round: true, blush: true },
+      face: { eyes: 'large', iris: 0x553624, round: true, blush: true },
     },
   },
   /** テオ: 十七歳、小柄、柔らかい茶髪、時守の濃紺に白い襟 */

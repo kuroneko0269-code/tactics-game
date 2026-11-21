@@ -19,7 +19,9 @@ export const PART_CELLS = {
   hair: [0, 3, 'l'],
   hairLight: [0, 3, 'r'],
   cloak: [1, 3],
-  apron: [2, 3],
+  apron: [2, 3, 'l'],
+  // 白目と瞳（顔の面に描く目）
+  sclera: [2, 3, 'r'],
   mantle: [3, 3, 'l'],
   // 目の光（ユナの目に入れる小さな白い点）
   shine: [3, 3, 'r'],
@@ -28,7 +30,8 @@ export const PART_CELLS = {
   accent: [5, 3],
   cloakInner: [6, 3, 'l'],
   skirt: [6, 3, 'r'],
-  hairDark: [7, 3],
+  hairDark: [7, 3, 'l'],
+  iris: [7, 3, 'r'],
   // 素材の頭の目の区画（まつ毛を目と同じ色にする）
   eye: [2, 0],
 } as const satisfies Record<string, readonly [number, number] | readonly [number, number, 'l' | 'r']>;
