@@ -74,11 +74,15 @@ export function showSettingsSheet(root: HTMLElement, current: () => GameSettings
       choices(TEXT.settings.font, STORY_FONTS, TEXT.settings.fonts, s.storyFont, (v) => set({ storyFont: v }), 'font', TEXT.settings.fontNotes),
       choices(TEXT.settings.textSize, TEXT_SIZES, TEXT.settings.textSizes, s.textSize, (v) => set({ textSize: v }), 'text-size'),
     );
-    if (s.checkTools)
-      look.append(
+    if (s.checkTools) {
+      // 人形とユナの髪（確認用の機能）は、2つの列を1段に並べる（欄が画面の高さに収まるように）
+      const pair = el('div', 'settings-pair');
+      pair.append(
         choices(TEXT.settings.puppetKind, PUPPET_KINDS, TEXT.settings.puppetKinds, s.puppetKind, (v) => set({ puppetKind: v }), 'puppet'),
         choices(TEXT.settings.yunaHair, YUNA_HAIRS, TEXT.settings.yunaHairs, s.yunaHair, (v) => set({ yunaHair: v }), 'yuna-hair'),
       );
+      look.append(pair);
+    }
     body.append(
       look,
       volumeRow,
