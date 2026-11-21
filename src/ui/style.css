@@ -3487,6 +3487,8 @@ body.in-dialogue #hud {
   flex-direction: column;
   gap: 2px;
   line-height: 1.8;
+  /* 読み返しの名前と台詞も、設定の書体で（場面4の顔の直しの PR で、語りだけが書体に従っていたのを直した） */
+  font-family: var(--kr-mincho);
 }
 
 .backlog-row.narration .backlog-text {

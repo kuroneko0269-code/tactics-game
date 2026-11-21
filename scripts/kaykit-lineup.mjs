@@ -6,7 +6,7 @@
  * 出来るもの（どれも jpg）:
  *   views.jpg（4人を正面・横・後ろ）・views-current.jpg（今の人形で同じ並び）・views-plain.jpg（素材そのままの陰影）・
  *   motions-<人物>.jpg（仕草ごとの、動きの途中の姿）・parts.jpg（自作の部品の見本）・skeletons.jpg（--skeletons を渡した時）・
- *   head-<人物>.jpg（頭と肩を5つの向きから）・body-<人物>.jpg（全身を5つの向きから）・face-[dinner-|night-]<人物>.jpg（顔を寄せて正面・斜め・横）。--only=head,views のように、撮る物を名前の頭で選べる
+ *   head-<人物>.jpg（頭と肩を5つの向きから）・body-<人物>.jpg（全身を5つの向きから）・face-[dinner-|night-]<人物>.jpg（顔を寄せて正面・斜め・横）・hairs-base.jpg / hairs-new.jpg（髪型の土台と試作）。--only=head,views のように、撮る物を名前の頭で選べる
  */
 import { createServer } from 'vite';
 import { chromium } from 'playwright';
@@ -48,6 +48,9 @@ const shots = [
     [`face-dinner-${who}`, `mode=face&who=${who}&w=1200&h=520&light=dinner`],
     [`face-night-${who}`, `mode=face&who=${who}&w=1200&h=520&light=night`],
   ]),
+  // 髪型を増やす試作（ゲームには入れない）: 土台の作者の髪3種と、試作
+  ['hairs-base', 'mode=hairs&set=base&w=1400&h=600&cy=0.62'],
+  ['hairs-new', 'mode=hairs&set=new&w=1800&h=600&cy=0.62'],
 ];
 const only = args.only ? args.only.split(',') : null;
 for (let i = shots.length - 1; i >= 0; i--) if (only && !only.some((o) => shots[i][0].startsWith(o))) shots.splice(i, 1);

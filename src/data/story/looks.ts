@@ -117,8 +117,8 @@ export interface KayKitLook {
     /** 作者が頭と一体で作った髪のどれを使うか（knight 短い・rogue 中くらいの長さ・mage 長い） */
     readonly kit: Exclude<KayKitHead, 'barbarian'>;
     readonly color: number;
-    /** 自作で足す、なめらかな大きな塊（bun 後ろのまとめ・twinTails 二つ結びのおさげ・bob 肩までの髪・ribbon リボン） */
-    readonly extras?: readonly ('bun' | 'twinTails' | 'bob' | 'ribbon')[];
+    /** 自作で足す、なめらかな大きな塊（bun 後ろのまとめ・twinTails 二つ結びのおさげ・ponytail 後ろで1つに結んだ房） */
+    readonly extras?: readonly ('bun' | 'twinTails' | 'ponytail')[];
     /** 作者の髪の形を変える（長さ・量・前髪・分け目・立たせる） */
     readonly shape?: KayKitHairShape;
   };

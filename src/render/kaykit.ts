@@ -600,10 +600,10 @@ function flatStroke(points: readonly [number, number][], width: number, taper = 
 
 /** 目の見た目（ふつうの人物と、ユナのように少し大きくまつ毛のある目）。白目は横長で小さく、瞳はやや大きく、上はまぶたの線で隠す */
 const EYE_STYLE = {
-  adult: { w: 0.054, h: 0.032, iris: 0.029, pupil: 0.013, shine: 0.0075, lid: 0.017 },
-  large: { w: 0.063, h: 0.042, iris: 0.036, pupil: 0.016, shine: 0.011, lid: 0.02 },
+  adult: { w: 0.054, h: 0.034, iris: 0.029, pupil: 0.013, shine: 0.0075, lid: 0.014 },
+  large: { w: 0.063, h: 0.045, iris: 0.036, pupil: 0.016, shine: 0.011, lid: 0.015 },
   // 切れ長（トウマ。少し細く、まぶたの線を太く）
-  narrow: { w: 0.056, h: 0.027, iris: 0.027, pupil: 0.012, shine: 0.0065, lid: 0.019 },
+  narrow: { w: 0.056, h: 0.03, iris: 0.027, pupil: 0.012, shine: 0.0065, lid: 0.015 },
 } as const;
 /** 目の中心（素材の目の位置。左右は x の符号） */
 const EYE_AT = { x: 0.2, y: 1.6 };
@@ -625,17 +625,19 @@ function eyeParts(surf: FaceSurface, kind: 'adult' | 'large' | 'narrow'): PartPi
     const white = { cx, cy, rx: st.w, ry: st.h };
     const inner = { cx, cy, rx: st.w * 0.97, ry: st.h * 0.97 };
     const ix = cx - sign * 0.003;
-    const iy = cy + st.h * 0.12;
+    // 瞳は白目の真ん中より少しだけ上（上の縁はまぶたの線に少し隠れる。隠しすぎると半目・眠そうに見えた。観客の検査）
+    const iy = cy + st.h * 0.04;
     piece(flatDisc(cx, cy, st.w, st.h), 0.003, 'sclera');
     piece(flatDisc(ix, iy, st.iris * 0.92, st.iris, inner), 0.005, 'iris');
     piece(flatDisc(ix, iy, st.pupil * 0.92, st.pupil, inner), 0.007, 'eye');
     piece(flatDisc(ix + sign * st.iris * 0.3, iy + st.iris * 0.3, st.shine, st.shine, inner), 0.009, 'shine');
     // 上のまぶたの線: 白目の上の縁に沿い、目尻（始め）が太く、目頭へ細く。白目の上の縁を少し覆う
     const lid: [number, number][] = [];
-    if (large) lid.push([cx + sign * st.w * 1.3, cy + st.h * 0.95]);
+    // まつ毛は目尻で少しだけ外へ（上へはね上げると、つり目・しかめっ面に見えた。観客の検査）
+    if (large) lid.push([cx + sign * st.w * 1.22, cy + st.h * 0.55]);
     for (const a of [0.08, 0.3, 0.55, 0.8, 1.05, 1.3, 1.55, 1.8, 2.05, 2.3, 2.6, 2.9]) {
       // 目尻（a 0）から目頭（a π）へ。上の縁より少し下（白目の上を覆う）
-      lid.push([cx + sign * Math.cos(a) * white.rx * 1.02, cy + Math.sin(a) * white.ry * 0.86 + st.lid * 0.12]);
+      lid.push([cx + sign * Math.cos(a) * white.rx * 1.02, cy + Math.sin(a) * white.ry * 0.95 + st.lid * 0.3]);
     }
     piece(flatStroke(lid, st.lid, large ? 0.9 : 0.7), 0.011, 'eye');
   }
@@ -651,7 +653,8 @@ const BROW_WIDTH = { thin: 0.013, normal: 0.018, thick: 0.026 } as const;
  */
 function browParts(surf: FaceSurface, width: keyof typeof BROW_WIDTH, large: boolean, lift = 0): PartPiece[] {
   const out: PartPiece[] = [];
-  const y = 1.692 + (large ? 0.01 : 0) + lift;
+  // 大きな目の人物（ユナ）は眉を目から離す（近いと、しかめっ面に見えた。観客の検査）
+  const y = 1.692 + (large ? 0.02 : 0) + lift;
   for (const sign of [1, -1]) {
     const pts: [number, number][] = [
       [sign * 0.13, y + 0.001],

@@ -127,6 +127,42 @@
           }
         span = (i - 1) * gap + Math.floor((i - 1) / 3) * 0.08 + gap;
         step(1.2);
+      } else if (mode === 'hairs') {
+        // 髪型を増やす試作（ゲームには入れない）: 作者の髪3種を土台に、変形（長さ・量・分け目）と大きな塊の付け足しで作った髪。
+        // set=base で土台の3種、set=new で試作。どれも同じ体（rogue）と顔で、正面・斜め・後ろから
+        const skin = 0xc2a18a;
+        const sets = {
+          base: [
+            ['土台: 短い（knight）', { head: 'knight', hair: { kit: 'knight', color: 0x3a2c24 } }],
+            ['土台: 中くらい（rogue）', { head: 'rogue', hair: { kit: 'rogue', color: 0x3a2c24 } }],
+            ['土台: 長い（mage）', { head: 'mage', hair: { kit: 'mage', color: 0x3a2c24 } }],
+          ],
+          new: [
+            ['試作1: 後ろで1つに結ぶ', { head: 'mage', hair: { kit: 'mage', color: 0x4a3426, extras: ['ponytail'] }, accent: 0x7a5a3a }],
+            ['試作2: 短い髪を立たせる', { head: 'knight', hair: { kit: 'knight', color: 0x6a4a2e, shape: { lift: 0.05, volume: 1.03 } } }],
+            ['試作3: 肩までの髪', { head: 'rogue', hair: { kit: 'rogue', color: 0x2a2226, shape: { length: 1.45, mirror: true } } }],
+            ['帽子と組み合わせ（短い髪に1つ結び）', { head: 'knight', hair: { kit: 'knight', color: 0x8a6a44, extras: ['ponytail'] }, headwear: { kind: 'hat', color: 0x5e4430 }, accent: 0x8a6a3a }],
+          ],
+        };
+        const list = sets[q.get('set') ?? 'new'];
+        const views = [
+          ['正面', 0],
+          ['斜め', 0.75],
+          ['後ろ', Math.PI],
+        ];
+        const gap = 0.36;
+        let i = 0;
+        for (const [label, o] of list) {
+          for (const [vl, yaw] of views) {
+            const k = { base: 'rogue', skin, cloth: 0x6a6050, cloth2: 0x5a5244, pants: 0x4a3e30, face: { brows: 'thin' }, ...o };
+            const p = place(make('touma', { kaykit: k, items: [] }), i * gap + Math.floor(i / 3) * 0.14);
+            p.setYaw(yaw);
+            labels.push({ x: p.group.position.x, text: vl === '正面' ? `${label}・${vl}` : vl });
+            i++;
+          }
+        }
+        span = (i - 1) * gap + Math.floor((i - 1) / 3) * 0.14 + gap + 0.3;
+        step(1.2);
       } else if (mode === 'motions') {
         // 仕草ごとの姿（動きの途中で止めた画）。1人の人物で、横に並べる
         const id = q.get('who') ?? 'yuna';
@@ -211,12 +247,12 @@
       }
       // 並びの幅が画面の横に収まる距離から、少し見下ろす
       const camera = new THREE.PerspectiveCamera(20, W / H, 0.1, 100);
-      const headShot = (mode === 'closeup' && q.get('frame') !== 'body') || mode === 'face';
+      const headShot = (mode === 'closeup' && q.get('frame') !== 'body') || mode === 'face' || mode === 'hairs';
       const xs = puppets.length ? puppets.map((p) => p.group.position.x) : labels.map((l) => l.x);
       const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
       const hfov = 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(10)) * (W / H));
-      const dist = Math.max(span / 2 / Math.tan(hfov / 2), mode === 'face' ? Number(q.get('dist') ?? 1.75) : 2.2);
-      if (mode === 'face') {
+      const dist = Math.max(span / 2 / Math.tan(hfov / 2), mode === 'face' || mode === 'hairs' ? Number(q.get('dist') ?? 1.75) : 2.2);
+      if (mode === 'face' || mode === 'hairs') {
         // 顔: 目の高さから、ほぼ水平に
         const eye = Number(q.get('cy') ?? 0.74);
         camera.position.set(cx, eye, dist);
@@ -238,6 +274,7 @@
         d.textContent = l.text;
         if (headShot) v.copy(new THREE.Vector3(l.x, 0.5, 0).project(camera));
         if (mode === 'face') v.copy(new THREE.Vector3(l.x, 0.6, 0).project(camera));
+        if (mode === 'hairs') v.copy(new THREE.Vector3(l.x, 0.44, 0).project(camera));
         d.style.cssText = `position:absolute;top:${H - 30}px;left:${((v.x + 1) / 2) * W}px;transform:translateX(-50%);background:#000a;padding:2px 6px;border-radius:4px;white-space:nowrap`;
         document.body.append(d);
       }
