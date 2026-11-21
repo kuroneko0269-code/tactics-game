@@ -1,4 +1,6 @@
 import { defineConfig, type Plugin } from 'vitest/config';
+// 書体の、使う文字の範囲だけを残す（scripts/font-subset.mjs）
+import { fontSubset } from './scripts/font-subset.mjs';
 
 // GitHub Pages では https://<ユーザー名>.github.io/<リポジトリ名>/ で公開されるため、
 // 本番ビルドのときだけ base（サイトの置き場所）をリポジトリ名に合わせる。
@@ -24,10 +26,12 @@ export default defineConfig(({ command, isPreview }) => ({
   define: {
     __BUILD_TIME__: JSON.stringify(BUILD_TIME),
   },
-  plugins: [versionFile()],
+  plugins: [versionFile(), fontSubset()],
   build: {
     // Three.js 本体だけで 500KB 近くあるため、警告の基準を少し上げる
     chunkSizeWarningLimit: 800,
+    // 書体の小さな範囲のファイルを CSS に埋め込まない（埋め込むと、使わない文字の範囲まで最初に読み込むことになるため）
+    assetsInlineLimit: (file) => (file.endsWith('.woff2') ? false : undefined),
   },
   test: {
     include: ['src/**/*.test.ts'],

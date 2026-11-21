@@ -27,6 +27,8 @@ export interface StagePort {
   step?(actor: string, from: Coord, to: Coord): Promise<void>;
   /** 話者の強調: マップ上のその人物の頭上に印を出し、カメラを少しだけ寄せる。null で印を消し、カメラを戻す */
   highlight?(speaker: string | null): void;
+  /** 台詞の間、話者の口を seconds 秒だけ動かす（0 で止める） */
+  speak?(speaker: string, seconds: number): void;
   /** 物をタップする操作: その物を光らせる（null で消す）。物のあるマス */
   setTapTarget?(name: string | null): Coord | undefined;
   /** 物か人物の、今の画面座標（物の名前の札を出す所）。見えなければ undefined */
@@ -191,6 +193,24 @@ export function inscriptionNodes(segments: readonly RubySegment[]): Node[] {
 
 const plain = (segments: readonly RubySegment[]) => segments.map((s) => s.text).join('');
 
+/** 黒地の字幕: 1行ずつ現れる間（ミリ秒）と、消える時間（style.css の caption-line-in・.leaving と合わせる） */
+const CAPTION_LINE_GAP_MS = 1100;
+const CAPTION_FADE_OUT_MS = 800;
+
+/** 字幕の組み立てた文（改行 br で区切られた）を、行ごとの span に分ける（黒地の字幕を1行ずつ現すため） */
+function captionLines(nodes: readonly Node[]): HTMLElement[] {
+  const lines: HTMLElement[] = [];
+  let line = el('span', 'caption-line');
+  for (const n of nodes) {
+    if (n.nodeName === 'BR') {
+      lines.push(line);
+      line = el('span', 'caption-line');
+    } else line.append(n);
+  }
+  lines.push(line);
+  return lines;
+}
+
 export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
   const { root, port } = deps;
   root.innerHTML = '';
@@ -266,6 +286,8 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
   let faceName: string | null = null;
   let highlighted: string | null = null;
   let shownTitle = '';
+  /** 最後に口を動かした話者 */
+  let spoken: string | null = null;
   let tapTarget: Coord | undefined;
   let listenMs = 0;
   let listenAll = 0;
@@ -387,17 +409,17 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
     });
   };
 
-  /** 名前の札の色（人物の服の主な色。縁は帯の色） */
+  /**
+   * 名前の札の色: 名前は真鍮色の明朝体で出し（画面の体裁「暦盤」）、人物の服の色は、名前の左の小さな印の色にだけ使う（だれの台詞かを色でも見分けられるように）
+   */
   const paintPlate = (node: HTMLElement, who: string) => {
     const c = deps.speakerColors?.(who);
     if (!c) {
-      node.removeAttribute('style');
+      node.style.removeProperty('--speaker');
       return;
     }
     const st = plateStyle(c.body, c.accent);
-    node.style.background = st.background;
-    node.style.color = st.color;
-    node.style.borderColor = st.border;
+    node.style.setProperty('--speaker', st.background);
   };
 
   /** 顔の枠と話者の強調を切り替える（null で消す） */
@@ -431,8 +453,17 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       return;
     }
     if (who === null) {
-      // 語り: 枠には入れず、字幕として出す（暗転中は画面の中央）
-      captionText.replaceChildren(...rubyNodes(step.text));
+      // 語り: 枠には入れず、字幕として出す（暗転中は画面の中央に、1行ずつゆっくり現れる）
+      caption.classList.remove('leaving');
+      if (stage.dark) {
+        const lines = captionLines(rubyNodes(step.text));
+        lines.forEach((line, i) => (line.style.animationDelay = `${(i * CAPTION_LINE_GAP_MS) / 1000}s`));
+        captionText.replaceChildren(...lines);
+        caption.style.setProperty('--caption-lines', String(lines.length));
+      } else {
+        captionText.replaceChildren(...rubyNodes(step.text));
+        caption.style.removeProperty('--caption-lines');
+      }
       caption.classList.toggle('centered', stage.dark);
       caption.hidden = false;
       box.classList.add('narration');
@@ -453,6 +484,10 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
     title.hidden = shownTitle === '';
     text.replaceChildren(...rubyNodes(step.text));
     setSpeakerView(step.portrait === false ? null : who, step.highlight === false ? null : who);
+    // 話者の口を、台詞の長さに合わせて小さく動かす（前の話者の口は止める）
+    if (spoken && spoken !== who) port.speak?.(spoken, 0);
+    spoken = who;
+    port.speak?.(who, Math.min(3.2, 0.5 + plain(step.text).length * 0.09));
     box.hidden = false;
   };
   /**
@@ -791,6 +826,11 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
       // 秒を決めた物の文字（封蝋の印など）は、その間だけ出して次へ（タップでも進む）
       else if (step.autoMs !== undefined) await wait(step.autoMs);
       else await new Promise<void>((resolve) => (release = resolve));
+      // 黒地の字幕は、ゆっくり消えてから次へ（画面の体裁「暦盤」）
+      if (step.speaker === null && !step.inscription && caption.classList.contains('centered') && !fast && !skipped) {
+        caption.classList.add('leaving');
+        await wait(CAPTION_FADE_OUT_MS);
+      }
       // 字幕と物の文字は、読み終えたらすぐ消す（暗転の上の字幕が、明けた画の上に残らないように）。台詞の枠は次の台詞まで残す
       if (step.speaker === null || step.inscription) hideLine(true);
       index = advance(script, nextStop(script, index));
@@ -823,20 +863,23 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
     placardEra.textContent = era ?? '';
     placardEra.hidden = !era;
     placardEra.dataset.era = era === '過去' ? 'past' : era === '今' ? 'now' : '';
-    placardText.textContent = body;
+    // 場所と時刻の間に縦の細い線（終わりの区切り。「トウマの家 ユナの部屋 夜」（区切りは全角の空白）なら「夜」の前）
+    const parts = body.split('\u3000');
+    if (parts.length > 1) placardText.replaceChildren(parts.slice(0, -1).join('\u3000'), el('span', 'placard-sep'), parts[parts.length - 1]!);
+    else placardText.textContent = body;
     placard.dataset.era = placardEra.dataset.era;
     placard.hidden = false;
     placard.classList.remove('leaving');
     placardShown = textOf;
     deps.onNotice?.('placard', textOf);
     window.clearTimeout(placardTimer);
-    const ms = (fast ? 1600 : 3600) + (stage.dark ? 1000 : 0);
+    const ms = (fast ? 1600 : 4200) + (stage.dark ? 1000 : 0);
     placardTimer = window.setTimeout(() => {
       placard.classList.add('leaving');
       placardTimer = window.setTimeout(() => {
         placard.hidden = true;
         placardShown = '';
-      }, 200);
+      }, 300);
     }, ms);
   }
 

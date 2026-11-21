@@ -1,3 +1,6 @@
+// 書体（明朝体。読み込む前は端末の明朝体で出す）
+import '@fontsource/shippori-mincho/500.css';
+import '@fontsource/shippori-mincho/700.css';
 import './ui/style.css';
 import * as THREE from 'three';
 import { forceVictory, startBattle } from './core/battle';
@@ -244,11 +247,11 @@ function main(): void {
   /** 場面の時刻の光（朝・昼・夕方・夜）。省くと昼 */
   const timeLight = (name: string | undefined) => TIMES_OF_DAY[name ?? DEFAULT_TIME] ?? TIMES_OF_DAY[DEFAULT_TIME]!;
   /** 今の時刻の光（自動テスト用と、遠景のカットから戻す時のため） */
-  let currentTime: { name: string; sky?: number } = { name: DEFAULT_TIME };
-  /** 場面の時刻の光を当てる。sky を渡すと空の色だけはそれ（マップが決めた空の色） */
-  const applyTime = (name: string | undefined, sky?: number) => {
-    currentTime = { name: name ?? DEFAULT_TIME, ...(sky !== undefined ? { sky } : {}) };
-    applyLighting(stage.scene, stage.lights, timeLight(name), sky);
+  let currentTime: { name: string; sky?: number; ambient?: number } = { name: DEFAULT_TIME };
+  /** 場面の時刻の光を当てる。sky を渡すと空の色だけはそれ（マップが決めた空の色）。ambient は室内の明るさの割合 */
+  const applyTime = (name: string | undefined, sky?: number, ambient?: number) => {
+    currentTime = { name: name ?? DEFAULT_TIME, ...(sky !== undefined ? { sky } : {}), ...(ambient !== undefined ? { ambient } : {}) };
+    applyLighting(stage.scene, stage.lights, timeLight(name), sky, ambient);
   };
   // マップの見た目は戦場の定義から作る（拠点や編成の画面でも、最後に出したマップを背景に出す）
   const rigOptions = (view: MapView, def: MapDefinition) => {
@@ -883,7 +886,7 @@ function main(): void {
     cutView = undefined;
     stage.scene.remove(cutMap.group);
     cutMap.dispose();
-    applyTime(timeBefore.name, timeBefore.sky);
+    applyTime(timeBefore.name, timeBefore.sky, timeBefore.ambient);
     for (const o of hidden) o.visible = true;
     hudEl.hidden = hudWas;
     labelsEl.hidden = labelsWas;
@@ -922,7 +925,7 @@ function main(): void {
     const sun = new THREE.DirectionalLight();
     sun.position.set(6, 12, 4);
     scene.add(hemi, sun);
-    applyLighting(scene, { hemi, sun }, timeLight(tod && tod.kind === 'timeOfDay' ? tod.time : def.time), def.sky);
+    applyLighting(scene, { hemi, sun }, timeLight(tod && tod.kind === 'timeOfDay' ? tod.time : def.time), def.sky, def.ambient);
     // 一瞬の画なので、夜の画でも手もとが見える明るさにする（暗くてユナの手が見分けられないと言われたため。初見の検査）
     hemi.intensity *= 3.2;
     sun.intensity *= 2.4;
@@ -984,6 +987,10 @@ function main(): void {
     sceneView?.dispose();
     sceneView = undefined;
     applyTime(undefined);
+    if (sceneHeightBefore !== undefined) {
+      setRigHeight(sceneHeightBefore);
+      sceneHeightBefore = undefined;
+    }
   }
   /** 暗転（画面を暗くする）と明転 */
   const setDark = (dark: boolean, ms: number) =>
@@ -993,9 +1000,13 @@ function main(): void {
       fadeEl.dataset.dark = String(dark);
       window.setTimeout(resolve, ms);
     });
-  const zoomOf = (d: Extract<Directive, { kind: 'camera' }>) => (d.zoom ? SCENE_ZOOM[d.zoom] : undefined);
-  /** カメラをゆっくり動かす秒（早送りの時は短く） */
-  const cameraSeconds = (d: Extract<Directive, { kind: 'camera' }>, fast: boolean) => (d.ms ? (fast ? Math.min(d.ms, 300) : d.ms) / 1000 : undefined);
+  /** 今の会話用マップ（カメラの寄りと速さの倍率を引く） */
+  const currentStageDef = () => (screen === 'scene' ? stages.find((st) => st.id === currentStageId) : undefined);
+  // マップの寄りの倍率は、近だけにかける（遠と中は、部屋と人物の並びを見せる画のまま）
+  const zoomOf = (d: Extract<Directive, { kind: 'camera' }>) => (d.zoom ? SCENE_ZOOM[d.zoom] * (d.zoom === 'near' ? (currentStageDef()?.cameraZoom ?? 1) : 1) : undefined);
+  /** カメラをゆっくり動かす秒（早送りの時は短く。マップの cameraPace の倍だけゆっくり） */
+  const cameraSeconds = (d: Extract<Directive, { kind: 'camera' }>, fast: boolean) =>
+    d.ms ? (fast ? Math.min(d.ms, 300) : d.ms * (currentStageDef()?.cameraPace ?? 1)) / 1000 : undefined;
   /** 台本を進める（終わるか飛ばすと解決する） */
   const playScript = async (scriptId: string | Script, port: StagePort, initial?: StageState) => {
     const script = typeof scriptId === 'string' ? scriptOf(scriptId) : scriptId;
@@ -1049,7 +1060,7 @@ function main(): void {
     /** 舞台の時刻の光（@時刻 で決めた時刻か、今のマップの時刻） */
     const syncTime = (st: StageState) => {
       const def = stages.find((x) => x.id === (st.location ?? sceneBaseStageId));
-      applyTime(st.time ?? def?.time, def?.sky);
+      applyTime(st.time ?? def?.time, def?.sky, def?.ambient);
     };
     const ensureLocation = (st: StageState) => {
       const want = st.location ?? sceneBaseStageId;
@@ -1172,6 +1183,7 @@ function main(): void {
       await view.walk(actor, [from, to]);
     },
     highlight: (speaker) => highlightSpeaker(speaker && view.actorHead(speaker) ? () => view.actorHead(speaker) : null),
+    speak: (speaker, seconds) => view.talk(speaker, seconds),
     setTapTarget: (name) => {
       const c = view.setTapTarget(name);
       // タップする物が見えるように、カメラを寄せる
@@ -1584,7 +1596,16 @@ function main(): void {
   }
   /** 会話用マップの空の色（夜空など）。省いたマップは昼の空 */
   /** 会話用マップの時刻の光と空の色（夜空のマップなど） */
-  const applySky = (def: { sky?: number; time?: string }) => applyTime(def.time, def.sky);
+  const applySky = (def: { sky?: number; time?: string; ambient?: number }) => applyTime(def.time, def.sky, def.ambient);
+  /** 会話用マップのカメラの高さ（マップが決めた高さ。省くと標準）。会話の場面を出る時に、元の高さへ戻す */
+  let sceneHeightBefore: 0 | 1 | 2 | undefined;
+  const setRigHeight = (h: 0 | 1 | 2) => {
+    for (let i = 0; i < 3 && rig.heightLevel !== h; i++) rig.cycleHeight();
+  };
+  const applyStageCamera = (def: { cameraHeight?: 0 | 1 | 2 }) => {
+    sceneHeightBefore ??= rig.heightLevel;
+    setRigHeight(def.cameraHeight ?? 1);
+  };
   /** 会話の場面の途中で場所を移す（@場所）: 会話用マップと舞台を作り直す（今の会話は続ける） */
   function switchLocation(stageId: string): SceneView {
     const stageDef = stages.find((st) => st.id === stageId);
@@ -1595,6 +1616,7 @@ function main(): void {
     useMap(stageDef.map);
     mapView.group.visible = stageDef.hideGround !== true;
     applySky(stageDef);
+    applyStageCamera(stageDef);
     rig.reset();
     const view = createSceneView(sceneViewOptions());
     sceneView = view;
@@ -1611,6 +1633,7 @@ function main(): void {
     useMap(stageDef.map);
     mapView.group.visible = stageDef.hideGround !== true;
     applySky(stageDef);
+    applyStageCamera(stageDef);
     setScreen('scene');
     rig.reset();
     const view = createSceneView(sceneViewOptions());

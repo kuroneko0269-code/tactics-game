@@ -14,7 +14,8 @@ import { stages } from './stages';
  * 仕草の動き（短い動き）。frames は 0〜1 の時刻ごとの姿勢で、間はなめらかにつなぐ。最後は元の姿勢に戻す。
  * 姿勢の値（角度はラジアン）: bow 体を前に倒す、head 頭を下げる（負なら上げる）、headTurn 頭を横に向ける、tilt 首をかしげる、
  * armL・armR 腕を前に上げる、spreadL・spreadR 腕を横に開く、drop 体を沈める（膝をつく）、lift 体を浮かせる（驚く）、
- * back 体を後ろへずらす（後ずさる。マスの一辺が 1）、turn 体ごと回す（背を向ける）
+ * back 体を後ろへずらす（後ずさる。マスの一辺が 1）、turn 体ごと回す（背を向ける）、
+ * sit 腰掛ける（0〜1。脚を前に出して腰を落とす。部品の人形で足した。drop は股と膝を曲げてしゃがむ）
  */
 export interface GesturePose {
   readonly bow?: number;
@@ -29,6 +30,7 @@ export interface GesturePose {
   readonly lift?: number;
   readonly back?: number;
   readonly turn?: number;
+  readonly sit?: number;
 }
 
 export interface GestureDefinition {
@@ -136,26 +138,32 @@ export const GESTURES: Readonly<Record<string, GestureDefinition>> = {
   めくる: { seconds: 0.9, frames: [{ t: 0 }, { t: 0.3, armR: 1.0, spreadR: 0.3, head: 0.5 }, { t: 0.6, armR: 1.0, spreadR: -0.3, head: 0.5 }, { t: 1 }] },
   /** 隊の一人ずつに合図する（手で前を示す） */
   手で合図する: { seconds: 0.9, frames: [{ t: 0 }, { t: 0.3, armR: 1.5, spreadR: 0.5 }, { t: 0.6, armR: 1.5, spreadR: -0.2 }, { t: 1 }] },
+  // ---- 部品の人形（序章の場面4の見本）で足した仕草 ----
+  /** 手に持った物を、目の前の台に置く（少しかがみ、右手を前の下へ伸ばしてから戻す） */
+  物を置く: { seconds: 1.0, frames: [{ t: 0 }, { t: 0.4, armR: 0.95, bow: 0.22, head: 0.3 }, { t: 0.65, armR: 0.9, bow: 0.22, head: 0.3 }, { t: 1 }] },
+  /** 後ろを振り向く（頭が先に回り、体が少し遅れてついてくる。向きは変えない） */
+  振り向く: { seconds: 0.9, frames: [{ t: 0 }, { t: 0.3, headTurn: 0.6, turn: 0.25 }, { t: 0.75, headTurn: 0.6, turn: 0.25 }, { t: 1 }] },
 };
 
 /**
  * 続く姿勢（@姿勢 名前 座る）。「立つ」で元の姿勢に戻す。値の意味は GesturePose と同じ（turn は使わない）
  */
 export const POSTURES: Readonly<Record<string, GesturePose>> = {
-  座る: { drop: 0.2, armL: 0.6, armR: 0.6 },
+  // 部品の人形では、脚を前に出して腰掛ける（sit）
+  座る: { sit: 1, armL: 0.55, armR: 0.55 },
   /** 作業台に向かって手を動かしている（三度叩くは、この姿勢から叩く） */
   作業する: { armR: 0.8, armL: 0.7, bow: 0.15, head: 0.35 },
   /** 膝をついたまま（遠くから見ても、立っていないと分かる深さ。戦闘不能の膝をついた姿と同じくらい） */
   膝をついたまま: { drop: 0.3, bow: 0.4, head: 0.45, armL: 0.35, armR: 0.35 },
   /** 腰掛けて、手もとの帳面に目を落としたまま（ハルドの「顔を上げずに話す」。話を聞く部屋） */
   // 上から見ると、深く首を垂れた姿は机に突っ伏して寝ているように見えるので、目だけを落とす程度にする（初見の検査）
-  帳面を読む: { drop: 0.2, armL: 0.75, armR: 0.75, head: 0.28 },
+  帳面を読む: { sit: 1, armL: 0.75, armR: 0.75, head: 0.28 },
   /** 剣を振り上げたまま（序章の丘: 門が開いてガレスがさらわれる間、トウマは何もしていないと分かるように） */
   剣を振り上げたまま: { armR: 2.9, armL: 2.6, head: -0.15 },
   うつむいたまま: { head: 0.6, bow: 0.1 },
   背を丸める: { bow: 0.3, head: 0.2 },
   /** 座ったまま、受け取った物を両手で胸に抱く（序章の場面3: テオが守り袋を胸に抱く。2026-11-20 発注者の決定） */
-  胸に抱いて座る: { drop: 0.2, armL: 1.25, armR: 1.25, head: 0.3 },
+  胸に抱いて座る: { sit: 1, armL: 1.25, armR: 1.25, head: 0.3 },
   /** 石を耳に当てたまま（序章の場面9。聞いている間） */
   耳に当てたまま: { armR: 2.3, tilt: 0.25, head: 0.1 },
 };
@@ -234,6 +242,15 @@ export const PROP_KINDS: Readonly<Record<string, string>> = {
   窓: 'window',
   星の見える窓: 'windowNight',
   台のともった灯: 'benchLampLit',
+  // 序章の場面4の見本（家の中の作り込み）で足した物
+  家の殻: 'homeShell',
+  かまど: 'hearth',
+  壁の棚: 'homeShelf',
+  長椅子: 'diningBenches',
+  卓の灯: 'tableLamp',
+  ともった卓の灯: 'tableLampLit',
+  寝台: 'bed',
+  作業の腰掛け: 'workStool',
   /** 遠くの家（マップの外の遠景。堰の下流の村の屋根） */
   遠くの家: 'house',
   壁の工具: 'wallTools',

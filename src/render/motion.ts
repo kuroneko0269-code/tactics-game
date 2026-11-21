@@ -11,7 +11,7 @@ export interface GestureMotion {
   readonly frames: readonly (PuppetPose & { readonly t: number; readonly turn?: number })[];
 }
 
-const POSE_KEYS = ['bow', 'head', 'headTurn', 'tilt', 'armL', 'armR', 'spreadL', 'spreadR', 'drop', 'lift', 'back'] as const;
+const POSE_KEYS = ['bow', 'head', 'headTurn', 'tilt', 'armL', 'armR', 'spreadL', 'spreadR', 'drop', 'lift', 'back', 'sit'] as const;
 
 /** 2つの姿勢を足し合わせる（続く姿勢の上に、仕草の動きを重ねる） */
 export function addPoses(a: PuppetPose, b: PuppetPose): PuppetPose {

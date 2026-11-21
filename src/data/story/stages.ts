@@ -36,6 +36,16 @@ export interface StageDefinition {
   readonly lookouts?: readonly { readonly x: number; readonly z: number }[];
   /** マップのマスを描かない（夜空だけを映す場面。地面の板が何か分からない箱に見えないように） */
   readonly hideGround?: boolean;
+  /**
+   * 室内の明るさの割合（空からの光と日の光を、この割合に弱める。灯の光で人物を照らし、部屋の隅を暗く沈めるため。省くと 1）
+   */
+  readonly ambient?: number;
+  /** 台本のカメラの「近」の寄りの倍率（近をこの倍だけ寄せる。人物の顔と手もとが分かる距離まで寄るため。省くと 1） */
+  readonly cameraZoom?: number;
+  /** 台本のカメラを動かす秒の倍率（大きいほどゆっくり。省くと 1） */
+  readonly cameraPace?: number;
+  /** カメラの高さ（0 低い・1 標準・2 高い。省くと標準）。低いほど人物の顔が見える */
+  readonly cameraHeight?: 0 | 1 | 2;
 }
 
 /** 室内（仮）: 5×5 の床と、奥の壁（高さ 4） */
@@ -60,22 +70,33 @@ export const yardStage: StageDefinition = {
 // ---- 序章の会話用のマップ（序章の PR B。形と家具の置き方は仮） ----
 
 /**
- * トウマの家（8×6）。左に食卓のある居間、右の奥にユナの部屋（のちの物置）。中ほどの壁（高さ 2）の (5,2) が廊下の口。
- * 手前（z=5）は戸の外。戸は (2,4) の手前の縁。ユナの部屋の物（作業台、のちの樽・箒・ほこり）は台本が置く
+ * トウマの家（8×6）。左に食卓のある居間、右の奥にユナの部屋（のちの物置）。中ほどの仕切り（x=5）の (5,2) が戸口。
+ * 手前（z=5）は戸の外。戸は (2,4) の手前の縁。ユナの部屋の物（作業台、のちの樽・箒・ほこり）は台本が置く。
+ * 壁は家の殻（物の形 homeShell）で描く: 奥と左の壁は高く、手前と右の壁は低く切った模型の家（序章の場面4の見本の PR で、石の段の壁から作り直した）。
+ * 部屋は暗めにして（ambient）、食卓の灯・かまど・作業台の灯の暖かい光で人物を照らす
  */
 export const homeStage: StageDefinition = {
   id: 'stage-home',
-  // 室内: 家のまわりは暗い（家が空に浮いて見えないように）
-  sky: 0x2e2420,
+  // 室内: 家のまわりは濃紺に沈める（家が空に浮いて見えないように）
+  sky: 0x0b111e,
+  ambient: 0.52,
+  cameraZoom: 1.45,
+  cameraPace: 1.5,
+  cameraHeight: 0,
   map: stageMap('stage-home', [
-    '4s 4s 4s 4s 4s 4s 4s 4s',
-    '0b 0b 0b 0b 0b 2s 0b 0b',
     '0b 0b 0b 0b 0b 0b 0b 0b',
-    '0b 0b 0b 0b 0b 2s 0b 0b',
-    '0b 0b 0b 0b 0b 2s 2s 2s',
+    '0b 0b 0b 0b 0b 0b 0b 0b',
+    '0b 0b 0b 0b 0b 0b 0b 0b',
+    '0b 0b 0b 0b 0b 0b 0b 0b',
+    '0b 0b 0b 0b 0b 0b 0b 0b',
     '0d 0d 0d 0d 0d 0d 0d 0d',
   ]),
   props: [
+    { id: '家の殻', kind: '家の殻', x: 0, z: 0 },
+    { id: 'かまど', kind: 'かまど', x: 0, z: 1 },
+    { id: '壁の棚', kind: '壁の棚', x: 3, z: 1 },
+    { id: '長椅子', kind: '長椅子', x: 2, z: 2 },
+    { id: '卓の灯', kind: 'ともった卓の灯', x: 2, z: 2 },
     { id: '食卓', kind: '食卓', x: 2, z: 2 },
     { id: '戸', kind: '戸', x: 2, z: 4 },
     // ユナの部屋（のちの物置）の窓。場面4と場面9で、同じ形と位置（改訂の決まり: 物置が元はユナの部屋だったと分かるように）

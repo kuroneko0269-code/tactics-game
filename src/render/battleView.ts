@@ -627,6 +627,8 @@ export function createBattleView(options: {
     turnTo,
     async animateMove(unitId, path) {
       const v = visual(unitId);
+      // 歩く間は足と腕を振る
+      v.puppet.setMoving?.(true);
       for (let i = 1; i < path.length; i++) {
         const a = path[i - 1]!;
         const b = path[i]!;
@@ -634,13 +636,14 @@ export function createBattleView(options: {
         await turnTo(unitId, dir);
         const from = mapView.tileTop(a.x, a.z);
         const to = mapView.tileTop(b.x, b.z);
-        const hop = 0.12 + Math.abs(to.y - from.y) * 0.6;
+        const hop = 0.05 + Math.abs(to.y - from.y) * 0.6;
         await tweens.play(STEP_SECONDS, (t) => {
           v.puppet.group.position.lerpVectors(from, to, t);
           v.puppet.group.position.y = from.y + (to.y - from.y) * t + Math.sin(Math.PI * t) * hop;
         });
         place(v, b);
       }
+      v.puppet.setMoving?.(false);
     },
     async animateAttack(event, onImpact) {
       const attacker = visual(event.attackerId);
@@ -881,6 +884,7 @@ export function createBattleView(options: {
       const a = actorPuppet(id);
       if (!a) return;
       const seconds = 0.28 / Math.max(0.2, pace);
+      a.puppet.setMoving?.(true);
       for (let i = 1; i < path.length; i++) {
         const from = mapView.tileTop(path[i - 1]!.x, path[i - 1]!.z);
         const to = mapView.tileTop(path[i]!.x, path[i]!.z);
@@ -890,6 +894,7 @@ export function createBattleView(options: {
         await tweens.play(seconds, (t) => a.puppet.group.position.lerpVectors(from, to, t));
         a.coord = { x: path[i]!.x, z: path[i]!.z };
       }
+      a.puppet.setMoving?.(false);
     },
     async wrap(id) {
       if (!wraps.has(id)) await wrapWithGate(id);

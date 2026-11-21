@@ -1,7 +1,9 @@
 /**
  * 物語の場面の画面写真を撮る（初見の検査のため。手順は docs/STORY_REVIEW.md）。
  *
- *   npm run story-shots -- --out=フォルダ [--speed=3] [--scenes=0,1,2]
+ *   npm run story-shots -- --out=フォルダ [--speed=3] [--scenes=0,1,2] [--from=4]
+ *
+ * --from=4 で、確認用の機能の「場面を選ぶ」から、その脚本の場面の始めから動かし、--scenes の最後の場面を過ぎたら止める（1場面だけを見る時）。
  *
  * 序章を題名の画面から最後まで、スマホ縦向き（iPhone 13 の大きさ、画素の密度 1）で動かし、
  * 台詞・字幕・操作が出るたびと、動きの途中（決まった間隔。前の写真と同じ画は省く）に画面写真を撮る。
@@ -242,13 +244,29 @@ async function main() {
 
   await page.goto(`${baseUrl}?seed=${SEED}&speed=${SPEED}`);
   await until(() => window.__tactics?.screen() === 'title');
-  await press(text.title.story);
+  /** --from: 脚本の場面の番号から始める（確認用の機能の「場面を選ぶ」）。--scenes の最後を過ぎたら止める */
+  const FROM = args.from !== undefined ? Number(args.from) : null;
+  const LAST = ONLY ? Math.max(...ONLY) : null;
+  if (FROM !== null) {
+    await press(text.settings.open);
+    await press(text.settings.checkOff);
+    await press(text.settings.close);
+    await press(text.title.story);
+    await until(() => window.__tactics.screen() === 'story-menu');
+    await press(text.check.sceneSelect);
+    await until(() => window.__tactics.screen() === 'scene-select');
+    const i = scenes.findIndex((s) => s.scriptScene === FROM);
+    const book = books.find((b) => b.id === 'main');
+    const label = text.story.sceneLabel(text.story.chapters[book.chapters[0].id], scenes[i].scriptScene, text.story.scenes[scenes[i].id]);
+    await page.getByRole('button', { name: label, exact: true }).click();
+  } else await press(text.title.story);
   let busyShotAt = 0;
   let logAt = 0;
   const started = Date.now();
   for (let guard = 0; guard < 200000; guard++) {
     const screen = await T(() => window.__tactics.screen());
     if (screen === 'story-end') break;
+    if (FROM !== null && LAST !== null && scriptSceneOf(await storyScene()) > LAST) break;
     if (Date.now() - started > 40 * 60 * 1000) throw new Error('時間がかかりすぎています');
     const d = await status();
     if (args.debug && Date.now() - logAt > 5000) {

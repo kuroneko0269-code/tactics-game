@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { MODELS, type ShapePart } from '../data/story/models';
+import { BACKDROP_MODELS, MODEL_LIGHTS, MODELS, type ShapePart } from '../data/story/models';
 import type { Puppet } from './puppet';
 import { YAW_OF } from './puppet';
 
@@ -58,6 +58,34 @@ export function createPropModel(kind: string): Puppet {
   group.add(body);
   const swaying: { mesh: THREE.Mesh; x: number; amount: number }[] = [];
   const materials = buildModel(kind, body, swaying);
+  // 背景の大きな物は、タップの判定から外す
+  if (BACKDROP_MODELS.includes(kind)) body.traverse((o) => (o.raycast = () => {}));
+  // 物が放つ光（ともった灯）。人物と机に暖かい光を当て、影を落とす
+  const lightDef = MODEL_LIGHTS[kind];
+  let light: THREE.PointLight | THREE.SpotLight | undefined;
+  if (lightDef) {
+    if (lightDef.shadow) {
+      // 影を落とす灯は、下へ広く照らすスポットの光にする（点の光の影は6方向を描くので重い。スポットなら1方向で、スマホでも軽い）
+      const spot = new THREE.SpotLight(lightDef.color, lightDef.intensity * 2.2, lightDef.distance, 1.5, 0.75, 1.5);
+      spot.position.set(lightDef.at[0], lightDef.at[1], lightDef.at[2]);
+      spot.target.position.set(lightDef.at[0], lightDef.at[1] - 1, lightDef.at[2]);
+      body.add(spot.target);
+      spot.castShadow = true;
+      spot.shadow.mapSize.set(512, 512);
+      spot.shadow.bias = -0.002;
+      spot.shadow.radius = 3;
+      spot.shadow.camera.near = 0.05;
+      spot.shadow.camera.far = lightDef.distance;
+      light = spot;
+    } else {
+      light = new THREE.PointLight(lightDef.color, lightDef.intensity, lightDef.distance, 1.6);
+      light.position.set(lightDef.at[0], lightDef.at[1], lightDef.at[2]);
+    }
+    body.add(light);
+  }
+  const baseIntensity = light?.intensity ?? 0;
+  /** 光の強さの割合（現れる・消える時に、形と一緒に明るさも変える） */
+  let lightLevel = 1;
   const base = materials.map((m) => m.emissive.clone());
   const baseOpacity = materials.map((m) => m.opacity);
   let yaw = 0;
@@ -80,6 +108,8 @@ export function createPropModel(kind: string): Puppet {
     },
     setOpacity(opacity) {
       materials.forEach((m, i) => (m.opacity = opacity * baseOpacity[i]!));
+      lightLevel = opacity;
+      if (light) light.intensity = baseIntensity * opacity;
     },
     setGlow(color, amount) {
       materials.forEach((m, i) =>
@@ -89,6 +119,11 @@ export function createPropModel(kind: string): Puppet {
     update(elapsed) {
       // 揺れる部品（軒の灯など）
       swaying.forEach((s, i) => (s.mesh.position.x = s.x + Math.sin(elapsed * 2.4 + i * 1.3) * s.amount));
+      // 炎のように、明るさがわずかに揺らぐ
+      if (light && lightDef?.flicker) {
+        const f = Math.sin(elapsed * 9.1) * 0.5 + Math.sin(elapsed * 23.7 + 1.3) * 0.3 + Math.sin(elapsed * 4.3) * 0.2;
+        light.intensity = baseIntensity * lightLevel * (1 + f * lightDef.flicker);
+      }
     },
   };
 }
