@@ -61,7 +61,9 @@ TypeScript / Vite（開発サーバーとビルド）/ Three.js（3D描画）/ V
 - **core の乱数は `src/core/rng.ts` のシード付き生成器だけを使う。** `Math.random` は lint で禁止。
   同じシード値なら同じ結果になるので、リプレイや巻き戻しで結果を再現できる。
 - **ジョブやアビリティの数値はコードに直接書かず `src/data` に置く。** core は引数で受け取ったデータで計算するだけにする。
-- キャラクターは、コードで組み立てた部品の人形（`src/render/puppet.ts`。約 3.4 頭身、小さい目とまばたき、3段の陰と細い輪郭線、骨で動かす1つの形。部品と衣装の組み合わせは `src/data/story/looks.ts`）。将来ローポリ3Dモデルに差し替えることもありうる。
+- キャラクターは、コードで組み立てた部品の人形（`src/render/puppet.ts`。約 3.4 頭身、小さい目とまばたき、3段の陰と細い輪郭線、骨で動かす1つの形。部品と衣装の組み合わせは `src/data/story/looks.ts`）。
+  序章の場面4だけ、外部の3D素材 KayKit（CC0）の体・骨・動きに自作の髪・衣装・色を足した人形を試している（`src/render/kaykit.ts`・`kaykitParts.ts`、見た目は `looks.ts` の `kaykit`、設定の「人形」で切り替え。docs/KAYKIT.md、素材の出どころは docs/CREDITS.md）。
+  外部の素材を足す時は、配布物の使用条件の文面を読んで確かめ、docs/CREDITS.md に書く。
 - スマホのブラウザでも遊べること。操作はタップ（クリックも同じ扱い）、縦向き・横向きどちらでも崩れないこと。
   ボタンは指で押せる大きさ（目安 48px 以上）にする。
 - 名称・キャラクター・素材はすべてオリジナル。既存作品の固有名詞や見た目を使わない。
@@ -95,10 +97,10 @@ npm run preview      # ビルド結果を確認（http://localhost:4173/tactics-
 npm run check        # lint・型チェック・テスト・ビルドをまとめて実行
 npm run autoplay     # 自動プレイ（全体。手元で実行）: 実際のブラウザで画面をタップして1戦を最後まで進め、core だけの計算と結果が一致するか確かめる（約15〜20分。画面サイズを減らすと短い）
 npm run script-rules # 台本の決まり（台詞の字数・続けて話す枠・字幕の行数）に合わない所の一覧を出す
-npm run story-shots -- --out=フォルダ # （-- --from=4 --scenes=4 で、場面を選ぶから場面4だけ）序章を動かして、台本の1行ごとにスマホ縦向きの画面写真を撮り、場面ごとの一覧と観客への依頼文を作る（初見の検査。docs/STORY_REVIEW.md。約7分）
+npm run story-shots -- --out=フォルダ # （-- --from=4 --scenes=4 で、場面を選ぶから場面4だけ。-- --puppet=current で今の人形、-- --kkshade=plain で KayKit の人形を素材そのままの陰影で）序章を動かして、台本の1行ごとにスマホ縦向きの画面写真を撮り、場面ごとの一覧と観客への依頼文を作る（初見の検査。docs/STORY_REVIEW.md。約7分）
 npm run script-export # 序章の「画面に出るものだけ」（札・字幕・台詞と肩書き・物の文字・名札・操作の案内・カットの秒数・場面の光）を場面ごとに書き出す（-- --all で動き・カメラ・音も、-- --out=ファイル でファイルに）
 npm run autoplay:ci  # 自動プレイ（短くした版。CI で実行）: 1戦は操作を一通り確かめたところで照合して打ち切る（約3〜4分）
-npm run render-perf  # 描画の重さ: 序章の場面4の夕食と夜の画で、1こまの描く回数・三角形・処理の時間・1秒あたりのこまの数を数える（-- --root=別の版の写し で、前の版と同じ条件で比べる。約1分）
+npm run render-perf  # 描画の重さ: 序章の場面4の夕食と夜の画で、1こまの描く回数・三角形・処理の時間・1秒あたりのこまの数を数える（-- --root=別の版の写し で、前の版と同じ条件で比べる。-- --puppet=current で今の人形。約1分）
 npm run balance      # バランス確認: 画面を使わず AI 同士を戦わせ、敵の段階ごとの勝率、ジョブごとのレベル 50 までの戦闘数・成長率の違い、ダンジョンの各戦闘の勝率と時間、装備の段階ごとの勝率・お金の速さ・買いそろえるまでの戦闘数を集計する（約15分。-- --dungeon-only でダンジョンだけ、-- --equipment-only で装備だけ、-- --jobs でジョブごとの勝率の比較だけ（1つのジョブだけを入れ替えた部隊どうしを戦わせる）、-- --unlocks で新しいジョブの解放までの戦闘数だけ、-- --prologue で序章の2つの戦闘の勝率と見込みの時間だけ）
 ```
 
@@ -199,8 +201,8 @@ npm run balance      # バランス確認: 画面を使わず AI 同士を戦わ
   台本の新しい指示（光・節・音・章題・持つ・離す・姿勢）は `src/core/script.ts`・`dialogue.ts`、戦場の定義の `cast`・`looks`・`afterVictory`・`tutorial` は `src/core/sortie.ts`。
   物の形は `src/data/story/models.ts`、人物の見た目は `src/data/story/looks.ts`、会話用のマップは `src/data/story/stages.ts`（文字の行は `mapRows.ts`）、旋律と効果音の名前は `src/data/sounds.ts`、章のために決めた部隊は `src/data/story/parties.ts`。
   音の合成は `src/ui/sound.ts`、手ほどきは `src/ui/tutorial.ts`、設定の欄と音の印は `src/ui/settingsSheet.ts`。
-  設定（音量・消音・見た手ほどき・書体・文字の大きさ・人形の描き方）はセーブデータとは別に `src/save/saveStore.ts` の `createSettingsStore` で保存する（「はじめから」でも消さない）。
-  書体と文字の大きさを画面に当てるのは `src/ui/storyLook.ts`（選ばれている書体だけを読み込む）、人形のドット風の描き方は `src/render/pixelPuppets.ts`（見た目の見本の2回目）。
+  設定（音量・消音・見た手ほどき・書体・文字の大きさ・人形）はセーブデータとは別に `src/save/saveStore.ts` の `createSettingsStore` で保存する（「はじめから」でも消さない）。
+  書体と文字の大きさを画面に当てるのは `src/ui/storyLook.ts`（選ばれている書体だけを読み込む）。
 - 序章（ゲーム脚本の PR）: 台本は `src/data/story/scripts/prologue.ts`（ゲーム脚本の表の1行ずつを `@脚本 場面-行` の印のついた指示の組として書く。
   対応はテスト `src/data/story/gameScript.test.ts` で確かめる）、章と場面は `src/data/story/books.ts`（脚本の10場面。堰と丘は戦闘の前と戦闘に分けて 12 の場面）、
   見込みの時間は `src/core/scriptTiming.ts`（数値は `src/data/story/scriptTiming.ts`。`npm run script-rules` で場面ごとに出す）、2つの戦闘は `src/data/battles/prologue/`、

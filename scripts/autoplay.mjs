@@ -2536,7 +2536,7 @@ async function storyRun(browser, baseUrl, name, core) {
   const enableCheckTools = async () => {
     await press(text.settings.open);
     await press(text.settings.checkOff);
-    // 書体・文字の大きさ・人形の描き方（見た目の見本の2回目）: 押すと画面に効き、元に戻せる
+    // 書体・文字の大きさ（見た目の見本の2回目）・人形（KayKit の人形の試し）: 押すと画面に効き、元に戻せる
     const choice = (group, label) => press(text.settings.choiceLabel(group, label));
     const root = () => T(() => ({ ...document.documentElement.dataset }));
     check((await root()).storyFont === 'zenOldMincho' && (await root()).textSize === 'medium', '書体と文字の大きさの初めの値が違います');
@@ -2546,9 +2546,10 @@ async function storyRun(browser, baseUrl, name, core) {
     check((await T(() => window.__tactics.settings().textSize)) === 'large', '文字の大きさが設定に残っていません');
     await choice(text.settings.textSize, text.settings.textSizes.medium);
     await choice(text.settings.font, text.settings.fonts.zenOldMincho);
-    await choice(text.settings.puppetStyle, text.settings.puppetStyles.pixel);
-    check((await T(() => window.__tactics.settings().puppetStyle)) === 'pixel', '人形の描き方を切り替えられません');
-    await choice(text.settings.puppetStyle, text.settings.puppetStyles.smooth);
+    check((await T(() => window.__tactics.settings().puppetKind)) === 'kaykit', '人形の初めの値が KayKit ではありません');
+    await choice(text.settings.puppetKind, text.settings.puppetKinds.current);
+    check((await T(() => window.__tactics.settings().puppetKind)) === 'current', '人形を「今の人形」に切り替えられません');
+    await choice(text.settings.puppetKind, text.settings.puppetKinds.kaykit);
     await press(text.settings.close);
     check((await T(() => window.__tactics.settings().checkTools)) === true, '設定で確認用の機能を入にできません');
     check(await T(() => !document.querySelector('.check-badge').hidden), '確認用の機能が入なのに、画面の隅の印が出ていません');
@@ -2901,6 +2902,8 @@ async function storyRun(browser, baseUrl, name, core) {
       if (n === 4 && d.waiting === 'line' && d.speaker === 'テオ') seen.teo = (await T(() => document.querySelector('.dialogue-name')?.textContent)) === 'テオ' && d.title === '若い時守';
       if (n === 5 && d.speaker === 'ユナ' && d.text === 'おかえり') {
         seen.yunaTitle = d.title === 'トウマの妹';
+        // KayKit の人形の試し: 場面4だけ KayKit の人形になる（設定の初めの値が KayKit）
+        seen.kaykit = await T(() => window.__tactics.kaykit());
         await screenshot('scene4-okaeri');
       }
       if (n === 5 && d.text.startsWith('みんなの分')) {
@@ -2908,6 +2911,7 @@ async function storyRun(browser, baseUrl, name, core) {
         seen.night = (await T(() => window.__tactics.time())) === '夜';
         await screenshot('scene4-room');
       }
+      if (n === 6 && seen.kaykitAfter === undefined) seen.kaykitAfter = await T(() => window.__tactics.kaykit());
       if (n === 6 && d.speaker === 'ミオ' && d.text.startsWith('時守さん')) seen.mioTitle = d.title === '薬屋の弟子';
       if (n === 5 && d.text.startsWith('この歌、')) await screenshot('scene4-workbench');
       if (n === 6 && d.waiting === 'walk' && !seen.follow) {
@@ -2921,10 +2925,14 @@ async function storyRun(browser, baseUrl, name, core) {
     if (n === 4) check(seen.seal && seen.teo, '封蝋の印「未来より」か、テオの名前と肩書きが出ていません');
     if (n === 5) {
       check(seen.yunaTitle, 'ユナの「おかえり」に、肩書き「トウマの妹」が出ていません');
+      check(seen.kaykit === true, '場面4で、KayKit の人形になっていません');
       check(seen.night, '場面4のユナの部屋の光が、夜になっていません');
       check(((await soundCounts()).door ?? 0) >= 1, '一度目の鼻歌が、戸の開く音で切られていません');
     }
-    if (n === 6) check(seen.mioTitle, 'ミオの肩書き「薬屋の弟子」が出ていません');
+    if (n === 6) {
+      check(seen.mioTitle, 'ミオの肩書き「薬屋の弟子」が出ていません');
+      check(seen.kaykitAfter === false, '場面5でも KayKit の人形のままです（試しは場面4だけ）');
+    }
     const want = { 3: ['今　暦の塔', '暦の塔　話を聞く部屋'], 4: ['暦の塔　円卓の広間'], 5: ['トウマの家　夕方', 'トウマの家　ユナの部屋　夜'], 6: ['都の通り　翌朝', '都の橋'], 7: ['暦の塔　時の門'] }[n] ?? [];
     const shown = await placardsShown();
     for (const w of want) check(shown.includes(w), `場面の札「${w}」が出ていません（${shown.join(' / ')}）`);
@@ -3259,7 +3267,7 @@ async function checkLayouts(browser, baseUrl, name, core) {
     await press(text.settings.checkOff);
     await press(text.settings.close);
     check(await page.evaluate(() => !document.querySelector('.check-badge').hidden), '確認用の機能を入にしても、隅の印が出ていません');
-    // 確認用の機能が入の時の設定の欄（人形の描き方の列が増える）
+    // 確認用の機能が入の時の設定の欄（人形の列が増える）
     await press(text.settings.open);
     await until(() => document.querySelector('.sheet[data-sheet="settings"]') !== null);
     await inspect('settings-check');

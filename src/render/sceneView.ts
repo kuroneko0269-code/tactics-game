@@ -72,6 +72,8 @@ export function createSceneView(options: {
   canvas: HTMLCanvasElement;
   /** 人物の名前 → 人形の見た目 */
   lookOf: (name: string) => PuppetLook;
+  /** 人形の作り方（省くと今の人形。KayKit の人形の試しで、場面4だけ KayKit の人形にする） */
+  makePuppet?: (look: PuppetLook) => Puppet;
   /** 物の種類の名前（台本の名前）→ 見た目の id */
   propModelOf: (kind: string) => string;
   /** 続く姿勢の名前 → 姿勢 */
@@ -143,7 +145,8 @@ export function createSceneView(options: {
     obj.userData.tileCoord = { x: c.x, z: c.z } satisfies TileCoord;
   };
   const makeActor = (name: string, a: ActorState) => {
-    const puppet = createPuppet(options.lookOf(name));
+    const look = options.lookOf(name);
+    const puppet = options.makePuppet?.(look) ?? createPuppet(look);
     scene.add(puppet.group);
     place(puppet.group, a);
     puppet.setFacing(a.facing);

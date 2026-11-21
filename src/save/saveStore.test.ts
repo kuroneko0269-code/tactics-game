@@ -172,16 +172,18 @@ describe('端末ごとの設定（序章に足りない仕組み）', () => {
       checkTools: true,
       storyFont: 'shipporiAntique',
       textSize: 'large',
-      puppetStyle: 'pixel',
+      puppetKind: 'current',
     } as const;
     store.save(saved);
     expect(store.load()).toEqual(saved);
     expect(normalizeSettings({ checkTools: 'yes' }).checkTools).toBe(false);
     expect(normalizeSettings({ volume: 250, muted: 'x', seenTutorials: [1, 'b'] })).toEqual({ ...DEFAULT_SETTINGS, volume: 100, seenTutorials: ['b'] });
-    // 書体・文字の大きさ・人形の描き方（見た目の見本の2回目）。前の版の設定（項目がない）は初期値。知らない値も初期値
+    // 書体・文字の大きさ（見た目の見本の2回目）・人形（KayKit の人形の試し）。前の版の設定（項目がない）は初期値。知らない値も初期値
     expect(normalizeSettings({ volume: 40 })).toEqual({ ...DEFAULT_SETTINGS, volume: 40 });
-    expect(DEFAULT_SETTINGS).toMatchObject({ storyFont: 'zenOldMincho', textSize: 'medium', puppetStyle: 'smooth' });
-    expect(normalizeSettings({ storyFont: 'gothic', textSize: 'huge', puppetStyle: 3 })).toEqual(DEFAULT_SETTINGS);
+    expect(DEFAULT_SETTINGS).toMatchObject({ storyFont: 'zenOldMincho', textSize: 'medium', puppetKind: 'kaykit' });
+    expect(normalizeSettings({ storyFont: 'gothic', textSize: 'huge', puppetKind: 3 })).toEqual(DEFAULT_SETTINGS);
+    // 外した「人形の描き方」（ドット風）が残った設定も、読み込める
+    expect(normalizeSettings({ puppetStyle: 'pixel' })).toEqual(DEFAULT_SETTINGS);
     text = '{壊れた';
     expect(store.load()).toEqual(DEFAULT_SETTINGS);
   });

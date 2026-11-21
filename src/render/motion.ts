@@ -39,12 +39,15 @@ export async function playGesture(tweens: Tweens, puppet: Puppet, motion: Gestur
     }
     return prev[key] ?? 0;
   };
+  // KayKit の人形は、素材の動きに結び付けた仕草なら、その動きを流す（向きの回転だけは、ここで動かす）
+  const byClip = puppet.beginGesture?.(motion, base, motion.seconds / Math.max(0.1, speed)) ?? false;
   await tweens.play(motion.seconds / Math.max(0.1, speed), (t) => {
     const pose: Record<string, number> = {};
     for (const k of POSE_KEYS) pose[k] = value(k, t);
-    puppet.setPose?.(addPoses(base, pose));
+    if (!byClip) puppet.setPose?.(addPoses(base, pose));
     puppet.setYaw(baseYaw + value('turn', t));
   });
+  puppet.endGesture?.();
   puppet.setPose?.(base);
 }
 

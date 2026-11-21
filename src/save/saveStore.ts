@@ -146,16 +146,16 @@ export interface GameSettings {
   readonly storyFont: StoryFont;
   /** 物語の画面の文字の大きさ（中が標準。大は見本の1回目までの大きさ） */
   readonly textSize: TextSize;
-  /** 人形の描き方（なめらか・ドット風。確認用の機能が入の時だけ、設定の欄に出す） */
-  readonly puppetStyle: PuppetStyle;
+  /** 人形（KayKit の人形の試し: KayKit・今の人形。確認用の機能が入の時だけ、設定の欄に出す。KayKit は序章の場面4だけに効く） */
+  readonly puppetKind: PuppetKind;
 }
 
 export const STORY_FONTS = ['zenOldMincho', 'shipporiAntique', 'shipporiMincho'] as const;
 export type StoryFont = (typeof STORY_FONTS)[number];
 export const TEXT_SIZES = ['small', 'medium', 'large'] as const;
 export type TextSize = (typeof TEXT_SIZES)[number];
-export const PUPPET_STYLES = ['smooth', 'pixel'] as const;
-export type PuppetStyle = (typeof PUPPET_STYLES)[number];
+export const PUPPET_KINDS = ['kaykit', 'current'] as const;
+export type PuppetKind = (typeof PUPPET_KINDS)[number];
 
 export const DEFAULT_SETTINGS: GameSettings = {
   volume: 70,
@@ -165,7 +165,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   checkTools: false,
   storyFont: 'zenOldMincho',
   textSize: 'medium',
-  puppetStyle: 'smooth',
+  puppetKind: 'kaykit',
 };
 
 /** 決まった選び肢のどれかなら、その値。違えば初期値 */
@@ -192,7 +192,8 @@ export function normalizeSettings(raw: unknown): GameSettings {
     checkTools: r.checkTools === true,
     storyFont: oneOf(STORY_FONTS, r.storyFont, DEFAULT_SETTINGS.storyFont),
     textSize: oneOf(TEXT_SIZES, r.textSize, DEFAULT_SETTINGS.textSize),
-    puppetStyle: oneOf(PUPPET_STYLES, r.puppetStyle, DEFAULT_SETTINGS.puppetStyle),
+    // 前の版の「人形の描き方」（puppetStyle）は外した。残っていても読まない
+    puppetKind: oneOf(PUPPET_KINDS, r.puppetKind, DEFAULT_SETTINGS.puppetKind),
   };
 }
 
