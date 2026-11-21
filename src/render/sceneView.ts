@@ -3,7 +3,7 @@ import type { ActorState, LightState, StageState } from '../core/dialogue';
 import type { Coord, Direction } from '../core/geometry';
 import type { MapView, TileCoord } from './mapView';
 import { createLightPillar, playGesture, type GestureMotion, type LightPillar } from './motion';
-import { createPropModel } from './props';
+import { createPropModel, refreshPropShadows } from './props';
 import { createPuppet, YAW_OF, type Puppet, type PuppetLook, type PuppetPose } from './puppet';
 import { headTop } from './speakerMark';
 import { createTweens } from './tweens';
@@ -211,6 +211,7 @@ export function createSceneView(options: {
         if (v) place(v.model.group, p);
         else makeProp(name, p.prop, p);
       }
+      refreshPropShadows(scene);
     },
     // 現れる・消える時は、体を薄く透かさない（半分透けた人影に見えたため。初見の検査）。
     // 白く光った姿が足もとから伸びて現れ、消える時は白く光ってから足もとへ縮む
@@ -267,7 +268,8 @@ export function createSceneView(options: {
       while (to - from < -Math.PI) to += Math.PI * 2;
       if (Math.abs(to - from) < 0.001) return;
       // 振り向く: 回る角度が大きいほど、少しゆっくり回る（人形劇のように、ぱっと向きが変わらないように）
-      const seconds = 0.22 + 0.22 * (Math.abs(to - from) / Math.PI);
+      // 見た目の見本の2回目で、さらにゆっくりにした（重さのある動きに）
+      const seconds = 0.34 + 0.36 * (Math.abs(to - from) / Math.PI);
       await play(seconds, (t) => a.puppet.setYaw(from + (to - from) * (t * t * (3 - 2 * t))));
       a.puppet.setFacing(facing);
     },
@@ -286,12 +288,14 @@ export function createSceneView(options: {
         model.setOpacity(t);
         model.body.scale.setScalar(0.6 + 0.4 * t);
       });
+      refreshPropShadows(scene);
     },
     async removeProp(name) {
       const p = props.get(name);
       if (!p) return;
       await play(0.3, (t) => p.model.setOpacity(1 - t));
       dropProp(name);
+      refreshPropShadows(scene);
     },
     async moveProp(name, c, seconds) {
       const p = props.get(name);
@@ -301,6 +305,7 @@ export function createSceneView(options: {
       await play(Math.max(0.05, seconds), (t) => p.model.group.position.lerpVectors(from, to, t));
       place(p.model.group, c);
       p.coord = { x: c.x, z: c.z };
+      refreshPropShadows(scene);
     },
     setTapTarget(name) {
       if (tapTarget) props.get(tapTarget)?.model.setGlow(new THREE.Color(0xffffff), 0);
@@ -324,6 +329,7 @@ export function createSceneView(options: {
         old.setOpacity(1 - t);
       });
       scene.remove(old.group);
+      refreshPropShadows(scene);
     },
     setItems(name, items) {
       const a = actors.get(name);

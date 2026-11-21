@@ -164,10 +164,24 @@ describe('端末ごとの設定（序章に足りない仕組み）', () => {
     const store = createSettingsStore({ read: () => text, write: (t) => (text = t), remove: () => (text = null) });
     expect(store.load()).toEqual(DEFAULT_SETTINGS);
     expect(DEFAULT_SETTINGS.checkTools).toBe(false);
-    store.save({ volume: 30, muted: true, skipSeenTutorials: false, seenTutorials: ['a'], checkTools: true });
-    expect(store.load()).toEqual({ volume: 30, muted: true, skipSeenTutorials: false, seenTutorials: ['a'], checkTools: true });
+    const saved = {
+      volume: 30,
+      muted: true,
+      skipSeenTutorials: false,
+      seenTutorials: ['a'],
+      checkTools: true,
+      storyFont: 'shipporiAntique',
+      textSize: 'large',
+      puppetStyle: 'pixel',
+    } as const;
+    store.save(saved);
+    expect(store.load()).toEqual(saved);
     expect(normalizeSettings({ checkTools: 'yes' }).checkTools).toBe(false);
     expect(normalizeSettings({ volume: 250, muted: 'x', seenTutorials: [1, 'b'] })).toEqual({ ...DEFAULT_SETTINGS, volume: 100, seenTutorials: ['b'] });
+    // 書体・文字の大きさ・人形の描き方（見た目の見本の2回目）。前の版の設定（項目がない）は初期値。知らない値も初期値
+    expect(normalizeSettings({ volume: 40 })).toEqual({ ...DEFAULT_SETTINGS, volume: 40 });
+    expect(DEFAULT_SETTINGS).toMatchObject({ storyFont: 'zenOldMincho', textSize: 'medium', puppetStyle: 'smooth' });
+    expect(normalizeSettings({ storyFont: 'gothic', textSize: 'huge', puppetStyle: 3 })).toEqual(DEFAULT_SETTINGS);
     text = '{壊れた';
     expect(store.load()).toEqual(DEFAULT_SETTINGS);
   });
