@@ -15,7 +15,66 @@
   --kr-text: #ede6d3;
   --kr-sub: #c9bfa6;
   --kr-rule: #55607f;
+  /* 書体（設定で切り替える。初めは Zen Old Mincho。発注者が1つに決めた後で、残りを外す） */
+  --kr-mincho: 'Zen Old Mincho', 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif;
+  /* 文字の大きさ（設定の「中」。見た目の見本の2回目）。台詞 16px・行間 1.8、名前 17px、肩書き 11px、場所の札 13px、物の札 12px、黒地の字幕 17px */
+  --kr-text-size: 16px;
+  --kr-line: 1.8;
+  --kr-name-size: 17px;
+  --kr-title-size: 11px;
+  --kr-placard-size: 13px;
+  --kr-era-size: 12px;
+  --kr-objlabel-size: 12px;
+  --kr-caption-size: 15px;
+  --kr-centered-size: 17px;
+  --kr-inscription-size: 18px;
+  --kr-inscription-label-size: 12px;
+  --kr-tool-size: 13px;
+  --kr-face: 70px;
+}
+
+:root[data-story-font='shipporiAntique'] {
+  --kr-mincho: 'Shippori Antique', 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif;
+  /* 太さが1種だけの書体なので、太字を作り出さない（にじんだ太字にしない） */
+  font-synthesis: none;
+}
+
+:root[data-story-font='shipporiMincho'] {
   --kr-mincho: 'Shippori Mincho', 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif;
+}
+
+/* 文字の大きさ「小」（中の 1 割小さく） */
+:root[data-text-size='small'] {
+  --kr-text-size: 14.5px;
+  --kr-line: 1.75;
+  --kr-name-size: 15.5px;
+  --kr-title-size: 10px;
+  --kr-placard-size: 12px;
+  --kr-era-size: 11px;
+  --kr-objlabel-size: 11px;
+  --kr-caption-size: 13.5px;
+  --kr-centered-size: 15.5px;
+  --kr-inscription-size: 16px;
+  --kr-inscription-label-size: 11px;
+  --kr-tool-size: 12.5px;
+  --kr-face: 62px;
+}
+
+/* 文字の大きさ「大」（見た目の見本の1回目までの大きさ） */
+:root[data-text-size='large'] {
+  --kr-text-size: 20px;
+  --kr-line: 1.9;
+  --kr-name-size: 20px;
+  --kr-title-size: 12px;
+  --kr-placard-size: 16px;
+  --kr-era-size: 15px;
+  --kr-objlabel-size: 15px;
+  --kr-caption-size: 18px;
+  --kr-centered-size: 19px;
+  --kr-inscription-size: 22px;
+  --kr-inscription-label-size: 13px;
+  --kr-tool-size: 14px;
+  --kr-face: 88px;
 }
 
 * {
@@ -2846,8 +2905,8 @@ body.in-dialogue #hud {
     inset 0 0 0 3px rgba(19, 27, 49, 0.95),
     inset 0 0 0 4px rgba(201, 164, 92, 0.42),
     0 6px 24px rgba(0, 0, 0, 0.5);
-  padding: 12px 16px 14px;
-  margin-top: 48px;
+  padding: 10px 14px 10px;
+  margin-top: calc(var(--kr-face) * 0.55);
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -2899,7 +2958,7 @@ body.in-dialogue #hud {
   color: var(--kr-sub);
   font-family: var(--kr-mincho);
   font-weight: 500;
-  font-size: 14px;
+  font-size: var(--kr-tool-size);
   letter-spacing: 0.12em;
   touch-action: manipulation;
 }
@@ -2914,7 +2973,7 @@ body.in-dialogue #hud {
 /* 台詞の枠の中: 左上に顔の丸（枠から少しはみ出す）、その右に肩書きと名前、下に台詞 */
 .dialogue-body {
   position: relative;
-  min-height: 84px;
+  min-height: calc(var(--kr-face) * 0.95);
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto 1fr;
@@ -2930,17 +2989,17 @@ body.in-dialogue #hud {
 }
 
 .dialogue-body:not(.no-face) .dialogue-plate {
-  margin-left: 98px;
-  min-height: 46px;
+  margin-left: calc(var(--kr-face) + 10px);
+  min-height: calc(var(--kr-face) * 0.52);
 }
 
 /* 顔の丸: 真鍮の輪と、その外の目盛りのような点線の輪。台詞の枠の左上に、少しはみ出して重ねる */
 .dialogue-face {
   position: absolute;
   left: -2px;
-  top: -52px;
-  width: 88px;
-  height: 88px;
+  top: calc(var(--kr-face) * -0.59);
+  width: var(--kr-face);
+  height: var(--kr-face);
   border-radius: 50%;
   border: 2px solid var(--kr-brass);
   background: radial-gradient(circle at 50% 38%, #34406a, #131b31 72%);
@@ -3003,7 +3062,7 @@ body.in-dialogue #hud {
 .dialogue-name {
   font-family: var(--kr-mincho);
   font-weight: 700;
-  font-size: 20px;
+  font-size: var(--kr-name-size);
   letter-spacing: 0.24em;
   white-space: nowrap;
   color: var(--kr-brass);
@@ -3013,7 +3072,7 @@ body.in-dialogue #hud {
 .dialogue-title {
   font-family: var(--kr-mincho);
   font-weight: 500;
-  font-size: 12px;
+  font-size: var(--kr-title-size);
   letter-spacing: 0.14em;
   color: var(--kr-sub);
   white-space: nowrap;
@@ -3029,14 +3088,16 @@ body.in-dialogue #hud {
   grid-area: text;
   font-family: var(--kr-mincho);
   font-weight: 500;
-  font-size: 20px;
-  line-height: 1.9;
+  font-size: var(--kr-text-size);
+  line-height: var(--kr-line);
   letter-spacing: 0.06em;
   color: var(--kr-text);
   padding-right: 22px;
   /* 上に細い罫（名前と台詞を分ける） */
   border-top: 1px solid rgba(85, 96, 127, 0.7);
   padding-top: 6px;
+  /* 言葉の途中で折り返さず、文節の切れ目で折り返す（初見の検査: 「入っ／た」と切れて読みにくい。対応しないブラウザでは今まで通り） */
+  word-break: auto-phrase;
 }
 
 .dialogue-text rt,
@@ -3084,8 +3145,8 @@ body.in-dialogue #hud {
   text-align: center;
   font-family: var(--kr-mincho);
   font-weight: 500;
-  font-size: 18px;
-  line-height: 1.9;
+  font-size: var(--kr-caption-size);
+  line-height: var(--kr-line);
   letter-spacing: 0.08em;
   color: var(--kr-text);
   background: rgba(15, 22, 38, 0.88);
@@ -3096,6 +3157,8 @@ body.in-dialogue #hud {
   touch-action: manipulation;
   /* 薄いまま読ませないよう、字幕は現れる動きなしで出す（初見の検査。黒地の字幕だけ1行ずつ現れる） */
   animation: none;
+  /* 言葉の途中で折り返さず、文節の切れ目で折り返す（初見の検査: 「入っ／た」と切れて読みにくい。対応しないブラウザでは今まで通り） */
+  word-break: auto-phrase;
 }
 
 .dialogue-caption[hidden] {
@@ -3109,7 +3172,7 @@ body.in-dialogue #hud {
   background: none;
   border: 0;
   padding: 48px 12px;
-  font-size: 19px;
+  font-size: var(--kr-centered-size);
   line-height: 2.3;
   letter-spacing: 0.14em;
   animation: none;
@@ -3208,7 +3271,7 @@ body.in-dialogue #hud {
 
 .dialogue-inscription-label {
   font-family: var(--kr-mincho);
-  font-size: 13px;
+  font-size: var(--kr-inscription-label-size);
   color: #6a5034;
   letter-spacing: 0.12em;
   margin-bottom: 4px;
@@ -3217,9 +3280,11 @@ body.in-dialogue #hud {
 .dialogue-inscription-text {
   font-family: var(--kr-mincho);
   font-weight: 500;
-  font-size: 22px;
+  font-size: var(--kr-inscription-size);
   line-height: 1.7;
   letter-spacing: 0.06em;
+  /* 言葉の途中で折り返さず、文節の切れ目で折り返す（初見の検査: 「入っ／た」と切れて読みにくい。対応しないブラウザでは今まで通り） */
+  word-break: auto-phrase;
 }
 
 .dialogue-inscription .dialogue-caption-next {
@@ -3278,7 +3343,7 @@ body.in-dialogue #hud {
   padding: 4px 10px 4px 12px;
   font-family: var(--kr-mincho);
   font-weight: 700;
-  font-size: 15px;
+  font-size: var(--kr-era-size);
   letter-spacing: 0.16em;
   white-space: nowrap;
   border-right: 1px solid var(--kr-brass);
@@ -3302,7 +3367,7 @@ body.in-dialogue #hud {
 .dialogue-placard-text {
   padding: 6px 14px 6px 12px;
   font-weight: 500;
-  font-size: 16px;
+  font-size: var(--kr-placard-size);
   line-height: 1.4;
   letter-spacing: 0.12em;
   white-space: pre;
@@ -3351,12 +3416,12 @@ body.in-dialogue #hud {
 
 .dialogue-nametag-name {
   font-weight: 700;
-  font-size: 20px;
+  font-size: var(--kr-name-size);
   letter-spacing: 0.2em;
 }
 
 .dialogue-nametag-title {
-  font-size: 12px;
+  font-size: var(--kr-title-size);
   letter-spacing: 0.12em;
   color: var(--kr-sub);
 }
@@ -3613,7 +3678,7 @@ body.in-dialogue #hud {
   }
 
   .dialogue-body {
-    min-height: 68px;
+    min-height: calc(var(--kr-face) * 0.8);
   }
 
   .dialogue-box:not(.narration):not(.tools-only) {
@@ -3621,28 +3686,22 @@ body.in-dialogue #hud {
   }
 
   .dialogue-face {
-    width: 66px;
-    height: 66px;
-    top: -38px;
+    width: calc(var(--kr-face) * 0.8);
+    height: calc(var(--kr-face) * 0.8);
+    top: calc(var(--kr-face) * -0.45);
   }
 
   .dialogue-body:not(.no-face) .dialogue-plate {
-    margin-left: 76px;
+    margin-left: calc(var(--kr-face) * 0.8 + 10px);
     min-height: 32px;
   }
 
-  .dialogue-name {
-    font-size: 18px;
-  }
-
   .dialogue-text {
-    font-size: 17px;
-    line-height: 1.7;
+    line-height: calc(var(--kr-line) - 0.15);
   }
 
   .dialogue-caption {
     top: calc(max(6px, env(safe-area-inset-top)) + 84px);
-    font-size: 17px;
     padding: 6px 14px;
   }
 
@@ -3656,7 +3715,6 @@ body.in-dialogue #hud {
   }
 
   .dialogue-inscription-text {
-    font-size: 19px;
     line-height: 1.55;
   }
 }
@@ -3939,12 +3997,93 @@ body.in-dialogue #hud {
     align-items: start;
   }
 
-  .settings-body .settings-row {
+  .settings-body .settings-row,
+  .settings-body .settings-look {
     grid-column: 1 / -1;
   }
 
+
   .settings-item .screen-button {
     font-size: 14px;
+  }
+}
+
+/* 書体・文字の大きさ・人形の描き方: 名前と、選び肢のボタンを横に並べる（押されているものを真鍮色で示す） */
+.settings-look {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-choices {
+  display: grid;
+  grid-template-columns: 6.5em minmax(0, 1fr);
+  align-items: center;
+}
+
+.settings-label {
+  font-size: 14px;
+  color: #c9d2e0;
+}
+
+.settings-choice-buttons {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+
+.settings-choice-buttons .screen-button.settings-choice {
+  min-height: 48px;
+  padding: 4px 6px;
+  align-items: center;
+  text-align: center;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.settings-font .screen-button.settings-choice {
+  font-size: 12px;
+}
+
+.settings-choice[aria-pressed='true'] {
+  border-color: var(--kr-brass);
+  background: rgba(201, 164, 92, 0.22);
+  color: #f4e7c4;
+}
+
+/* 書体の選び肢は、その書体の名前の書体ではなく、ふつうの文字で出す（選ばれていない書体は読み込まないため） */
+
+/* 横向きの低い画面: 書体・文字の大きさ・人形の描き方の列を横に1段に並べる（欄が画面の高さに収まるように） */
+@media (orientation: landscape) and (max-height: 500px) {
+  .settings-look {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1.5fr);
+    gap: 6px 10px;
+  }
+
+  .settings-body .settings-look .settings-row {
+    grid-column: auto;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  .settings-look .settings-label {
+    font-size: 12px;
+  }
+}
+
+/* 低い縦向きの画面（小さめのスマホ）: 切り替えの説明を省き、欄の間を詰める（書体などの列が増えても、ボタンが画面に収まるように） */
+@media (orientation: portrait) and (max-height: 700px) {
+  .settings-item .screen-note {
+    display: none;
+  }
+
+  .settings-body,
+  .settings-look {
+    gap: 6px;
   }
 }
 
@@ -4063,7 +4202,7 @@ body.in-dialogue #hud {
   color: var(--kr-text);
   border: 1px solid var(--kr-brass);
   font-family: var(--kr-mincho);
-  font-size: 15px;
+  font-size: var(--kr-objlabel-size);
   font-weight: 700;
   letter-spacing: 0.16em;
   white-space: nowrap;

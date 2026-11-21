@@ -18,13 +18,16 @@
     "script-rules": "vitest run src/data/story/story.test.ts src/data/story/scriptTiming.test.ts --silent=false -t \"台本の決まり|見込み\"",
     "balance": "node scripts/balance.mjs",
     "script-export": "node scripts/script-export.mjs",
-    "story-shots": "node scripts/story-shots.mjs"
+    "story-shots": "node scripts/story-shots.mjs",
+    "render-perf": "node scripts/render-perf.mjs"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
+    "@fontsource/shippori-antique": "^5.3.0",
     "@fontsource/shippori-mincho": "^5.3.0",
+    "@fontsource/zen-old-mincho": "^5.3.1",
     "three": "^0.187.0"
   },
   "devDependencies": {

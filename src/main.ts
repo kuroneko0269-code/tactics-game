@@ -1,6 +1,3 @@
-// 書体（明朝体。読み込む前は端末の明朝体で出す）
-import '@fontsource/shippori-mincho/500.css';
-import '@fontsource/shippori-mincho/700.css';
 import './ui/style.css';
 import * as THREE from 'three';
 import { forceVictory, startBattle } from './core/battle';
@@ -51,6 +48,8 @@ import { createMapView, type MapView } from './render/mapView';
 import { createBattleView, type BattleView } from './render/battleView';
 import { createPicker } from './render/picker';
 import { attachCameraInput } from './render/cameraInput';
+import { applyStoryLook } from './ui/storyLook';
+import { createPixelPuppets } from './render/pixelPuppets';
 import { createSaveStore, createSettingsStore, localStorageBackend, settingsBackend, type GameSettings } from './save/saveStore';
 import { createBaseScreen } from './ui/baseScreen';
 import { createBattleController, type BattleController } from './ui/battleController';
@@ -162,6 +161,10 @@ function main(): void {
   let settings: GameSettings = settingsStore.load();
   const sound = createSoundSystem();
   sound.setVolume(settings.volume, settings.muted);
+  // 物語の画面の書体と文字の大きさ（選ばれている書体だけを読み込む）
+  applyStoryLook(settings.storyFont, settings.textSize);
+  /** 人形をドット風に描くか（確認用の機能が入で、設定でドット風を選んだ時だけ） */
+  const pixelPuppetsOn = () => settings.checkTools && settings.puppetStyle === 'pixel';
   /** 確認用の機能の印と「勝ったことにする」（設定で入にした時だけ） */
   const checkBadge = createCheckBadge(document.getElementById('app') ?? document.body);
   checkBadge.setEnabled(settings.checkTools);
@@ -173,6 +176,7 @@ function main(): void {
     settings = next;
     settingsStore.save(next);
     sound.setVolume(next.volume, next.muted);
+    applyStoryLook(next.storyFont, next.textSize);
     checkBadge.setEnabled(next.checkTools);
     refreshCheckWin();
   };
@@ -252,6 +256,11 @@ function main(): void {
   const applyTime = (name: string | undefined, sky?: number, ambient?: number) => {
     currentTime = { name: name ?? DEFAULT_TIME, ...(sky !== undefined ? { sky } : {}), ...(ambient !== undefined ? { ambient } : {}) };
     applyLighting(stage.scene, stage.lights, timeLight(name), sky, ambient);
+    // 室内（灯の影だけの場面）では、床のマスに影を落とさせない（平らな床の影は見えず、影の計算だけが重くなるため。見た目の見本の2回目）
+    const tilesCast = (ambient ?? 1) >= 1;
+    mapView.group.traverse((o) => {
+      if ((o as THREE.Mesh).isMesh) o.castShadow = tilesCast;
+    });
   };
   // マップの見た目は戦場の定義から作る（拠点や編成の画面でも、最後に出したマップを背景に出す）
   const rigOptions = (view: MapView, def: MapDefinition) => {
@@ -1922,6 +1931,8 @@ function main(): void {
     };
   }
 
+  /** ドット風の描き方（人物だけを低い解像度で描いて拡大する） */
+  const pixelPuppets = createPixelPuppets(stage.renderer);
   const timer = new THREE.Timer();
   stage.renderer.setAnimationLoop((time) => {
     timer.update(time);
@@ -1939,7 +1950,8 @@ function main(): void {
       overlayShow.rig.update(dt);
       overlayShow.view.update(dt, elapsed);
       stage.renderer.render(overlayShow.scene, overlayShow.rig.camera);
-    } else stage.renderer.render(stage.scene, rig.camera);
+    } else if (pixelPuppetsOn()) pixelPuppets.render(stage.scene, rig.camera);
+    else stage.renderer.render(stage.scene, rig.camera);
     if (battle) {
       battle.labels.setPositions(battle.view.unitAnchors());
       battle.hud.update();

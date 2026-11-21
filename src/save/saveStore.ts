@@ -142,9 +142,34 @@ export interface GameSettings {
   readonly skipSeenTutorials: boolean;
   readonly seenTutorials: readonly string[];
   readonly checkTools: boolean;
+  /** 物語の画面の書体（見た目の見本の2回目。発注者が1つに決めた後で、残りを外す） */
+  readonly storyFont: StoryFont;
+  /** 物語の画面の文字の大きさ（中が標準。大は見本の1回目までの大きさ） */
+  readonly textSize: TextSize;
+  /** 人形の描き方（なめらか・ドット風。確認用の機能が入の時だけ、設定の欄に出す） */
+  readonly puppetStyle: PuppetStyle;
 }
 
-export const DEFAULT_SETTINGS: GameSettings = { volume: 70, muted: false, skipSeenTutorials: true, seenTutorials: [], checkTools: false };
+export const STORY_FONTS = ['zenOldMincho', 'shipporiAntique', 'shipporiMincho'] as const;
+export type StoryFont = (typeof STORY_FONTS)[number];
+export const TEXT_SIZES = ['small', 'medium', 'large'] as const;
+export type TextSize = (typeof TEXT_SIZES)[number];
+export const PUPPET_STYLES = ['smooth', 'pixel'] as const;
+export type PuppetStyle = (typeof PUPPET_STYLES)[number];
+
+export const DEFAULT_SETTINGS: GameSettings = {
+  volume: 70,
+  muted: false,
+  skipSeenTutorials: true,
+  seenTutorials: [],
+  checkTools: false,
+  storyFont: 'zenOldMincho',
+  textSize: 'medium',
+  puppetStyle: 'smooth',
+};
+
+/** 決まった選び肢のどれかなら、その値。違えば初期値 */
+const oneOf = <T extends string>(list: readonly T[], value: unknown, fallback: T): T => (list.includes(value as T) ? (value as T) : fallback);
 
 export interface SettingsStore {
   load(): GameSettings;
@@ -165,6 +190,9 @@ export function normalizeSettings(raw: unknown): GameSettings {
     skipSeenTutorials: typeof r.skipSeenTutorials === 'boolean' ? r.skipSeenTutorials : DEFAULT_SETTINGS.skipSeenTutorials,
     seenTutorials: Array.isArray(r.seenTutorials) ? r.seenTutorials.filter((x): x is string => typeof x === 'string') : [],
     checkTools: r.checkTools === true,
+    storyFont: oneOf(STORY_FONTS, r.storyFont, DEFAULT_SETTINGS.storyFont),
+    textSize: oneOf(TEXT_SIZES, r.textSize, DEFAULT_SETTINGS.textSize),
+    puppetStyle: oneOf(PUPPET_STYLES, r.puppetStyle, DEFAULT_SETTINGS.puppetStyle),
   };
 }
 

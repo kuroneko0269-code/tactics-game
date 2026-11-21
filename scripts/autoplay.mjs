@@ -2294,8 +2294,9 @@ async function presentationDrill(page, check, screenshot) {
   const [yuna, touma, voice, noFace, noMark, caption] = seen;
   check(seen.length === 6, `試しの台本の台詞と語りの数が違います（${seen.length}）`);
   check(yuna.face === 'ユナ' && yuna.view.portrait === 'ユナ' && yuna.drawn > 1500 && yuna.view.mark, `顔の枠か話者の印が出ていません（${JSON.stringify(yuna.view)}・${yuna.drawn}）`);
-  check(yuna.plateBg === 'rgb(226, 214, 184)' && touma.plateBg === 'rgb(31, 42, 74)', `名前の左の印が人物の服の色になっていません（${yuna.plateBg} / ${touma.plateBg}）`);
-  check(yuna.nameSize >= 18, `名前の文字が小さい（${yuna.nameSize}px）`);
+  check(yuna.plateBg === 'rgb(201, 187, 155)' && touma.plateBg === 'rgb(43, 51, 70)', `名前の左の印が人物の服の色になっていません（${yuna.plateBg} / ${touma.plateBg}）`);
+  // 名前は 17px（見た目の見本の2回目で、文字の大きさ「中」を小さくした。「大」は 20px）
+  check(yuna.nameSize >= 15, `名前の文字が小さい（${yuna.nameSize}px）`);
   for (const x of [yuna, touma]) {
     const inside = (r) => r && r.top >= -1 && r.left >= -1 && r.bottom <= x.vh + 1 && r.right <= vw + 1;
     check(inside(x.faceRect) && inside(x.plateRect) && x.faceRect.width >= 56, `顔の枠か名前の札が画面に収まっていません（${JSON.stringify([x.faceRect, x.plateRect])}）`);
@@ -2535,6 +2536,19 @@ async function storyRun(browser, baseUrl, name, core) {
   const enableCheckTools = async () => {
     await press(text.settings.open);
     await press(text.settings.checkOff);
+    // 書体・文字の大きさ・人形の描き方（見た目の見本の2回目）: 押すと画面に効き、元に戻せる
+    const choice = (group, label) => press(text.settings.choiceLabel(group, label));
+    const root = () => T(() => ({ ...document.documentElement.dataset }));
+    check((await root()).storyFont === 'zenOldMincho' && (await root()).textSize === 'medium', '書体と文字の大きさの初めの値が違います');
+    await choice(text.settings.textSize, text.settings.textSizes.large);
+    await choice(text.settings.font, text.settings.fonts.shipporiMincho);
+    check((await root()).textSize === 'large' && (await root()).storyFont === 'shipporiMincho', '文字の大きさか書体の切り替えが画面に効いていません');
+    check((await T(() => window.__tactics.settings().textSize)) === 'large', '文字の大きさが設定に残っていません');
+    await choice(text.settings.textSize, text.settings.textSizes.medium);
+    await choice(text.settings.font, text.settings.fonts.zenOldMincho);
+    await choice(text.settings.puppetStyle, text.settings.puppetStyles.pixel);
+    check((await T(() => window.__tactics.settings().puppetStyle)) === 'pixel', '人形の描き方を切り替えられません');
+    await choice(text.settings.puppetStyle, text.settings.puppetStyles.smooth);
     await press(text.settings.close);
     check((await T(() => window.__tactics.settings().checkTools)) === true, '設定で確認用の機能を入にできません');
     check(await T(() => !document.querySelector('.check-badge').hidden), '確認用の機能が入なのに、画面の隅の印が出ていません');
@@ -3245,6 +3259,11 @@ async function checkLayouts(browser, baseUrl, name, core) {
     await press(text.settings.checkOff);
     await press(text.settings.close);
     check(await page.evaluate(() => !document.querySelector('.check-badge').hidden), '確認用の機能を入にしても、隅の印が出ていません');
+    // 確認用の機能が入の時の設定の欄（人形の描き方の列が増える）
+    await press(text.settings.open);
+    await until(() => document.querySelector('.sheet[data-sheet="settings"]') !== null);
+    await inspect('settings-check');
+    await press(text.settings.close);
     await press(text.title.story);
     await screenIs('story-menu');
     await inspect('story-menu-first');

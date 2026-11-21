@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { BACKDROP_MODELS, MODEL_LIGHTS, MODELS, type ShapePart } from '../data/story/models';
 import type { Puppet } from './puppet';
 import { YAW_OF } from './puppet';
@@ -28,11 +29,45 @@ function geometryOf(p: ShapePart): THREE.BufferGeometry {
   }
 }
 
-/** 物の形のデータから、3D の部品の組を作る（材質の一覧も返す。光らせたり透かしたりするため） */
+/**
+ * 物の形のデータから、3D の部品の組を作る（材質の一覧も返す。光らせたり透かしたりするため）。
+ * 光らない・透けない・揺れない部品は、部品ごとの色を頂点の色に焼き込んで1つの形にまとめる
+ * （家の殻のように部品の多い物でも、描く回数を1回にする。見た目の見本の2回目で、描画を軽くするため）
+ */
 export function buildModel(kind: string, parent: THREE.Object3D, swaying?: { mesh: THREE.Mesh; x: number; amount: number }[]): THREE.MeshLambertMaterial[] {
   const parts = MODELS[kind] ?? MODELS.box!;
   const materials: THREE.MeshLambertMaterial[] = [];
-  for (const p of parts) {
+  const plain = parts.filter((p) => p.glow === undefined && (p.opacity ?? 1) >= 1 && !p.sway);
+  if (plain.length > 1) {
+    const color = new THREE.Color();
+    const pieces = plain.map((p) => {
+      const g = geometryOf(p);
+      const m = new THREE.Matrix4().compose(
+        new THREE.Vector3(p.at[0], p.at[1], p.at[2]),
+        new THREE.Quaternion().setFromEuler(new THREE.Euler(...(p.rot ?? [0, 0, 0]))),
+        new THREE.Vector3(1, 1, 1),
+      );
+      const flat = (g.index ? g.toNonIndexed() : g).applyMatrix4(m);
+      if (flat !== g) g.dispose();
+      for (const name of Object.keys(flat.attributes)) if (name !== 'position' && name !== 'normal') flat.deleteAttribute(name);
+      color.setHex(p.color);
+      const n = flat.attributes.position!.count;
+      const col = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) col.set([color.r, color.g, color.b], i * 3);
+      flat.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      return flat;
+    });
+    const merged = mergeGeometries(pieces);
+    for (const g of pieces) g.dispose();
+    if (merged) {
+      const m = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, transparent: true });
+      materials.push(m);
+      const mesh = new THREE.Mesh(merged, m);
+      mesh.castShadow = true;
+      parent.add(mesh);
+    }
+  }
+  for (const p of plain.length > 1 ? parts.filter((x) => !plain.includes(x)) : parts) {
     const m = new THREE.MeshLambertMaterial({ color: p.color, flatShading: true, transparent: true, opacity: p.opacity ?? 1 });
     if (p.glow !== undefined) m.emissive.setHex(p.glow);
     materials.push(m);
@@ -44,6 +79,14 @@ export function buildModel(kind: string, parent: THREE.Object3D, swaying?: { mes
     parent.add(mesh);
   }
   return materials;
+}
+
+/** 物の灯の影を描き直す（物を置いた・消した・動かした後に呼ぶ） */
+export function refreshPropShadows(scene: THREE.Object3D): void {
+  scene.traverse((o) => {
+    const l = o as THREE.SpotLight;
+    if (l.isLight && l.castShadow && l.shadow && !l.shadow.autoUpdate) l.shadow.needsUpdate = true;
+  });
 }
 
 /** 物の種類があるか（台本の検査で使う） */
@@ -71,6 +114,9 @@ export function createPropModel(kind: string): Puppet {
       spot.target.position.set(lightDef.at[0], lightDef.at[1] - 1, lightDef.at[2]);
       body.add(spot.target);
       spot.castShadow = true;
+      // 影は、物が動いた時だけ描き直す（人形は影の計算に入れないので、置いた物が変わらない間は同じ影のまま。refreshPropShadows）
+      spot.shadow.autoUpdate = false;
+      spot.shadow.needsUpdate = true;
       spot.shadow.mapSize.set(512, 512);
       spot.shadow.bias = -0.002;
       spot.shadow.radius = 3;

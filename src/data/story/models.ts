@@ -563,10 +563,14 @@ export const MODELS: Readonly<Record<string, ModelDefinition>> = {
   broom: [cyl(0.015, 0.7, 0.015, [0, 0.45, 0], WOOD), { shape: 'cone', size: [0.09, 0.2], at: [0, 0.1, 0], color: 0xc8b070 }],
 };
 
-/** 物が放つ光（物の形と同じ id）。灯の暖かい光が人物と机に当たり、影が落ちる（序章の場面4の見本） */
+/**
+ * 物が放つ光（物の形と同じ id）。灯の暖かい光が人物と机に当たる（序章の場面4の見本）。
+ * 見た目の見本の2回目で、灯の影をやめた（影を落とす光は、画面のすべての点で影を調べるので、スマホとソフトウェアの描画で最も重かった。
+ * 人物の影は足もとの丸い影で見せる）
+ */
 export const MODEL_LIGHTS: Readonly<Record<string, ModelLight>> = {
-  tableLampLit: { color: 0xffc890, intensity: 2.0, distance: 5, at: [0, TABLE_TOP + 0.45, 0.05], shadow: true, flicker: 0.06 },
-  benchLampLit: { color: 0xffb05a, intensity: 2.6, distance: 4.5, at: [-0.25, BENCH_TOP + 0.4, 0.3], shadow: true, flicker: 0.05 },
+  tableLampLit: { color: 0xffc890, intensity: 3.4, distance: 5, at: [0, TABLE_TOP + 0.45, 0.05], flicker: 0.06 },
+  benchLampLit: { color: 0xffb05a, intensity: 4.2, distance: 4.5, at: [-0.25, BENCH_TOP + 0.4, 0.3], flicker: 0.05 },
   lampLit: { color: 0xffb860, intensity: 1.6, distance: 3.5, at: [0, 0.45, 0], flicker: 0.05 },
   hearth: { color: 0xff7a30, intensity: 1.0, distance: 2.6, at: [-0.05, 0.25, 0.45], flicker: 0.12 },
 };

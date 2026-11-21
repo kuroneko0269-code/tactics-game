@@ -53,7 +53,8 @@ function repeat(times: number, base: GesturePose, hit: GesturePose, start = 0.12
 }
 
 export const GESTURES: Readonly<Record<string, GestureDefinition>> = {
-  うなずく: { seconds: 0.6, frames: [{ t: 0 }, { t: 0.35, head: 0.45 }, { t: 0.7, head: 0.1 }, { t: 1 }] },
+  // 見た目の見本の2回目: 弾むように見えないよう、浅く、少しゆっくりにした（以前は 0.6 秒で頭を 0.45 下げた）
+  うなずく: { seconds: 0.7, frames: [{ t: 0 }, { t: 0.4, head: 0.3 }, { t: 0.75, head: 0.08 }, { t: 1 }] },
   首を振る: { seconds: 0.8, frames: [{ t: 0 }, { t: 0.25, headTurn: 0.5 }, { t: 0.5, headTurn: -0.5 }, { t: 0.75, headTurn: 0.4 }, { t: 1 }] },
   背を向ける: { seconds: 0.5, frames: [{ t: 0 }, { t: 1, turn: Math.PI }], turnAway: true },
   指で数える: {
@@ -67,7 +68,8 @@ export const GESTURES: Readonly<Record<string, GestureDefinition>> = {
   胸に手を当てる: { seconds: 1.2, frames: [{ t: 0 }, { t: 0.3, armR: 1.3 }, { t: 0.8, armR: 1.3 }, { t: 1 }] },
   // 上から見ると、深く曲げた体がしゃがんだ姿に見えるので、浅めにする（初見の検査）
   会釈する: { seconds: 0.9, frames: [{ t: 0 }, { t: 0.4, bow: 0.3, head: 0.25 }, { t: 0.6, bow: 0.3, head: 0.25 }, { t: 1 }] },
-  驚く: { seconds: 0.5, frames: [{ t: 0 }, { t: 0.3, lift: 0.12, armL: 0.8, armR: 0.8 }, { t: 1 }] },
+  // 跳び上がらず、身を引いて腕を少し上げる（見た目の見本の2回目。以前は体を 0.12 浮かせた）
+  驚く: { seconds: 0.6, frames: [{ t: 0 }, { t: 0.3, back: 0.06, armL: 0.5, armR: 0.5, head: -0.1 }, { t: 1 }] },
   // ---- 序章に足りない仕組みで足した仕草 ----
   深く会釈する: { seconds: 1.3, frames: [{ t: 0 }, { t: 0.35, bow: 0.55, head: 0.35 }, { t: 0.7, bow: 0.55, head: 0.35 }, { t: 1 }] },
   首をかしげる: { seconds: 1.1, frames: [{ t: 0 }, { t: 0.3, tilt: 0.38 }, { t: 0.75, tilt: 0.38 }, { t: 1 }] },
@@ -89,7 +91,7 @@ export const GESTURES: Readonly<Record<string, GestureDefinition>> = {
     ],
   },
   /** 箸や指で人を指す */
-  指さす: { seconds: 1.0, frames: [{ t: 0 }, { t: 0.25, armR: 1.55 }, { t: 0.75, armR: 1.55 }, { t: 1 }] },
+  指さす: { seconds: 1.1, frames: [{ t: 0 }, { t: 0.3, armR: 1.4 }, { t: 0.75, armR: 1.4 }, { t: 1 }] },
   /** 隣の人の背をさする */
   背をさする: { seconds: 1.8, frames: repeat(3, { armL: 1.0, bow: 0.1 }, { armL: 0.75 }) },
   /** 物を手渡す */
@@ -124,7 +126,7 @@ export const GESTURES: Readonly<Record<string, GestureDefinition>> = {
   /** 歌う（体を少し揺らす） */
   歌う: { seconds: 2.4, frames: [{ t: 0 }, { t: 0.25, head: -0.2, tilt: 0.15 }, { t: 0.5, head: -0.2, tilt: -0.15 }, { t: 0.75, head: -0.2, tilt: 0.15 }, { t: 1 }] },
   /** 足を止める（はっとする） */
-  足を止める: { seconds: 0.8, frames: [{ t: 0 }, { t: 0.25, lift: 0.04, head: -0.1 }, { t: 0.6, head: -0.1 }, { t: 1 }] },
+  足を止める: { seconds: 0.9, frames: [{ t: 0 }, { t: 0.25, back: 0.03, head: -0.1 }, { t: 0.6, head: -0.1 }, { t: 1 }] },
   // ---- ゲーム脚本の序章で足した仕草 ----
   /** 戸を押して開ける（右手を前へ伸ばし、少し前へ出る） */
   戸を開ける: { seconds: 0.9, frames: [{ t: 0 }, { t: 0.35, armR: 1.4, bow: 0.1 }, { t: 0.65, armR: 1.5, bow: 0.12 }, { t: 1 }] },
@@ -143,6 +145,12 @@ export const GESTURES: Readonly<Record<string, GestureDefinition>> = {
   物を置く: { seconds: 1.0, frames: [{ t: 0 }, { t: 0.4, armR: 0.95, bow: 0.22, head: 0.3 }, { t: 0.65, armR: 0.9, bow: 0.22, head: 0.3 }, { t: 1 }] },
   /** 後ろを振り向く（頭が先に回り、体が少し遅れてついてくる。向きは変えない） */
   振り向く: { seconds: 0.9, frames: [{ t: 0 }, { t: 0.3, headTurn: 0.6, turn: 0.25 }, { t: 0.75, headTurn: 0.6, turn: 0.25 }, { t: 1 }] },
+  // ---- 見た目の見本の2回目で足した仕草 ----
+  /**
+   * うつむいた顔を、ゆっくり上げて相手を見る（序章の場面4で、振り向いたユナが兄を見る。以前の「手を上げる」の代わり。
+   * 手を振る動きは幼く見えるため）。終わりは元の姿勢に戻る
+   */
+  顔を上げる: { seconds: 1.2, frames: [{ t: 0 }, { t: 0.2, head: 0.22 }, { t: 0.6, head: -0.08 }, { t: 0.88, head: -0.06 }, { t: 1 }] },
 };
 
 /**

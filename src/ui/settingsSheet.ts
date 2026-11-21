@@ -1,9 +1,10 @@
-import type { GameSettings } from '../save/saveStore';
+import { PUPPET_STYLES, STORY_FONTS, TEXT_SIZES, type GameSettings } from '../save/saveStore';
 import { el, screenButton, showSheet } from './dom';
 import { TEXT } from './text';
 
 /**
  * 設定の欄（序章に足りない仕組み）: 音量（10 ずつ）・消音・見た手ほどきを出さないか・確認用の機能。下からせり上がる欄に出す。
+ * 見た目の見本の2回目で、書体・文字の大きさ（いつでも）と、人形の描き方（確認用の機能が入の時だけ）を足した。
  * 変えるたびに onChange を呼ぶ（保存と、音の仕組みへの反映は呼ぶ側）
  */
 export function showSettingsSheet(root: HTMLElement, current: () => GameSettings, onChange: (next: GameSettings) => void, onClose?: () => void): void {
@@ -41,7 +42,28 @@ export function showSettingsSheet(root: HTMLElement, current: () => GameSettings
       }),
     );
     if (s.muted) mute.append(el('p', 'screen-note', TEXT.settings.mutedNote));
+    /** 選び肢のボタンの列（押されているものが今の値）。読み上げの名前は「文字の大きさ: 中」のように、どの列かを添える */
+    const choices = <T extends string>(group: string, list: readonly T[], labels: Readonly<Record<T, string>>, value: T, pick: (v: T) => void, key: string) => {
+      const row = el('div', `settings-row settings-choices settings-${key}`);
+      row.append(el('span', 'settings-label', group));
+      const buttons = el('div', 'settings-choice-buttons');
+      for (const v of list) {
+        const b = screenButton(labels[v], () => pick(v), { className: 'settings-choice', pressed: v === value });
+        b.setAttribute('aria-label', TEXT.settings.choiceLabel(group, labels[v]));
+        b.dataset.value = v;
+        buttons.append(b);
+      }
+      row.append(buttons);
+      return row;
+    };
+    const look = el('div', 'settings-look');
+    look.append(
+      choices(TEXT.settings.font, STORY_FONTS, TEXT.settings.fonts, s.storyFont, (v) => set({ storyFont: v }), 'font'),
+      choices(TEXT.settings.textSize, TEXT_SIZES, TEXT.settings.textSizes, s.textSize, (v) => set({ textSize: v }), 'text-size'),
+    );
+    if (s.checkTools) look.append(choices(TEXT.settings.puppetStyle, PUPPET_STYLES, TEXT.settings.puppetStyles, s.puppetStyle, (v) => set({ puppetStyle: v }), 'puppet'));
     body.append(
+      look,
       volumeRow,
       mute,
       item(
