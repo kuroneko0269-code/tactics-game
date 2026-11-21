@@ -2266,7 +2266,8 @@ async function presentationDrill(page, check, screenshot) {
       const canvas = document.querySelector('.portrait-canvas');
       return {
         view: window.__tactics.speakerView(),
-        plateBg: plate ? getComputedStyle(plate).backgroundColor : '',
+        // 名前は真鍮色で、人物の服の色は名前の左の小さな菱形の色（画面の体裁「暦盤」）
+        plateBg: plate ? getComputedStyle(plate, '::before').backgroundColor : '',
         nameSize: parseFloat(getComputedStyle(document.querySelector('.dialogue-name')).fontSize),
         titleText: document.querySelector('.dialogue-title')?.hidden ? '' : (document.querySelector('.dialogue-title')?.textContent ?? ''),
         faceRect: rect(faceEl),
@@ -2293,7 +2294,7 @@ async function presentationDrill(page, check, screenshot) {
   const [yuna, touma, voice, noFace, noMark, caption] = seen;
   check(seen.length === 6, `試しの台本の台詞と語りの数が違います（${seen.length}）`);
   check(yuna.face === 'ユナ' && yuna.view.portrait === 'ユナ' && yuna.drawn > 1500 && yuna.view.mark, `顔の枠か話者の印が出ていません（${JSON.stringify(yuna.view)}・${yuna.drawn}）`);
-  check(yuna.plateBg === 'rgb(216, 204, 176)' && touma.plateBg === 'rgb(31, 42, 74)', `名前の札が人物の服の色になっていません（${yuna.plateBg} / ${touma.plateBg}）`);
+  check(yuna.plateBg === 'rgb(226, 214, 184)' && touma.plateBg === 'rgb(31, 42, 74)', `名前の左の印が人物の服の色になっていません（${yuna.plateBg} / ${touma.plateBg}）`);
   check(yuna.nameSize >= 18, `名前の文字が小さい（${yuna.nameSize}px）`);
   for (const x of [yuna, touma]) {
     const inside = (r) => r && r.top >= -1 && r.left >= -1 && r.bottom <= x.vh + 1 && r.right <= vw + 1;
@@ -2875,7 +2876,7 @@ async function storyRun(browser, baseUrl, name, core) {
         );
         await screenshot('scene2-hearing');
       }
-      if (n === 3 && d.caption) seen.twoLines = await T(() => document.querySelectorAll('.dialogue-caption br').length === 1 && document.querySelector('.dialogue-caption.centered') !== null && window.__tactics.dialogueStage().location === undefined);
+      if (n === 3 && d.caption) seen.twoLines = await T(() => document.querySelectorAll('.dialogue-caption.centered .caption-line').length === 2 && window.__tactics.dialogueStage().location === undefined);
       if (n === 3 && d.speaker === 'ハルド' && d.text.startsWith('下流の村は')) seen.haldTitle = d.title === '塔の監督官';
       if (n === 3 && d.speaker === 'イェルマ') seen.yelmaTitle = d.title === '塔の長の補佐';
       if (n === 4 && d.inscription) {

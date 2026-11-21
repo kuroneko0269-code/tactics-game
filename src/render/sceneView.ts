@@ -23,6 +23,8 @@ export interface SceneView {
   walk(name: string, path: readonly Coord[], speed?: number): Promise<void>;
   turn(name: string, facing: Direction): Promise<void>;
   gesture(name: string, motion: GestureMotion): Promise<void>;
+  /** 人物の口を seconds 秒だけ動かす（台詞の間）。0 で止める */
+  talk(name: string, seconds: number): void;
   putProp(name: string, kind: string, c: Coord): Promise<void>;
   removeProp(name: string): Promise<void>;
   changeProp(name: string, kind: string): Promise<void>;
@@ -234,20 +236,26 @@ export function createSceneView(options: {
       const a = actors.get(name);
       if (!a) return;
       const seconds = STEP_SECONDS / Math.max(0.2, pace);
-      for (let i = 1; i < path.length; i++) {
-        const from = mapView.tileTop(path[i - 1]!.x, path[i - 1]!.z);
-        const to = mapView.tileTop(path[i]!.x, path[i]!.z);
-        const dx = path[i]!.x - path[i - 1]!.x;
-        const dz = path[i]!.z - path[i - 1]!.z;
-        const facing: Direction = dx > 0 ? 'east' : dx < 0 ? 'west' : dz > 0 ? 'south' : 'north';
-        a.puppet.setFacing(facing);
-        const hop = Math.abs(to.y - from.y) > 0.01 ? 0.25 : 0.06;
-        await play(seconds, (t) => {
-          a.puppet.group.position.lerpVectors(from, to, t);
-          a.puppet.group.position.y += Math.sin(Math.PI * t) * hop;
-        });
-        place(a.puppet.group, path[i]!);
-        a.coord = { x: path[i]!.x, z: path[i]!.z };
+      // 歩く間は足と腕を振る（終わったら止める）
+      a.puppet.setMoving?.(true);
+      try {
+        for (let i = 1; i < path.length; i++) {
+          const from = mapView.tileTop(path[i - 1]!.x, path[i - 1]!.z);
+          const to = mapView.tileTop(path[i]!.x, path[i]!.z);
+          const dx = path[i]!.x - path[i - 1]!.x;
+          const dz = path[i]!.z - path[i - 1]!.z;
+          const facing: Direction = dx > 0 ? 'east' : dx < 0 ? 'west' : dz > 0 ? 'south' : 'north';
+          a.puppet.setFacing(facing);
+          const hop = Math.abs(to.y - from.y) > 0.01 ? 0.25 : 0.015;
+          await play(seconds, (t) => {
+            a.puppet.group.position.lerpVectors(from, to, t);
+            a.puppet.group.position.y += Math.sin(Math.PI * t) * hop;
+          });
+          place(a.puppet.group, path[i]!);
+          a.coord = { x: path[i]!.x, z: path[i]!.z };
+        }
+      } finally {
+        a.puppet.setMoving?.(false);
       }
     },
     async turn(name, facing) {
@@ -258,13 +266,18 @@ export function createSceneView(options: {
       while (to - from > Math.PI) to -= Math.PI * 2;
       while (to - from < -Math.PI) to += Math.PI * 2;
       if (Math.abs(to - from) < 0.001) return;
-      await play(0.2, (t) => a.puppet.setYaw(from + (to - from) * t));
+      // 振り向く: 回る角度が大きいほど、少しゆっくり回る（人形劇のように、ぱっと向きが変わらないように）
+      const seconds = 0.22 + 0.22 * (Math.abs(to - from) / Math.PI);
+      await play(seconds, (t) => a.puppet.setYaw(from + (to - from) * (t * t * (3 - 2 * t))));
       a.puppet.setFacing(facing);
     },
     async gesture(name, motion) {
       const a = actors.get(name);
       if (!a) return;
       await playGesture(tweens, a.puppet, motion, a.posture, speed);
+    },
+    talk(name, seconds) {
+      actors.get(name)?.puppet.talk?.(seconds);
     },
     async putProp(name, kind, c) {
       dropProp(name);

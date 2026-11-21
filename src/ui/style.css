@@ -8,6 +8,14 @@
   --player-light: #6fb2ff;
   --enemy: #c8352e;
   --enemy-light: #ff7a6e;
+  /* 画面の体裁「暦盤」（物語の場面の枠・札・字幕）: 濃紺の地、真鍮色の細い線、明朝体 */
+  --kr-ground: #0f1626;
+  --kr-panel: #131b31;
+  --kr-brass: #c9a45c;
+  --kr-text: #ede6d3;
+  --kr-sub: #c9bfa6;
+  --kr-rule: #55607f;
+  --kr-mincho: 'Shippori Mincho', 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif;
 }
 
 * {
@@ -2825,18 +2833,28 @@ body.in-dialogue #hud {
   visibility: hidden;
 }
 
+/* ---- 会話の枠（画面の体裁「暦盤」: 濃紺の地に真鍮色の細い線、明朝体。序章の場面4の見本の PR） ---- */
 .dialogue-box {
+  position: relative;
   width: min(100%, 760px);
-  max-height: 40vh;
-  background: rgba(14, 20, 31, 0.92);
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-radius: 14px;
-  padding: 6px 10px 10px;
+  max-height: 44vh;
+  background: rgba(19, 27, 49, 0.95);
+  border: 1px solid var(--kr-rule);
+  border-radius: 0;
+  /* 内側にもう1本、真鍮の細い罫（暦盤の縁のような二重の線） */
+  box-shadow:
+    inset 0 0 0 3px rgba(19, 27, 49, 0.95),
+    inset 0 0 0 4px rgba(201, 164, 92, 0.42),
+    0 6px 24px rgba(0, 0, 0, 0.5);
+  padding: 12px 16px 14px;
+  margin-top: 48px;
   display: flex;
   flex-direction: column;
   gap: 4px;
   cursor: pointer;
   touch-action: manipulation;
+  color: var(--kr-text);
+  font-family: var(--kr-mincho);
 }
 
 .dialogue-box[hidden] {
@@ -2847,70 +2865,98 @@ body.in-dialogue #hud {
 .dialogue-box.narration {
   background: transparent;
   border-color: transparent;
+  box-shadow: none;
   padding: 0;
+  margin-top: 0;
 }
 
 .dialogue-box.narration .dialogue-body {
   display: none;
 }
 
+/* 早送り・読み返し・スキップ: 台詞の枠の右上の外に、細い罫の小さなボタンで並べる */
 .dialogue-tools {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
   display: flex;
   justify-content: flex-end;
   gap: 6px;
 }
 
+.dialogue-box.narration .dialogue-tools,
+.dialogue-box.tools-only .dialogue-tools {
+  position: static;
+}
+
 .dialogue-tool {
   min-height: 48px;
   min-width: 64px;
-  padding: 4px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 10px;
-  background: rgba(40, 52, 74, 0.9);
-  color: var(--text);
-  font-family: inherit;
+  padding: 4px 12px;
+  border: 1px solid var(--kr-rule);
+  border-radius: 0;
+  background: rgba(15, 22, 38, 0.86);
+  color: var(--kr-sub);
+  font-family: var(--kr-mincho);
+  font-weight: 500;
   font-size: 14px;
+  letter-spacing: 0.12em;
   touch-action: manipulation;
 }
 
 .dialogue-tool[aria-pressed='true'] {
-  background: var(--accent);
-  color: #1b2433;
-  font-weight: bold;
+  background: var(--kr-brass);
+  border-color: var(--kr-brass);
+  color: var(--kr-ground);
+  font-weight: 700;
 }
 
-/* 台詞の枠の中: 左に顔の枠、右上に名前の札、右下に台詞 */
+/* 台詞の枠の中: 左上に顔の丸（枠から少しはみ出す）、その右に肩書きと名前、下に台詞 */
 .dialogue-body {
   position: relative;
   min-height: 84px;
-  overflow: hidden;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  grid-template-rows: auto 1fr;
-  grid-template-areas:
-    'face plate'
-    'face text';
-  column-gap: 10px;
-  row-gap: 4px;
-}
-
-.dialogue-body.no-face {
   grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
   grid-template-areas:
     'plate'
     'text';
+  row-gap: 6px;
+  padding-left: 0;
 }
 
-/* 顔の枠: 話者の人形を別のカメラで写した絵（胸から上） */
+.dialogue-body:not(.no-face) {
+  padding-top: 0;
+}
+
+.dialogue-body:not(.no-face) .dialogue-plate {
+  margin-left: 98px;
+  min-height: 46px;
+}
+
+/* 顔の丸: 真鍮の輪と、その外の目盛りのような点線の輪。台詞の枠の左上に、少しはみ出して重ねる */
 .dialogue-face {
-  grid-area: face;
-  align-self: start;
-  width: 84px;
-  height: 84px;
-  border-radius: 12px;
-  border: 2px solid rgba(255, 255, 255, 0.45);
-  background: radial-gradient(circle at 50% 35%, #4a5a78, #1a2232 75%);
-  overflow: hidden;
+  position: absolute;
+  left: -2px;
+  top: -52px;
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  border: 2px solid var(--kr-brass);
+  background: radial-gradient(circle at 50% 38%, #34406a, #131b31 72%);
+  overflow: visible;
+  box-shadow:
+    0 0 0 3px var(--kr-ground),
+    0 4px 14px rgba(0, 0, 0, 0.55);
+}
+
+.dialogue-face::after {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+  border: 1.5px dotted rgba(201, 164, 92, 0.75);
+  pointer-events: none;
 }
 
 .dialogue-face[hidden] {
@@ -2921,36 +2967,55 @@ body.in-dialogue #hud {
   display: block;
   width: 100%;
   height: 100%;
+  border-radius: 50%;
 }
 
-/* 名前の札: 人物の服の主な色の地に、大きくはっきり。縁は帯の色（色は画面から付ける） */
+/* 名前: 真鍮色の太い明朝体で、字間を広く。肩書きは名前の上に小さく、控えめな色で。人物の色は名前の左の小さな印 */
 .dialogue-plate {
   grid-area: plate;
   justify-self: start;
-  display: inline-flex;
-  align-items: baseline;
-  gap: 10px;
+  display: flex;
+  flex-direction: column-reverse;
+  justify-content: flex-start;
+  align-items: flex-start;
+  gap: 0;
   max-width: 100%;
-  padding: 2px 14px 3px;
-  border-radius: 8px;
-  border: 2px solid var(--accent);
-  border-left-width: 6px;
-  background: #2a3550;
-  color: #fff;
-  line-height: 1.35;
+  padding: 0 0 0 14px;
+  border: 0;
+  background: none;
+  color: var(--kr-brass);
+  line-height: 1.3;
+  position: relative;
+}
+
+.dialogue-plate::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0.62em;
+  width: 6px;
+  height: 6px;
+  transform: rotate(45deg);
+  background: var(--speaker, var(--kr-brass));
+  outline: 1px solid var(--kr-brass);
 }
 
 .dialogue-name {
-  font-weight: bold;
+  font-family: var(--kr-mincho);
+  font-weight: 700;
   font-size: 20px;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.24em;
   white-space: nowrap;
+  color: var(--kr-brass);
 }
 
-/* 肩書き（「八の席」など）。名前より小さく */
+/* 肩書き（「トウマの妹」など）。名前の上に小さく */
 .dialogue-title {
-  font-size: 14px;
-  opacity: 0.9;
+  font-family: var(--kr-mincho);
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  color: var(--kr-sub);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2962,25 +3027,43 @@ body.in-dialogue #hud {
 
 .dialogue-text {
   grid-area: text;
-  font-size: 17px;
-  line-height: 1.8;
-  padding-right: 20px;
+  font-family: var(--kr-mincho);
+  font-weight: 500;
+  font-size: 20px;
+  line-height: 1.9;
+  letter-spacing: 0.06em;
+  color: var(--kr-text);
+  padding-right: 22px;
+  /* 上に細い罫（名前と台詞を分ける） */
+  border-top: 1px solid rgba(85, 96, 127, 0.7);
+  padding-top: 6px;
 }
 
 .dialogue-text rt,
 .backlog-text rt,
 .dialogue-caption rt {
-  font-size: 0.55em;
-  color: #c8d4e6;
+  font-size: 0.5em;
+  color: var(--kr-sub);
 }
 
+/* 次へ送る印: 右下に真鍮色の小さな菱形 */
 .dialogue-next {
   position: absolute;
-  right: 4px;
-  bottom: 0;
-  font-size: 12px;
-  color: var(--accent);
-  animation: dialogue-blink 1s infinite;
+  right: 2px;
+  bottom: 4px;
+  width: 9px;
+  height: 9px;
+  font-size: 0;
+  transform: rotate(45deg);
+  background: var(--kr-brass);
+  animation: dialogue-next 1.6s ease-in-out infinite;
+}
+
+@keyframes dialogue-next {
+  50% {
+    opacity: 0.25;
+    transform: translateY(3px) rotate(45deg);
+  }
 }
 
 @keyframes dialogue-blink {
@@ -2989,30 +3072,29 @@ body.in-dialogue #hud {
   }
 }
 
-/* 語りの字幕: 枠なしで、画面の上（暗転中は中央）に短く出す。時と場所を示す */
+/* 語りの字幕: 画面の上に、濃紺の帯と真鍮の細い罫で出す（暗転中は、黒地の中央に1行ずつゆっくり現れる） */
 .dialogue-caption {
   position: absolute;
   left: 50%;
   /* 場所と時の札（top + 52px、高さ約 34px）の下から出す（札に字幕の頭が隠れないように） */
-  top: calc(max(10px, env(safe-area-inset-top)) + 92px);
+  top: calc(max(10px, env(safe-area-inset-top)) + 96px);
   transform: translateX(-50%);
   width: min(calc(100% - 32px), 640px);
-  padding: 10px 18px;
+  padding: 12px 18px 10px;
   text-align: center;
-  font-family: 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif;
-  font-size: 19px;
-  line-height: 1.75;
-  letter-spacing: 0.06em;
-  color: #f4f1e8;
-  text-shadow:
-    0 0 6px rgba(0, 0, 0, 0.95),
-    0 1px 2px rgba(0, 0, 0, 0.95);
-  /* 後ろの人物や物と重なっても読めるよう、角の丸い半透明の板にする（初見の検査） */
-  background: rgba(5, 8, 14, 0.58);
-  border-radius: 12px;
+  font-family: var(--kr-mincho);
+  font-weight: 500;
+  font-size: 18px;
+  line-height: 1.9;
+  letter-spacing: 0.08em;
+  color: var(--kr-text);
+  background: rgba(15, 22, 38, 0.88);
+  border-top: 1px solid var(--kr-brass);
+  border-bottom: 1px solid var(--kr-brass);
+  border-radius: 0;
   cursor: pointer;
   touch-action: manipulation;
-  /* 薄いまま読ませないよう、字幕は現れる動きなしで出す（初見の検査） */
+  /* 薄いまま読ませないよう、字幕は現れる動きなしで出す（初見の検査。黒地の字幕だけ1行ずつ現れる） */
   animation: none;
 }
 
@@ -3020,16 +3102,63 @@ body.in-dialogue #hud {
   display: none;
 }
 
+/* 黒地の字幕: 画面の中央に、上下に広い余白を取り、1行ずつゆっくり現れて、読める時間を置いてから消える */
 .dialogue-caption.centered {
   top: 50%;
   transform: translate(-50%, -50%);
+  background: none;
+  border: 0;
+  padding: 48px 12px;
+  font-size: 19px;
+  line-height: 2.3;
+  letter-spacing: 0.14em;
+  animation: none;
+  transition: opacity 0.8s ease;
+}
+
+.dialogue-caption.centered.leaving {
+  opacity: 0;
+}
+
+.caption-line {
+  display: block;
+}
+
+.dialogue-caption.centered .caption-line {
+  opacity: 0;
+  animation: caption-line-in 1.6s ease-out forwards;
+}
+
+@keyframes caption-line-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
 }
 
 .dialogue-caption-next {
-  font-family: system-ui, sans-serif;
-  font-size: 12px;
-  color: var(--accent);
-  animation: dialogue-blink 1s infinite;
+  width: 8px;
+  height: 8px;
+  margin: 6px auto 0;
+  font-size: 0;
+  transform: rotate(45deg);
+  background: var(--kr-brass);
+  animation: dialogue-blink 1.6s infinite;
+}
+
+/* 黒地の字幕の次へ送る印は、すべての行が現れてから出す */
+.dialogue-caption.centered .dialogue-caption-next {
+  opacity: 0;
+  animation:
+    caption-line-in 0.8s ease-out forwards,
+    dialogue-blink 1.6s 0.8s infinite;
+  animation-delay: calc(var(--caption-lines, 1) * 1.1s + 0.6s), calc(var(--caption-lines, 1) * 1.1s + 1.4s);
 }
 
 /* 操作の場面の間は、台詞の枠を隠し、早送り・読み返し・スキップのボタンだけを残す */
@@ -3037,6 +3166,8 @@ body.in-dialogue #hud {
   background: transparent;
   border-color: transparent;
   box-shadow: none;
+  margin-top: 0;
+  padding: 0;
   pointer-events: none;
 }
 
@@ -3060,9 +3191,11 @@ body.in-dialogue #hud {
   text-align: center;
   background: #efe6cf;
   color: #2a2016;
-  border: 2px solid #8a6a3a;
-  border-radius: 6px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
+  border: 1px solid #8a6a3a;
+  box-shadow:
+    inset 0 0 0 3px #efe6cf,
+    inset 0 0 0 4px rgba(138, 106, 58, 0.6),
+    0 6px 20px rgba(0, 0, 0, 0.55);
   cursor: pointer;
   touch-action: manipulation;
   /* 物の文字は、半透明で後ろの人物が透けないよう、濃さを変えずに少し広がって現れる（初見の検査） */
@@ -3074,31 +3207,28 @@ body.in-dialogue #hud {
 }
 
 .dialogue-inscription-label {
+  font-family: var(--kr-mincho);
   font-size: 13px;
   color: #6a5034;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.12em;
   margin-bottom: 4px;
 }
 
 .dialogue-inscription-text {
-  font-family: 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif;
+  font-family: var(--kr-mincho);
+  font-weight: 500;
   font-size: 22px;
   line-height: 1.7;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
 }
 
-/* 肩書きのある名前の札: 肩書きを名の下に出す（初めて出る人物の台詞・@肩書き） */
+.dialogue-inscription .dialogue-caption-next {
+  background: #8a6a3a;
+}
+
+/* 肩書きのある名前の札（初めて出る人物の台詞・@肩書き）: 肩書きを名前の上に出す */
 .dialogue-plate.with-title {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0;
-  padding-bottom: 4px;
-}
-
-.dialogue-plate.with-title .dialogue-title {
-  font-size: 14px;
-  line-height: 1.3;
-  letter-spacing: 0.04em;
+  padding-bottom: 0;
 }
 
 /* 手書きの札の署名（測り棒の札の「ユナ」）。右に寄せて、少し小さく */
@@ -3109,7 +3239,7 @@ body.in-dialogue #hud {
   margin-top: 2px;
 }
 
-/* 場所と時の札: 画面の左上の隅に短く出し、数秒で消える。「今」と「過去」は色の違う印で一目で分かるように */
+/* 場所と時の札: 画面の左上。濃紺の地に真鍮の細い罫。「今」「過去」と場所の間に縦の細い線 */
 .dialogue-placard {
   position: absolute;
   left: max(12px, env(safe-area-inset-left));
@@ -3117,18 +3247,21 @@ body.in-dialogue #hud {
   display: flex;
   align-items: stretch;
   max-width: calc(100% - 24px);
-  border-radius: 6px;
+  border-radius: 0;
   overflow: hidden;
-  background: rgba(10, 14, 22, 0.78);
-  border: 1px solid rgba(255, 255, 255, 0.28);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
-  color: #f4f1e8;
-  font-family: 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif;
+  background: rgba(15, 22, 38, 0.92);
+  border: 1px solid var(--kr-brass);
+  box-shadow:
+    inset 0 0 0 2px rgba(15, 22, 38, 0.92),
+    inset 0 0 0 3px rgba(201, 164, 92, 0.3),
+    0 4px 14px rgba(0, 0, 0, 0.45);
+  color: var(--kr-text);
+  font-family: var(--kr-mincho);
   pointer-events: none;
   z-index: 3;
-  animation: placard-in 0.45s ease-out;
+  animation: placard-in 0.8s ease-out;
   /* 消える時は短く（薄れる途中が、文字のない空の枠に見えたため。初見の検査） */
-  transition: opacity 0.2s ease;
+  transition: opacity 0.3s ease;
 }
 
 .dialogue-placard[hidden] {
@@ -3142,63 +3275,72 @@ body.in-dialogue #hud {
 .dialogue-placard-era {
   display: flex;
   align-items: center;
-  padding: 4px 10px;
-  font-family: system-ui, sans-serif;
-  font-weight: bold;
+  padding: 4px 10px 4px 12px;
+  font-family: var(--kr-mincho);
+  font-weight: 700;
   font-size: 15px;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.16em;
   white-space: nowrap;
+  border-right: 1px solid var(--kr-brass);
 }
 
 .dialogue-placard-era[hidden] {
   display: none;
 }
 
-/* 今: 澄んだ青。過去: 古い紙の琥珀色 */
+/* 今: 濃紺の地に真鍮の字。過去: 真鍮の地に濃紺の字（一目で見分けられるように） */
 .dialogue-placard-era[data-era='now'] {
-  background: #2f7fb8;
-  color: #fff;
+  background: transparent;
+  color: var(--kr-brass);
 }
 
 .dialogue-placard-era[data-era='past'] {
-  background: #c8923a;
-  color: #24180a;
-}
-
-.dialogue-placard[data-era='past'] {
-  border-color: rgba(232, 184, 108, 0.7);
+  background: var(--kr-brass);
+  color: var(--kr-ground);
 }
 
 .dialogue-placard-text {
-  padding: 5px 12px;
+  padding: 6px 14px 6px 12px;
+  font-weight: 500;
   font-size: 16px;
   line-height: 1.4;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.12em;
+  white-space: pre;
+}
+
+/* 札の場所と時刻の間の縦の細い線（文の中の全角の空白で区切った所） */
+.placard-sep {
+  display: inline-block;
+  width: 1px;
+  height: 0.95em;
+  margin: 0 0.7em;
+  vertical-align: -0.12em;
+  background: var(--kr-rule);
 }
 
 @keyframes placard-in {
   from {
     opacity: 0;
-    transform: translateX(-12px);
+    transform: translateX(-10px);
   }
 }
 
-/* 名札（台詞のない人物の名前と肩書き）。画面の上の中ほどに短く出す（色は人物の服の色） */
+/* 名札（台詞のない人物の名前と肩書き）。画面の上の中ほどに短く出す */
 .dialogue-nametag {
   position: absolute;
   left: 50%;
   top: calc(max(10px, env(safe-area-inset-top)) + 100px);
   transform: translateX(-50%);
   display: inline-flex;
-  flex-direction: column;
+  flex-direction: column-reverse;
   align-items: flex-start;
   max-width: calc(100% - 32px);
-  padding: 4px 16px 5px;
-  border-radius: 8px;
-  border: 2px solid var(--accent);
-  border-left-width: 6px;
-  background: #2a3550;
-  color: #fff;
+  padding: 6px 16px 6px;
+  border-radius: 0;
+  border: 1px solid var(--kr-brass);
+  background: rgba(15, 22, 38, 0.92);
+  color: var(--kr-brass);
+  font-family: var(--kr-mincho);
   pointer-events: none;
   animation: caption-in 0.4s ease-out;
 }
@@ -3208,14 +3350,15 @@ body.in-dialogue #hud {
 }
 
 .dialogue-nametag-name {
-  font-weight: bold;
+  font-weight: 700;
   font-size: 20px;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.2em;
 }
 
 .dialogue-nametag-title {
-  font-size: 14px;
-  opacity: 0.92;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  color: var(--kr-sub);
 }
 
 /* 重ねる短い画（回想）: 今の場面の写しを薄くして、別の画を透かして見せる。画の層（#stage）の中だけに置き、会話の枠や操作のボタンにはかけない */
@@ -3277,7 +3420,7 @@ body.in-dialogue #hud {
 }
 
 .backlog-row.narration .backlog-text {
-  font-family: 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif;
+  font-family: var(--kr-mincho);
   color: #d9e4f2;
 }
 
@@ -3452,6 +3595,7 @@ body.in-dialogue #hud {
   }
 
   .dialogue-box:not(.narration) .dialogue-tools {
+    position: static;
     grid-column: 2;
     grid-row: 1;
   }
@@ -3472,9 +3616,19 @@ body.in-dialogue #hud {
     min-height: 68px;
   }
 
+  .dialogue-box:not(.narration):not(.tools-only) {
+    margin-top: 34px;
+  }
+
   .dialogue-face {
-    width: 68px;
-    height: 68px;
+    width: 66px;
+    height: 66px;
+    top: -38px;
+  }
+
+  .dialogue-body:not(.no-face) .dialogue-plate {
+    margin-left: 76px;
+    min-height: 32px;
   }
 
   .dialogue-name {
@@ -3482,8 +3636,8 @@ body.in-dialogue #hud {
   }
 
   .dialogue-text {
-    font-size: 16px;
-    line-height: 1.65;
+    font-size: 17px;
+    line-height: 1.7;
   }
 
   .dialogue-caption {
@@ -3511,7 +3665,7 @@ body.in-dialogue #hud {
   font-size: 34px;
   margin: 0 0 4px;
   letter-spacing: 0.12em;
-  font-family: 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif;
+  font-family: var(--kr-mincho);
 }
 
 .title-screen .game-sub {
@@ -3520,7 +3674,7 @@ body.in-dialogue #hud {
 }
 
 .recap-line {
-  font-family: 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif;
+  font-family: var(--kr-mincho);
   font-size: 17px;
   line-height: 1.8;
   margin: 4px 0;
@@ -3538,7 +3692,7 @@ body.in-dialogue #hud {
   justify-content: center;
   gap: 14px;
   color: var(--text);
-  font-family: 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif;
+  font-family: var(--kr-mincho);
   animation: chapter-in 0.9s ease-out;
   cursor: pointer;
   touch-action: manipulation;
@@ -3892,7 +4046,8 @@ body.in-dialogue #hud {
   }
 }
 
-/* 物の名前の札（物の上に、名前だけを短く出す。物を指す小さな三角つき） */
+/* 物の名前の札（物の上に、名前だけを短く出す）: 場所の札と同じ意匠（濃紺の地・真鍮の罫・明朝体）で、
+   左右に菱形の飾りと、物を指す下向きの細い線を付けて、場所の札と見分ける */
 .dialogue-objlabels {
   position: absolute;
   inset: 0;
@@ -3901,36 +4056,48 @@ body.in-dialogue #hud {
 
 .dialogue-objlabel {
   position: absolute;
-  transform: translate(-50%, calc(-100% - 14px));
-  padding: 4px 12px;
-  border-radius: 6px;
-  background: rgba(250, 244, 226, 0.95);
-  color: #2a1e10;
-  border: 1px solid rgba(120, 90, 40, 0.7);
-  font-size: 16px;
-  font-weight: bold;
-  letter-spacing: 0.06em;
+  transform: translate(-50%, calc(-100% - 18px));
+  padding: 3px 14px 4px;
+  border-radius: 0;
+  background: rgba(15, 22, 38, 0.92);
+  color: var(--kr-text);
+  border: 1px solid var(--kr-brass);
+  font-family: var(--kr-mincho);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
   white-space: nowrap;
   pointer-events: none;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
-  animation: placard-in 0.25s ease-out;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+  animation: placard-in 0.35s ease-out;
   z-index: 3;
+}
+
+.dialogue-objlabel::before {
+  content: '◆';
+  color: var(--kr-brass);
+  font-size: 8px;
+  margin-right: 8px;
+  vertical-align: 0.25em;
 }
 
 .dialogue-objlabel::after {
   content: '';
   position: absolute;
   left: 50%;
-  bottom: -8px;
-  transform: translateX(-50%);
-  border: 8px solid transparent;
-  border-bottom: 0;
-  border-top-color: rgba(250, 244, 226, 0.95);
+  top: 100%;
+  width: 1px;
+  height: 16px;
+  background: var(--kr-brass);
 }
 
 .dialogue-objlabel.free {
   left: 50% !important;
   top: 34% !important;
+}
+
+.dialogue-objlabel.free::after {
+  display: none;
 }
 
 .dialogue-objlabel[hidden] {

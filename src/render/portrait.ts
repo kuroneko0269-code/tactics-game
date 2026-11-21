@@ -29,9 +29,10 @@ export function createPortraitRenderer(lookOf: (name: string) => PuppetLook): Po
   canvas.className = 'portrait-canvas';
   let renderer: THREE.WebGLRenderer | undefined;
   const scene = new THREE.Scene();
-  scene.add(new THREE.HemisphereLight(0xeef4ff, 0x8a7a6a, 1.6));
-  const key = new THREE.DirectionalLight(0xffffff, 2.0);
-  key.position.set(0.6, 1.2, 2.6);
+  // 灯のような暖かい光を斜め前から当て、反対側は濃紺の空の光で淡く起こす（顔の丸の中で、やわらかい陰影が出るように）
+  scene.add(new THREE.HemisphereLight(0xc8d4ff, 0x4a3a30, 1.3));
+  const key = new THREE.DirectionalLight(0xffe2bc, 2.4);
+  key.position.set(1.2, 1.4, 2.4);
   scene.add(key);
   const camera = new THREE.PerspectiveCamera(26, 1, 0.05, 20);
   const puppets = new Map<string, Puppet>();
@@ -74,9 +75,10 @@ export function createPortraitRenderer(lookOf: (name: string) => PuppetLook): Po
       // 人形の大きさから、胸から上が収まるようにカメラを置く（背の高さが違っても同じ写り方になる）
       const box = new THREE.Box3().setFromObject(puppet.group);
       const top = box.max.y;
-      const chest = top * 0.52;
-      const center = new THREE.Vector3(0, (top + chest) / 2 - 0.01, 0);
-      const span = (top - chest) * 1.18;
+      // 丸い枠なので、頭のてっぺんに余白を残し、肩までを入れる
+      const chest = top * 0.5;
+      const center = new THREE.Vector3(0, (top + chest) / 2 - 0.005, 0);
+      const span = (top - chest) * 1.32;
       const distance = span / 2 / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
       camera.position.set(0.12 * distance, center.y + 0.06, distance);
       camera.lookAt(center);
