@@ -49,7 +49,7 @@ import { createBattleView, type BattleView } from './render/battleView';
 import { createPicker } from './render/picker';
 import { attachCameraInput } from './render/cameraInput';
 import { applyStoryLook } from './ui/storyLook';
-import { createPixelPuppets } from './render/pixelPuppets';
+import { createPuppet, type PuppetLook } from './render/puppet';
 import { createSaveStore, createSettingsStore, localStorageBackend, settingsBackend, type GameSettings } from './save/saveStore';
 import { createBaseScreen } from './ui/baseScreen';
 import { createBattleController, type BattleController } from './ui/battleController';
@@ -74,7 +74,7 @@ import { scriptTexts } from './data/story/scripts';
 import { ACTOR_LOOKS as ACTOR_LOOK_IDS, GESTURES, LIGHT_COLORS, POSTURES, PROP_KINDS, scriptCatalog, VOICES } from './data/story/stageDefs';
 import { stages } from './data/story/stages';
 import { parties } from './data/story/parties';
-import { DEFAULT_LOOK, LOOKS } from './data/story/looks';
+import { DEFAULT_LOOK, KAYKIT_TRIAL_SCENES, LOOKS } from './data/story/looks';
 import { LISTEN, melodyTimes, SOUND_EFFECTS } from './data/sounds';
 import { prologueBattles } from './data/battles/prologue';
 import { createSceneView, type SceneView } from './render/sceneView';
@@ -163,8 +163,26 @@ function main(): void {
   sound.setVolume(settings.volume, settings.muted);
   // 物語の画面の書体と文字の大きさ（選ばれている書体だけを読み込む）
   applyStoryLook(settings.storyFont, settings.textSize);
-  /** 人形をドット風に描くか（確認用の機能が入で、設定でドット風を選んだ時だけ） */
-  const pixelPuppetsOn = () => settings.checkTools && settings.puppetStyle === 'pixel';
+  /**
+   * KayKit の人形（KayKit の人形の試し）の仕組みと素材。物語の場面4に入る時に、仕組みのファイルごと読み込む
+   * （題名の画面の表示を遅くしないため。動きの仕組みは three.js の大きな部分なので、最初のファイルに入れない）
+   */
+  let kaykit: typeof import('./render/kaykit') | undefined;
+  const loadKaykit = async () => {
+    const m = await import('./render/kaykit');
+    // 開発中だけ: URL に &kkshade=plain と付けると、素材そのままの陰影で描く（見え方を比べる写真のため。docs/KAYKIT.md）
+    const shade = import.meta.env.DEV ? new URLSearchParams(location.search).get('kkshade') : null;
+    if (shade === 'toon' || shade === 'plain') m.setKayKitShading(shade);
+    if (await m.loadKayKit()) kaykit = m;
+  };
+  /** KayKit の人形を試す場面（序章の場面4）を見せている間 */
+  let kaykitScene = false;
+  /** KayKit の素材の読み込みを一度試したか（失敗した時に、同じ場面で何度も試さない） */
+  let kaykitLoadTried = false;
+  /** 人形を KayKit で作るか（試しの場面で、設定が「KayKit」で、素材を読み込み済みの時だけ） */
+  const kaykitOn = () => kaykitScene && settings.puppetKind === 'kaykit' && kaykit !== undefined;
+  /** 人形の作り方: KayKit の見た目がある人物は KayKit の人形、ほかは今の人形 */
+  const makePuppet = (look: PuppetLook) => (kaykitOn() && look.kaykit && kaykit ? kaykit.createKayKitPuppet(look) : createPuppet(look));
   /** 確認用の機能の印と「勝ったことにする」（設定で入にした時だけ） */
   const checkBadge = createCheckBadge(document.getElementById('app') ?? document.body);
   checkBadge.setEnabled(settings.checkTools);
@@ -844,7 +862,7 @@ function main(): void {
     return (id ? LOOKS[currentSite?.looks?.[id] ?? id] : undefined) ?? DEFAULT_LOOK;
   };
   /** 顔の枠（話者の人形を別のカメラで写す）と、マップ上の話者の印 */
-  const portrait = createPortraitRenderer(speakerLook);
+  const portrait = createPortraitRenderer(speakerLook, makePuppet);
   const speakerMark = createSpeakerMark(stage.scene);
   /** 言葉にしない声の、頭上の小さな印 */
   const voiceMarks = createVoiceMarks(stage.scene);
@@ -1566,6 +1584,21 @@ function main(): void {
       return showStoryEndScreen(screenEl, TEXT.books[bookId] ?? bookId, showTitle);
     }
     const scene = now.scene;
+    // KayKit の人形の試し: 序章の場面4だけ。素材は、この場面に入る時に読み込む（題名の画面の表示を遅くしない）
+    const trial = KAYKIT_TRIAL_SCENES.includes(scene.id) && (scene.kind === 'dialogue' || scene.kind === 'interactive');
+    if (trial !== kaykitScene) {
+      kaykitScene = trial;
+      portrait.clear();
+    }
+    if (trial && settings.puppetKind === 'kaykit' && !kaykit && !kaykitLoadTried) {
+      // 読み込めなかった時（通信の失敗など）は、今の人形で続ける
+      void loadKaykit().finally(() => {
+        kaykitLoadTried = true;
+        portrait.clear();
+        runScene(bookId, true);
+      });
+      return;
+    }
     if (scene.kind === 'dialogue' || scene.kind === 'interactive') {
       // 暗転の上の字幕から始まる場面は、舞台を見せる前から暗くしておく（人物が並んだ画を、字幕の前に一瞬見せないため）
       if (startsDark(scriptOf(scene.scriptId))) void setDark(true, 0);
@@ -1598,6 +1631,7 @@ function main(): void {
       camera: () => rig.camera,
       canvas: stage.renderer.domElement,
       lookOf: (name: string) => LOOKS[ACTOR_LOOK_IDS[name] ?? ''] ?? DEFAULT_LOOK,
+      makePuppet,
       propModelOf: (kind: string) => PROP_KINDS[kind] ?? 'box',
       postureOf: (name: string) => POSTURES[name],
       lightColorOf: (name: string) => LIGHT_COLORS[name] ?? 0xffffff,
@@ -1847,6 +1881,8 @@ function main(): void {
       tutorial: () => battle?.tutorial?.status() ?? null,
       /** 設定 */
       settings: () => settings,
+      /** KayKit の人形を使っているか（KayKit の人形の試し。場面4で、設定が KayKit で、素材を読み込み済み） */
+      kaykit: () => kaykitOn(),
       /** 物語の進み具合 */
       story: () => story,
       /** これまでに鳴らした旋律（旋律/音色）・見せた会話用マップ・言葉にしない声の数（読み込み直すと消える） */
@@ -1931,8 +1967,6 @@ function main(): void {
     };
   }
 
-  /** ドット風の描き方（人物だけを低い解像度で描いて拡大する） */
-  const pixelPuppets = createPixelPuppets(stage.renderer);
   const timer = new THREE.Timer();
   stage.renderer.setAnimationLoop((time) => {
     timer.update(time);
@@ -1950,8 +1984,7 @@ function main(): void {
       overlayShow.rig.update(dt);
       overlayShow.view.update(dt, elapsed);
       stage.renderer.render(overlayShow.scene, overlayShow.rig.camera);
-    } else if (pixelPuppetsOn()) pixelPuppets.render(stage.scene, rig.camera);
-    else stage.renderer.render(stage.scene, rig.camera);
+    } else stage.renderer.render(stage.scene, rig.camera);
     if (battle) {
       battle.labels.setPositions(battle.view.unitAnchors());
       battle.hud.update();

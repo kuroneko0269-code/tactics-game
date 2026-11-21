@@ -44,6 +44,13 @@ export interface Puppet {
   setMoving?(moving: boolean): void;
   /** 台詞の間（seconds 秒）、頭と肩をわずかに動かす。0 で止める */
   talk?(seconds: number): void;
+  /**
+   * 仕草を始める（KayKit の人形: 素材の動きに結び付けた仕草なら、その動きを seconds 秒で流して true を返す。motion は仕草の定義そのもの、base は続く姿勢）。
+   * true の間は、仕草の骨の姿勢を重ねない。今の人形には無い
+   */
+  beginGesture?(motion: object, base: PuppetPose, seconds: number): boolean;
+  /** 仕草を終える */
+  endGesture?(): void;
   update(elapsedSeconds: number): void;
 }
 
@@ -155,20 +162,13 @@ function phaseOf(look: PuppetLook): number {
   return (n / 997) * 3;
 }
 
-/** 輪郭線の太さの割合（すべての人形で共通。ドット風の描き方では、小さな画で線が途切れないように太くする） */
-const outlineScale = { value: 1 };
-export function setOutlineScale(scale: number): void {
-  outlineScale.value = scale;
-}
-
 /** 輪郭線の材質: 体を法線の向きに少し膨らませ、裏面だけを暗く塗る。頂点ごとの outlineW（0 なら線なし）で太さを変える */
 function outlineMaterial(): THREE.MeshBasicMaterial {
   const m = new THREE.MeshBasicMaterial({ color: OUTLINE, side: THREE.BackSide });
   m.onBeforeCompile = (shader) => {
-    shader.uniforms.outlineScale = outlineScale;
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float outlineW;\nuniform float outlineScale;')
-      .replace('#include <skinning_vertex>', '#include <skinning_vertex>\ntransformed += normalize( objectNormal ) * outlineW * outlineScale;');
+      .replace('#include <common>', '#include <common>\nattribute float outlineW;')
+      .replace('#include <skinning_vertex>', '#include <skinning_vertex>\ntransformed += normalize( objectNormal ) * outlineW;');
   };
   m.customProgramCacheKey = () => 'puppet-outline';
   return m;
@@ -182,7 +182,7 @@ function buildPuppet(look: PuppetLook, low: boolean): Puppet {
   const group = new THREE.Group();
   const body = new THREE.Group();
   group.add(body);
-  // 画面の切り替え（ドット風の描き方）で、人物だけを選び出すための印
+  // 人物の印（人形を選び出す時のため）
   group.userData.puppet = true;
   const w = look.width ?? 1;
   const outfit = look.outfit ?? (look.robe ? 'robe' : 'tunic');

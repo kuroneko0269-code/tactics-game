@@ -1,8 +1,9 @@
 /**
  * 物語の場面の画面写真を撮る（初見の検査のため。手順は docs/STORY_REVIEW.md）。
  *
- *   npm run story-shots -- --out=フォルダ [--speed=3] [--scenes=0,1,2] [--from=4]
+ *   npm run story-shots -- --out=フォルダ [--speed=3] [--scenes=0,1,2] [--from=4] [--puppet=current]
  *
+ * --puppet=current で、設定の「人形」を「今の人形」にして撮る（KayKit の人形の試し。--from と一緒に使う。省くと KayKit）。
  * --from=4 で、確認用の機能の「場面を選ぶ」から、その脚本の場面の始めから動かし、--scenes の最後の場面を過ぎたら止める（1場面だけを見る時）。
  *
  * 序章を題名の画面から最後まで、スマホ縦向き（iPhone 13 の大きさ、画素の密度 1）で動かし、
@@ -242,7 +243,7 @@ async function main() {
     }
   };
 
-  await page.goto(`${baseUrl}?seed=${SEED}&speed=${SPEED}`);
+  await page.goto(`${baseUrl}?seed=${SEED}&speed=${SPEED}${args.kkshade ? `&kkshade=${args.kkshade}` : ''}`);
   await until(() => window.__tactics?.screen() === 'title');
   /** --from: 脚本の場面の番号から始める（確認用の機能の「場面を選ぶ」）。--scenes の最後を過ぎたら止める */
   const FROM = args.from !== undefined ? Number(args.from) : null;
@@ -250,6 +251,7 @@ async function main() {
   if (FROM !== null) {
     await press(text.settings.open);
     await press(text.settings.checkOff);
+    if (args.puppet) await press(text.settings.choiceLabel(text.settings.puppetKind, text.settings.puppetKinds[args.puppet]));
     await press(text.settings.close);
     await press(text.title.story);
     await until(() => window.__tactics.screen() === 'story-menu');

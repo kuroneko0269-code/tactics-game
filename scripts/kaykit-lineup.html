@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>KayKit の人形の並び</title>
+    <style>
+      body { margin: 0; background: #1b1b20; color: #e8e2d0; font: 14px sans-serif; }
+      canvas { display: block; }
+    </style>
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <script type="module">
+      // KayKit の人形の試し: 作り分けと動きの確かめの写真を撮るための、開発用サーバーだけで開くページ（scripts/kaykit-lineup.mjs）。
+      // ?mode=views 4人を正面・横・後ろ / mode=motions 仕草ごとの姿 / mode=parts 自作の部品の見本 / mode=skeleton 骸骨
+      // &puppet=current で今の人形 &shade=plain で素材そのままの陰影
+      import * as THREE from 'three';
+      import { createKayKitPuppet, loadKayKit, setKayKitShading } from '/src/render/kaykit.ts';
+      import { createPuppet } from '/src/render/puppet.ts';
+      import { LOOKS } from '/src/data/story/looks.ts';
+      import { GESTURES, POSTURES } from '/src/data/story/stageDefs.ts';
+      import { playGesture } from '/src/render/motion.ts';
+      import { createTweens } from '/src/render/tweens.ts';
+
+      const q = new URLSearchParams(location.search);
+      const mode = q.get('mode') ?? 'views';
+      const W = Number(q.get('w') ?? 1400);
+      const H = Number(q.get('h') ?? 520);
+      setKayKitShading(q.get('shade') === 'plain' ? 'plain' : 'toon');
+      const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('c'), antialias: true });
+      renderer.setPixelRatio(1);
+      renderer.setSize(W, H);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x9a9080);
+      scene.add(new THREE.HemisphereLight(0xc8d4ff, 0x4a3a30, 1.5));
+      const sun = new THREE.DirectionalLight(0xffe2bc, 2.2);
+      sun.position.set(1.5, 3, 4);
+      scene.add(sun);
+      const ground = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshLambertMaterial({ color: 0x6a5e4c }));
+      ground.rotation.x = -Math.PI / 2;
+      scene.add(ground);
+      await loadKayKit();
+      const make = (id, overrides) => {
+        const look = { ...LOOKS[id], ...(overrides ?? {}) };
+        return q.get('puppet') === 'current' ? createPuppet(look) : createKayKitPuppet(look);
+      };
+      const tweens = createTweens();
+      const puppets = [];
+      const labels = [];
+      /** 人形を x の位置に置く */
+      const place = (p, x, z = 0) => {
+        p.group.position.set(x, 0, z);
+        scene.add(p.group);
+        puppets.push(p);
+        return p;
+      };
+      const people = ['touma', 'yuna', 'father', 'mother'];
+      const names = { touma: 'トウマ', yuna: 'ユナ', father: '父', mother: '母' };
+      let span = 0;
+      let t = 0;
+      const step = (seconds) => {
+        for (let k = 0; k < seconds * 30; k++) {
+          t += 1 / 30;
+          tweens.update(1 / 30);
+          for (const p of puppets) p.update(t);
+        }
+      };
+      if (mode === 'views') {
+        // 4人を正面・横・後ろから（向きごとに組にして並べる）
+        const yaws = [0, Math.PI / 2, Math.PI];
+        let i = 0;
+        for (const [r, y] of yaws.entries())
+          for (const id of people) {
+            const p = place(make(id), i * 0.5 + r * 0.35);
+            p.setYaw(y);
+            labels.push({ x: p.group.position.x, text: `${names[id]}・${['正面', '横', '後ろ'][r]}` });
+            i++;
+          }
+        span = (i - 1) * 0.5 + 0.7 + 0.7;
+        step(1.2);
+      } else if (mode === 'motions') {
+        // 仕草ごとの姿（動きの途中で止めた画）。1人の人物で、横に並べる
+        const id = q.get('who') ?? 'yuna';
+        const list = [
+          ['立つ', null, 0],
+          ['歩く（途中）', 'walk', 0.5],
+          ['振り向く', '振り向く', 0.5],
+          ['うなずく', 'うなずく', 0.4],
+          ['顔を上げる', '顔を上げる', 0.6],
+          ['しゃがむ（拾う）', '拾う', 0.45],
+          ['座る', 'sit', 0],
+          ['物を持つ', 'hold', 0],
+          ['物を置く', '物を置く', 0.45],
+        ];
+        list.forEach(([label, how, at], i) => {
+          const p = place(make(id), i * 0.55);
+          p.setYaw(0.5);
+          labels.push({ x: i * 0.55, text: label });
+          if (how === 'walk') p.setMoving(true);
+          else if (how === 'sit') p.setPose(POSTURES['座る']);
+          else if (how === 'hold') p.setItems({ hand: q.get('item') ?? 'lampSmall' });
+          else if (how) {
+            const g = GESTURES[how];
+            void playGesture(tweens, p, g, {});
+            p.__stopAt = at * g.seconds;
+          }
+        });
+        span = (list.length - 1) * 0.55 + 0.8;
+        // 仕草の途中（at の割合）まで進めて止める
+        const longest = Math.max(...puppets.map((p) => p.__stopAt ?? 0.6));
+        for (let k = 0; k < longest * 30; k++) {
+          t += 1 / 30;
+          tweens.update(1 / 30);
+          for (const p of puppets) if ((p.__stopAt ?? 0.6) >= t) p.update(t);
+        }
+      } else if (mode === 'parts') {
+        // 自作の部品の見本: 髪の4種類・頭巾・帽子・肩掛け・マント・前掛け
+        const base = LOOKS.touma.kaykit;
+        const samples = [
+          ['髪: 短い', { hair: { style: 'short', color: 0x2a2220 } }],
+          ['髪: 結ぶ', { hair: { style: 'tied', color: 0x2a2220 }, accent: 0x9a4a32 }],
+          ['髪: まとめ髪', { hair: { style: 'bun', color: 0x4a3426 } }],
+          ['髪: 刈り込み', { hair: { style: 'cropped', color: 0x2a2220 } }],
+          ['頭巾', { headwear: { kind: 'hood', color: 0x5a5244 } }],
+          ['帽子', { headwear: { kind: 'hat', color: 0x5e4430 }, accent: 0x8a6a3a }],
+          ['肩掛け', { mantle: 0x6a604e }],
+          ['マント（外套）', { cloak: { color: 0x2b3346, length: 'long', hoodDown: true } }],
+          ['前掛け', { apron: { color: 0xbdb091, bib: true } }],
+        ];
+        samples.forEach(([label, o], i) => {
+          const k = { base: 'rogue', skin: base.skin, cloth: 0x7a6c5c, hair: { style: 'short', color: 0x2a2220 }, ...o };
+          const p = place(make('touma', { kaykit: k }), i * 0.55);
+          p.setYaw(i % 2 ? 0.6 : -0.6);
+          labels.push({ x: i * 0.55, text: label });
+        });
+        span = (samples.length - 1) * 0.55 + 0.8;
+        step(1.2);
+      } else if (mode === 'skeleton') {
+        // 骸骨（素材そのまま。物語の場面と戦闘には入れない）
+        const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader.js');
+        const files = ['Skeleton_Minion', 'Skeleton_Warrior', 'Skeleton_Mage', 'Skeleton_Rogue'];
+        const dir = q.get('dir') ?? '/.lab/';
+        const mixers = [];
+        for (const [i, f] of files.entries()) {
+          const g = await new GLTFLoader().loadAsync(`${dir}${f}.glb`);
+          const o = g.scene;
+          o.scale.setScalar(0.42);
+          o.position.x = i * 0.9;
+          o.rotation.y = 0.4;
+          o.traverse((x) => {
+            if (x.isMesh && !x.isSkinnedMesh) x.visible = false;
+          });
+          scene.add(o);
+          const m = new THREE.AnimationMixer(o);
+          const clip = g.animations.find((a) => a.name === (q.get('anim') ?? 'Idle'));
+          if (clip) m.clipAction(clip).play();
+          m.update(0.6);
+          mixers.push(m);
+          labels.push({ x: i * 0.9, text: f });
+        }
+        span = 3 * 0.9 + 1.2;
+      }
+      // 並びの幅が画面の横に収まる距離から、少し見下ろす
+      const camera = new THREE.PerspectiveCamera(20, W / H, 0.1, 100);
+      const xs = puppets.length ? puppets.map((p) => p.group.position.x) : labels.map((l) => l.x);
+      const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+      const hfov = 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(10)) * (W / H));
+      const dist = Math.max(span / 2 / Math.tan(hfov / 2), 2.2);
+      camera.position.set(cx, 0.5 + dist * 0.12, dist);
+      camera.lookAt(cx, 0.45, 0);
+      renderer.render(scene, camera);
+      // 名前の札（画面の下に）
+      const ctx = document.createElement('canvas').getContext('2d');
+      for (const l of labels) {
+        const v = new THREE.Vector3(l.x, 0, 0).project(camera);
+        const d = document.createElement('div');
+        d.textContent = l.text;
+        d.style.cssText = `position:absolute;top:${H - 30}px;left:${((v.x + 1) / 2) * W}px;transform:translateX(-50%);background:#000a;padding:2px 6px;border-radius:4px;white-space:nowrap`;
+        document.body.append(d);
+      }
+      void ctx;
+      window.done = true;
+    </script>
+  </body>
+</html>

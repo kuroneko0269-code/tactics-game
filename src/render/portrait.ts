@@ -16,13 +16,15 @@ export interface PortraitRenderer {
   show(name: string | null): void;
   /** 今写している人物（自動テスト用） */
   readonly current: string | null;
+  /** 作った人形を捨てる（人形の作り方を切り替えた時。次に写す時に作り直す） */
+  clear(): void;
   dispose(): void;
 }
 
 /** canvas の画素の大きさ（CSS の大きさは style.css。画素の密度 2 までを見込む） */
 const PIXELS = 192;
 
-export function createPortraitRenderer(lookOf: (name: string) => PuppetLook): PortraitRenderer {
+export function createPortraitRenderer(lookOf: (name: string) => PuppetLook, makePuppet: (look: PuppetLook) => Puppet = createPuppet): PortraitRenderer {
   const canvas = document.createElement('canvas');
   canvas.width = PIXELS;
   canvas.height = PIXELS;
@@ -51,7 +53,7 @@ export function createPortraitRenderer(lookOf: (name: string) => PuppetLook): Po
   const puppetOf = (name: string) => {
     let p = puppets.get(name);
     if (!p) {
-      p = createPuppet(lookOf(name));
+      p = makePuppet(lookOf(name));
       // 少し斜め（向かって左を向く）にして、顔と体の形が分かるようにする
       p.setYaw(0.42);
       p.update(0);
@@ -87,6 +89,11 @@ export function createPortraitRenderer(lookOf: (name: string) => PuppetLook): Po
       } catch {
         // WebGL が使えない時は、顔の枠を空のままにする（名前の札は出る）
       }
+    },
+    clear() {
+      for (const p of puppets.values()) scene.remove(p.group);
+      puppets.clear();
+      current = null;
     },
     dispose() {
       renderer?.dispose();

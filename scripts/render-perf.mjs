@@ -1,13 +1,14 @@
 /**
  * 描画の重さを測る（序章の場面4。見た目の見本の PR で、変更の前後を同じ条件で比べるために作った）。
  *
- *   node scripts/render-perf.mjs [--root=別の作業フォルダ] [--seconds=5] [--dpr=2]
+ *   node scripts/render-perf.mjs [--root=別の作業フォルダ] [--seconds=5] [--dpr=2] [--puppet=current]
  *
  * --root に、比べたい版のリポジトリの写し（git worktree）を渡すと、その版の画面を測る（node_modules は今の物を使ってよい）。
  * スマホ縦向き（iPhone 13 の大きさ・画素の密度 --dpr）で、「場面を選ぶ」から場面4を始め、
  * 夕食（「おかえり」の台詞の時）と夜（ユナの部屋の最初の台詞の時）で、--seconds 秒ずつ次を数える:
  * - 1こまあたりの描く回数（WebGL の draw の呼び出し。影の計算の分も含む）と三角形の数
  * - 1こまの処理の時間（画面を描く処理にかかった時間の平均）と、1秒あたりのこまの数
+ * --puppet=current で、設定の「人形」を「今の人形」にして測る（KayKit の人形の試し。省くと KayKit。KayKit の無い前の版では付けない）。
  * ソフトウェアの描画（この環境のブラウザ）で測るので、実機の数字そのものではない。版どうしの比べ合いに使う。
  */
 import { createServer } from 'vite';
@@ -90,6 +91,7 @@ async function main() {
   await until(() => window.__tactics?.screen() === 'title');
   await press(text.settings.open);
   await press(text.settings.checkOff);
+  if (args.puppet) await press(text.settings.choiceLabel(text.settings.puppetKind, text.settings.puppetKinds[args.puppet]));
   await press(text.settings.close);
   await press(text.title.story);
   await until(() => window.__tactics.screen() === 'story-menu');
@@ -121,7 +123,7 @@ async function main() {
       'こま/秒': Number((s.frames / SECONDS).toFixed(1)),
     });
   }
-  console.log(`版: ${ROOT}（画素の密度 ${DPR}、${SECONDS} 秒ずつ）`);
+  console.log(`版: ${ROOT}（画素の密度 ${DPR}、${SECONDS} 秒ずつ${args.puppet ? `、人形 ${args.puppet}` : ''}）`);
   console.table(results);
   console.log(JSON.stringify(results));
   await browser.close();

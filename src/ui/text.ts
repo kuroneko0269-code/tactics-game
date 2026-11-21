@@ -170,13 +170,13 @@ export const TEXT = {
     checkOn: '確認用の機能: 入',
     checkOff: '確認用の機能: 切',
     checkNote: '入にすると、物語の場面を選ぶ・物語の戦闘を勝ったことにする、が使えます（確かめるための機能）',
-    // 見た目の見本の2回目: 書体と文字の大きさ（いつでも）、人形の描き方（確認用の機能が入の時だけ）
+    // 見た目の見本の2回目: 書体と文字の大きさ（いつでも）。KayKit の人形の試し: 人形（確認用の機能が入の時だけ）
     font: '書体',
     fonts: { zenOldMincho: 'Zen Old Mincho', shipporiAntique: 'Shippori Antique', shipporiMincho: 'Shippori Mincho' },
     textSize: '文字の大きさ',
     textSizes: { small: '小', medium: '中', large: '大' },
-    puppetStyle: '人形の描き方',
-    puppetStyles: { smooth: 'なめらか', pixel: 'ドット風' },
+    puppetKind: '人形',
+    puppetKinds: { kaykit: 'KayKit', current: '今の人形' },
     choiceLabel: (group: string, choice: string) => `${group}: ${choice}`,
     close: '閉じる',
   },

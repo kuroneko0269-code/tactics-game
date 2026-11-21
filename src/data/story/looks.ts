@@ -73,6 +73,55 @@ export interface LookDefinition {
   readonly sleeves?: 'rolled';
   /** 襟巻き・襟の色（省くと差し色） */
   readonly scarf?: number;
+  /**
+   * KayKit の体で作る時の見た目（KayKit の人形の試し。src/render/kaykit.ts）。書いた人物だけが、設定の「人形：KayKit」で KayKit の体になる。
+   * 今は序章の場面4の4人だけ
+   */
+  readonly kaykit?: KayKitLook;
+}
+
+/** KayKit の土台の体（素材の5人のうち、服の形が違う3人の体。docs/KAYKIT.md） */
+export type KayKitBase = 'rogue' | 'mage' | 'barbarian';
+
+/**
+ * KayKit の体で作る人物の見た目。体・骨・動きは KayKit のまま使い、髪・かぶり物・マント・肩掛け・前掛けと色だけを自作する。
+ * 色は、彩度を落とした土の色に寄せる（描く時にさらに彩度を落とす）。人物ごとの差し色（accent）は1色まで
+ */
+export interface KayKitLook {
+  /** 土台の体（rogue 短い上着と革の籠手・mage 膝までの長衣・barbarian がっしりした体と毛皮の縁） */
+  readonly base: KayKitBase;
+  /** 頭（knight 髪を外した頭・barbarian ひげの頭。省くと knight） */
+  readonly head?: 'knight' | 'barbarian';
+  /** 背丈の倍率（1 が大人。体を小さくする時は、頭も同じ割合で小さくなる） */
+  readonly height?: number;
+  /** 肩幅の倍率（1 がふつう） */
+  readonly width?: number;
+  /** 肌の色 */
+  readonly skin: number;
+  /** 服の主な色 */
+  readonly cloth: number;
+  /** 服の2つ目の色（襟・袖。省くと服の色を少し暗く） */
+  readonly cloth2?: number;
+  /** 縁取りの色（裾・毛皮の縁。省くと生成り） */
+  readonly trim?: number;
+  /** 革（帯・籠手）の色 */
+  readonly leather?: number;
+  /** ズボンの色 */
+  readonly pants?: number;
+  /** 靴の色 */
+  readonly boots?: number;
+  /** 髪の形と色（束のある形。short 短い・tied 後ろで結ぶ・bun まとめ髪・cropped 刈り込み）。ひげの頭では、ひげも同じ色 */
+  readonly hair: { readonly style: 'short' | 'tied' | 'bun' | 'cropped'; readonly color: number };
+  /** かぶり物（hood 頭巾・hat 帽子） */
+  readonly headwear?: { readonly kind: 'hood' | 'hat'; readonly color: number };
+  /** 背のマント・外套（long 足もとまで・short 腰まで）。hoodDown で首の後ろに下ろした頭巾を付ける */
+  readonly cloak?: { readonly color: number; readonly length: 'long' | 'short'; readonly hoodDown?: boolean };
+  /** 肩掛けの色 */
+  readonly mantle?: number;
+  /** 前掛け（bib で胸当てつき） */
+  readonly apron?: { readonly color: number; readonly bib?: boolean };
+  /** 差し色（結い紐・襟巻き・首の布。1色まで） */
+  readonly accent?: number;
 }
 
 // 色は、彩度を落とした土の色（布・革・くすんだ金属）。人形は描く時にさらに彩度を落とす（puppet.ts の muted）。
@@ -83,6 +132,22 @@ const LEATHER_DARK = 0x35271d;
 const LINEN = 0xc6b898;
 const WOOL = 0x6a5e4c;
 const IRON = 0x6f7272;
+
+/** トウマの KayKit の見た目: 時守の濃紺の外套（足もとまで。首の後ろに下ろした頭巾）、黒の短髪。差し色は襟の鈍い青緑 */
+const TOUMA_KAYKIT: KayKitLook = {
+  base: 'rogue',
+  skin: 0xbd9e88,
+  cloth: 0x2e3546,
+  cloth2: 0x262c3a,
+  trim: 0x3a4152,
+  leather: LEATHER_DARK,
+  pants: 0x2e2c2c,
+  boots: LEATHER_DARK,
+  hair: { style: 'short', color: 0x1b1a1e },
+  // 外套は、今の人形の濃紺より少し明るく（夜の部屋で、髪と外套が1つの黒い塊に見えないように。観客の検査）
+  cloak: { color: 0x34405a, length: 'long', hoodDown: true },
+  accent: 0x5c7f80,
+};
 
 export const LOOKS: Readonly<Record<string, LookDefinition>> = {
   // ---- 隊（操作する仲間） ----
@@ -102,6 +167,7 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
     pauldrons: LEATHER,
     hood: 'down',
     pouch: true,
+    kaykit: TOUMA_KAYKIT,
   },
   /** ゴード: 大柄、茶の短髪、鈍い赤。鉄の肩当て。背に真鍮の測り棒 */
   gord: {
@@ -149,6 +215,20 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
     sleeves: 'rolled',
     pouch: true,
     scarf: LEATHER_DARK,
+    kaykit: {
+      base: 'rogue',
+      height: 0.86,
+      width: 0.94,
+      skin: 0xc6a790,
+      cloth: 0xc2b496,
+      cloth2: 0xa89a7c,
+      leather: 0x5a4230,
+      pants: 0x54463a,
+      boots: 0x45342a,
+      hair: { style: 'tied', color: 0x18151a },
+      apron: { color: 0x5e4632 },
+      accent: 0x9a4a32,
+    },
   },
   /** テオ: 十七歳、小柄、柔らかい茶髪、時守の濃紺に白い襟 */
   teo: { body: NAVY, accent: 0xd8d2c0, hair: 0x7a5e44, hairStyle: 'messy', scale: 0.9, width: 0.92, outfit: 'robe', boots: LEATHER_DARK },
@@ -172,6 +252,7 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
     pauldrons: LEATHER,
     hood: 'down',
     items: [{ model: 'lampSmall', slot: 'waist' }],
+    kaykit: TOUMA_KAYKIT,
   },
   /** ガレス（丘。誓いの剣を手に持つ。折れると「折れた剣」に持ち替える） */
   garethOath: {
@@ -202,6 +283,20 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
     legs: 0x4a3530,
     mantle: 0x6a604e,
     sleeves: 'rolled',
+    kaykit: {
+      base: 'mage',
+      height: 0.97,
+      skin: 0xc2a18a,
+      cloth: 0x6b4a42,
+      cloth2: 0x5a3e38,
+      trim: 0x8a5040,
+      leather: 0x4a3530,
+      pants: 0x4a3530,
+      boots: 0x3e2e26,
+      hair: { style: 'bun', color: 0x3a2a22 },
+      mantle: 0x6a604e,
+      apron: { color: 0xbdb091, bib: true },
+    },
   },
   /** 父: がっしりした体に、苔色の上着と革の帯。袖をまくり、短い髪と短く刈ったひげ。差し色は首の黄土の布 */
   father: {
@@ -218,6 +313,22 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
     sleeves: 'rolled',
     belt: LEATHER,
     pouch: true,
+    kaykit: {
+      base: 'barbarian',
+      head: 'barbarian',
+      height: 1.03,
+      width: 1.06,
+      skin: 0xb5937c,
+      // 観客の検査: 後ろ姿のトウマと見分けられるよう、トウマより明るい苔色・茶の髪にした
+      cloth: 0x6e7a4c,
+      cloth2: 0x5a6440,
+      trim: 0x9a8a6e,
+      leather: LEATHER,
+      pants: 0x4a3e30,
+      boots: LEATHER_DARK,
+      hair: { style: 'cropped', color: 0x5a4430 },
+      accent: 0x8a7040,
+    },
   },
   /** ミオ: 十四歳、小柄、肩までの黒髪、薬草の緑 */
   mio: { body: 0x56704a, accent: 0xc8c09a, hair: 0x16151a, hairStyle: 'long', scale: 0.84, width: 0.9, sleeves: 'rolled', pouch: true },
@@ -246,6 +357,12 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
   instructor: { body: 0x4a5468, accent: 0xa8905a, hair: 0x8a8a8a, hairStyle: 'short' },
   apprentice: { body: 0x6a8050, accent: 0xc8bc9a, hair: 0x5a3a20, hairStyle: 'messy' },
 };
+
+/**
+ * KayKit の人形を試す場面（物語の場面の id。KayKit の人形の試し）。設定が「KayKit」の時、この場面だけ、
+ * 見た目に kaykit がある人物を KayKit の人形にする。序章全体と戦闘の駒には、まだ広げない
+ */
+export const KAYKIT_TRIAL_SCENES: readonly string[] = ['home'];
 
 /** ここにない人物のふつうの見た目 */
 export const DEFAULT_LOOK: LookDefinition = { body: 0x7a6c5c, accent: 0xa89a80, hair: 0x3a3028, hairStyle: 'short' };
