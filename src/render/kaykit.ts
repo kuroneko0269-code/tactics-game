@@ -54,6 +54,19 @@ const GESTURE_CLIPS: Readonly<Record<string, { clip: Clip; from?: number; to?: n
 };
 /** 平たい物（暦盤・帳面）を手に持つ時の、面の起こし方（物の見た目の id → ラジアン。負で、面を持つ人の顔の方へ起こす。自分で見ている持ち方） */
 const HELD_TILT: Readonly<Record<string, number>> = { calendarSmall: -0.85, ledger: -0.85, scroll: -0.6 };
+/**
+ * 武器と背負う物の大きさと傾き（KayKit の体は今の人形より頭が大きく背が低いので、長い物は小さめにし、背の物は斜めに負う）。
+ * scale 倍率・tilt 体の左右への傾き（ラジアン）・y 上下へずらす量
+ */
+const ITEM_POSE: Readonly<Record<string, { scale: number; tilt?: number; y?: number }>> = {
+  sword: { scale: 0.72 },
+  spear: { scale: 0.85 },
+  staff: { scale: 0.8 },
+  staffRing: { scale: 0.8 },
+  bow: { scale: 0.8 },
+  measuringRod: { scale: 0.7, tilt: 0.55, y: -0.32 },
+  quiver: { scale: 0.75, tilt: -0.2, y: -0.25 },
+};
 const GESTURE_NAME = new Map<object, string>(Object.entries(GESTURES).map(([name, g]) => [g, name]));
 
 interface Assets {
@@ -191,7 +204,8 @@ function paletteTexture(look: KayKitLook): THREE.Texture {
     skin: look.skin,
     // 素手（省いた時は革の手袋の色）・油染み（服を暗くした色）・工具の木の柄と鉄
     hands: look.hands ?? look.leather ?? 0x5e4430,
-    stain: new THREE.Color(look.cloth).lerp(new THREE.Color(0x3a3028), 0.32).getHex(),
+    // 油染みの色（染みのない人物で革の肩当ての時は、この区画を革の色に使う）
+    stain: look.pauldrons === 'leather' && !look.stains ? (look.leather ?? 0x5e4430) : new THREE.Color(look.cloth).lerp(new THREE.Color(0x3a3028), 0.32).getHex(),
     wood: 0x7a5a3a,
     metal: 0x6f7272,
     shine: 0xf4eee2,
@@ -1148,6 +1162,12 @@ export function createKayKitPuppet(look: LookDefinition): Puppet {
         holder.rotation.x = flat ? HELD_TILT[model]! : 0;
         // 平たい物は少し大きく持つ（KayKit の体は今の人形より幅があり、同じ大きさでは体の陰に隠れるため。暦盤）
         if (flat) holder.scale.setScalar(1.4);
+        const pose = ITEM_POSE[model];
+        if (pose) {
+          holder.scale.setScalar(pose.scale);
+          holder.rotation.z = pose.tilt ?? 0;
+          holder.position.y = pose.y ?? 0;
+        }
         a.add(holder);
         itemMaterials.push(...buildModel(model, holder));
       }

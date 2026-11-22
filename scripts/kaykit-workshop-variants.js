@@ -251,3 +251,90 @@ export const VARIANTS = {
     ],
   },
 };
+
+// ---- 人形の工房 その2（序章の残りの人物）----
+
+/** 画像に入れる人物の名前 */
+export const NAMES = {
+  touma: 'トウマ', yuna: 'ユナ', father: '父', mother: '母',
+  gord: 'ゴード', kiri: 'キリ', fen: 'フェン', nono: 'ノノ',
+  hald: 'ハルド', yelma: 'イェルマ', teo: 'テオ', mio: 'ミオ', gareth: 'ガレス',
+  baker: 'パン屋のおかみ', apothecary: '薬屋の老婆', vendor: '売り子', stranger: '見知らぬ男',
+};
+/** 並びの写真に出す、決まった人物（決まるたびに足す） */
+export const DECIDED = ['touma', 'yuna', 'father', 'mother'];
+
+const EARTH = { leather: 0x5e4430, pants: 0x3e342c, boots: 0x3a2a20 };
+const GORD_HAIR = { kit: 'knight', color: 0x4a3222, shape: { length: 0.8 } };
+const GORD_ITEMS = { items: [{ model: 'sword', slot: 'hand' }, { model: 'measuringRod', slot: 'back' }] };
+const KIRI_ITEMS = { items: [{ model: 'bow', slot: 'handL' }, { model: 'quiver', slot: 'back' }] };
+const STAFF = { items: [{ model: 'staff', slot: 'hand' }] };
+
+Object.assign(VARIANTS, {
+  gord: {
+    1: [
+      {
+        name: 'A 鉄の肩当て',
+        note: 'がっしりした体・鈍い赤の上着・鉄の肩当て',
+        def: GORD_ITEMS,
+        look: { base: 'barbarian', head: 'knight', height: 1.1, width: 1.15, skin: 0xb8967e, cloth: 0x7a3e34, cloth2: 0x66342c, trim: 0x8a7a5a, ...EARTH, hair: GORD_HAIR, pauldrons: 'iron' },
+      },
+      {
+        name: 'B 革の胴と赤いマント',
+        note: '短い上着の体・革の胴・腰までの赤いマント',
+        def: GORD_ITEMS,
+        look: { base: 'rogue', head: 'knight', height: 1.1, width: 1.18, skin: 0xb8967e, cloth: 0x6a5040, cloth2: 0x5a4436, trim: 0x8a7a5a, ...EARTH, hair: GORD_HAIR, pauldrons: 'leather', cloak: { color: 0x7a3e34, length: 'short' } },
+      },
+      {
+        name: 'C 赤い肩掛け',
+        note: 'がっしりした体・土色の上着・赤い肩掛け',
+        def: GORD_ITEMS,
+        look: { base: 'barbarian', head: 'knight', height: 1.1, width: 1.15, skin: 0xb8967e, cloth: 0x5a4e44, cloth2: 0x4a4038, trim: 0x8a7a5a, ...EARTH, hair: { ...GORD_HAIR, shape: { length: 0.7, volume: 1.04 } }, mantle: 0x7a3e34 },
+      },
+    ],
+  },
+  kiri: {
+    1: [
+      {
+        name: 'A 青年・緑の短い外套',
+        note: '後ろで束ねた髪・腰までの緑の外套・弓と矢筒',
+        def: KIRI_ITEMS,
+        look: { base: 'rogue', head: 'rogue', width: 0.88, skin: 0xbf9f86, cloth: 0x4a5a44, cloth2: 0x3e4c3a, ...EARTH, hair: { kit: 'rogue', color: 0x2a2018, shape: { length: 0.7 }, extras: ['ponytail'] }, cloak: { color: 0x3a5440, length: 'short', hoodDown: true } },
+      },
+      {
+        name: 'B 女性・高い一つ結び',
+        note: '長い髪を一つに結ぶ・深い緑の上着・弓と矢筒',
+        def: KIRI_ITEMS,
+        look: { base: 'rogue', head: 'mage', height: 0.95, width: 0.85, skin: 0xc4a48c, cloth: 0x3a5440, cloth2: 0x2f4636, ...EARTH, hair: { kit: 'mage', color: 0x2a2018, shape: { length: 0.6 }, extras: ['ponytail'] }, face: { brows: 'thin' } },
+      },
+      {
+        name: 'C 緑の肩掛け',
+        note: '短めの髪を後ろで結ぶ・生成りの上着・緑の肩掛け',
+        def: KIRI_ITEMS,
+        look: { base: 'rogue', head: 'rogue', width: 0.88, skin: 0xbf9f86, cloth: 0xa89a7c, cloth2: 0x8e8268, ...EARTH, hair: { kit: 'rogue', color: 0x3a2a1e, shape: { length: 0.55 }, extras: ['ponytail'] }, mantle: 0x3a5440 },
+      },
+    ],
+  },
+  fen: {
+    1: [
+      {
+        name: 'A 黒い長衣',
+        note: '小柄・白髪まじりの短髪・黒の長衣と肩掛け・杖',
+        def: STAFF,
+        look: { base: 'mage', head: 'knight', height: 0.9, skin: 0xbf9f86, cloth: 0x2e2c30, cloth2: 0x26242a, trim: 0x6a5a7a, ...EARTH, hair: { kit: 'knight', color: 0x8e8a84 }, mantle: 0x3a3634 },
+      },
+      {
+        name: 'B つばの広い帽子',
+        note: '黒の長衣・黒い帽子・帯に紫・杖',
+        def: STAFF,
+        look: { base: 'mage', head: 'knight', height: 0.9, skin: 0xbf9f86, cloth: 0x2e2c30, cloth2: 0x26242a, trim: 0x4a4650, ...EARTH, hair: { kit: 'knight', color: 0x8e8a84 }, headwear: { kind: 'hat', color: 0x2a282e }, accent: 0x6a5a7a },
+      },
+      {
+        name: 'C 女性・まとめ髪',
+        note: '白髪まじりの長い髪をまとめる・黒の長衣・杖',
+        def: STAFF,
+        look: { base: 'mage', head: 'mage', height: 0.9, skin: 0xc4a48c, cloth: 0x2e2c30, cloth2: 0x26242a, trim: 0x6a5a7a, ...EARTH, hair: { kit: 'mage', color: 0x8e8a84, extras: ['bun'] }, mantle: 0x3a3634, face: { brows: 'thin' } },
+      },
+    ],
+  },
+});

@@ -156,6 +156,8 @@ export interface KayKitLook {
   readonly stains?: boolean;
   /** 腰の工具（腰の帯に下げた革の袋と、金槌・ねじ回し） */
   readonly tools?: boolean;
+  /** 肩当て（左右の肩に丸い大きな板。iron 鉄・leather 革（革の色）） */
+  readonly pauldrons?: 'iron' | 'leather';
   /**
    * 顔（目と眉は顔の面に沿わせて描く。省くと落ち着いた大人の目と、ふつうの太さの眉）。eyes: 'large' で少し大きくまつ毛のある目、'narrow' で切れ長の目、iris で瞳の色、
    * round で輪郭を丸く、slim で目より下を細く（0.1 で 1 割）、blush で頬の赤み、brows で眉の太さ、browLift で眉の高さ
