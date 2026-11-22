@@ -97,7 +97,7 @@
         ctx.fillText(`${v.name}`, bx + 8, 30);
         ctx.font = '15px sans-serif';
         ctx.fillStyle = '#c8c0aa';
-        ctx.fillText(v.note ?? '', bx + 8 + ctx.measureText(v.name).width * 1.5 + 14, 30);
+        if (!small) ctx.fillText(v.note ?? '', bx + 8 + ctx.measureText(v.name).width * 1.5 + 14, 30);
         const base = LOOKS[who];
         const look = { ...base, kaykit: { ...base.kaykit, ...v.look, hair: { ...base.kaykit.hair, ...(v.look?.hair ?? {}) } } };
         for (const [i, [label, yaw, mode]] of views.entries()) {

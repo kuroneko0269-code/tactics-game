@@ -27,7 +27,9 @@ export const PART_CELLS = {
   shine: [3, 3, 'r'],
   headwear: [4, 3, 'l'],
   blush: [4, 3, 'r'],
-  accent: [5, 3],
+  accent: [5, 3, 'l'],
+  // 2つ目の差し色（外套の縁・胸の印・髪飾りの金具）
+  accentB: [5, 3, 'r'],
   cloakInner: [6, 3, 'l'],
   skirt: [6, 3, 'r'],
   hairDark: [7, 3, 'l'],
@@ -197,10 +199,11 @@ export function cloakParts(look: KayKitLook): PartPiece[] {
   const c = look.cloak;
   if (!c) return [];
   const b = BODY_SIZE[look.base];
-  const bottom = c.length === 'long' ? 0.12 : 0.62;
+  const bottom = c.length === 'long' ? 0.12 : c.length === 'knee' ? 0.3 : 0.62;
   const h = b.shoulder - bottom;
+  const rBottom = c.length === 'long' ? 0.68 : c.length === 'knee' ? 0.62 : 0.52;
   // 背の布: 円すい台の後ろ側だけ（すそが広がる）。肩から下へ
-  const panel = new THREE.CylinderGeometry(0.44, c.length === 'long' ? 0.68 : 0.52, h, 12, 5, true, Math.PI - 1.45, 2.9);
+  const panel = new THREE.CylinderGeometry(0.44, rBottom, h, 12, 5, true, Math.PI - 1.45, 2.9);
   panel.scale(1, 1, 0.82);
   panel.translate(0, bottom + h / 2, 0.0);
   // 肩を覆う上の輪（外套が肩に掛かっているように）
@@ -211,6 +214,14 @@ export function cloakParts(look: KayKitLook): PartPiece[] {
     finish(bothSides(panel), 'cloak', { a: BONE.chest, b: BONE.hips, topY: 0.9, lowY: bottom }, false),
     finish(bothSides(yoke), 'cloak', { a: BONE.chest }, false),
   ];
+  if (c.edge) {
+    // 裾の細い縁（暗い場面でも外套の輪郭が残るように）
+    const t = 0.045;
+    const hem = new THREE.CylinderGeometry(rBottom - ((rBottom - 0.44) * t) / h + 0.012, rBottom + 0.012, t, 12, 1, true, Math.PI - 1.47, 2.94);
+    hem.scale(1, 1, 0.82);
+    hem.translate(0, bottom + t / 2, 0);
+    pieces.push(finish(bothSides(hem), 'accentB', { a: BONE.chest, b: BONE.hips, topY: 0.9, lowY: bottom }, false));
+  }
   // 襟（差し色）
   if (look.accent !== undefined) {
     // 襟は太め（髪と外套が1つの黒い塊に見えないように、境目に差し色を見せる。観客の検査）
@@ -220,6 +231,14 @@ export function cloakParts(look: KayKitLook): PartPiece[] {
     collar.scale(1, 1, 0.9);
     collar.translate(0, b.shoulder + 0.075, 0.0);
     pieces.push(finish(collar, 'accent', { a: BONE.chest }, false));
+    if (c.edge) {
+      // 襟の上の細い縁
+      const line = new THREE.TorusGeometry(0.285, 0.016, 5, 16);
+      line.rotateX(Math.PI / 2);
+      line.scale(1, 1, 0.9);
+      line.translate(0, b.shoulder + 0.13, 0.0);
+      pieces.push(finish(line, 'accentB', { a: BONE.chest }, false));
+    }
   }
   if (c.hoodDown) {
     // 首の後ろに下ろした頭巾（丸まった布）
@@ -227,6 +246,29 @@ export function cloakParts(look: KayKitLook): PartPiece[] {
     pieces.push(finish(hood, 'cloakInner', { a: BONE.chest }, false));
   }
   return pieces;
+}
+
+/** 胸か肩の丸い印（門の輪をかたどった、輪と中の小さな円） */
+export function emblemParts(look: KayKitLook): PartPiece[] {
+  if (!look.emblem) return [];
+  const b = BODY_SIZE[look.base];
+  const ring = new THREE.TorusGeometry(0.045, 0.011, 6, 18);
+  const dot = new THREE.CylinderGeometry(0.014, 0.014, 0.01, 12);
+  dot.rotateX(Math.PI / 2);
+  const g = [ring, dot];
+  if (look.emblem === 'chest') {
+    for (const x of g) {
+      x.rotateX(-0.12);
+      x.translate(0.16, b.shoulder - 0.2, b.front + 0.035);
+    }
+  } else {
+    for (const x of g) {
+      x.rotateY(Math.PI / 2 - 0.35);
+      x.rotateZ(-0.3);
+      x.translate(0.43, b.shoulder - 0.03, 0.08);
+    }
+  }
+  return g.map((x) => finish(x, 'accentB', { a: BONE.chest }, false));
 }
 
 /** 肩掛け（短い肩のマント） */
@@ -349,5 +391,5 @@ export function toolParts(look: KayKitLook): PartPiece[] {
 /** 人物の自作の部品をすべて */
 export function customParts(look: KayKitLook): PartPiece[] {
   // 髪は src/render/kaykitHair.ts（頭巾をかぶる時は作らない）
-  return [...headwearParts(look), ...cloakParts(look), ...mantleParts(look), ...skirtParts(look), ...apronParts(look), ...scarfParts(look), ...toolParts(look)];
+  return [...headwearParts(look), ...cloakParts(look), ...emblemParts(look), ...mantleParts(look), ...skirtParts(look), ...apronParts(look), ...scarfParts(look), ...toolParts(look)];
 }

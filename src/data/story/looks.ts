@@ -121,9 +121,10 @@ export interface KayKitLook {
     readonly color: number;
     /**
      * 自作で足す、なめらかな大きな塊（bun 後ろのまとめ・twinTails 二つ結びのおさげ・ponytail 後ろで1つに結んだ房・forelock 垂れた前髪の1房（うつむくと垂れる）・
-     * flicks 寝かせた毛先（耳の後ろと後ろ頭の裾の、毛先だけ少し跳ねる平たい房）・flareUp 跳ねた短い髪（見比べ用の仮の頭だけ））
+     * flicks 寝かせた毛先（耳の後ろと後ろ頭の裾の、毛先だけ少し跳ねる平たい房）・flareUp 跳ねた短い髪（見比べ用の仮の頭だけ）・
+     * pin 前髪の横の丸い金具の髪留め・bows 結び目の小さなリボン・flower 耳の上の小さな花の髪飾り）
      */
-    readonly extras?: readonly ('bun' | 'twinTails' | 'ponytail' | 'forelock' | 'flicks' | 'flareUp')[];
+    readonly extras?: readonly ('bun' | 'twinTails' | 'ponytail' | 'forelock' | 'flicks' | 'flareUp' | 'pin' | 'bows' | 'flower')[];
     /** 作者の髪の形を変える（長さ・量・前髪・分け目・立たせる） */
     readonly shape?: KayKitHairShape;
     /** 二つ結びの房の形（twinTails の時。省くと胸の前へ下ろす元の形） */
@@ -131,14 +132,18 @@ export interface KayKitLook {
   };
   /** かぶり物（hood 頭巾・hat 帽子） */
   readonly headwear?: { readonly kind: 'hood' | 'hat'; readonly color: number };
-  /** 背のマント・外套（long 足もとまで・short 腰まで）。hoodDown で首の後ろに下ろした頭巾を付ける */
-  readonly cloak?: { readonly color: number; readonly length: 'long' | 'short'; readonly hoodDown?: boolean };
+  /** 背のマント・外套（long 足もとまで・knee 膝まで・short 腰まで）。hoodDown で首の後ろに下ろした頭巾を付ける。edge で襟と裾に細い縁（色は accentB） */
+  readonly cloak?: { readonly color: number; readonly length: 'long' | 'knee' | 'short'; readonly hoodDown?: boolean; readonly edge?: boolean };
   /** 肩掛けの色 */
   readonly mantle?: number;
   /** 前掛け（bib で胸当てつき） */
   readonly apron?: { readonly color: number; readonly bib?: boolean };
   /** 差し色（結い紐・襟巻き・首の布。1色まで） */
   readonly accent?: number;
+  /** 2つ目の差し色（外套の細い縁・胸の印・髪飾りの金具） */
+  readonly accentB?: number;
+  /** 胸か肩の丸い印（色は accentB） */
+  readonly emblem?: 'chest' | 'shoulder';
   /** スカート（腰から膝の上まで。脚の動きに付いてくる） */
   readonly skirt?: { readonly color: number };
   /** 袖をまくる（rogue の体だけ。肘から先を肌にし、肘にまくった袖の帯を見せる） */

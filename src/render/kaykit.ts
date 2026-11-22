@@ -178,6 +178,7 @@ function paletteTexture(look: KayKitLook): THREE.Texture {
     mantle: look.mantle ?? look.cloth,
     headwear: look.headwear?.color ?? look.cloth,
     accent: look.accent ?? look.cloth,
+    accentB: look.accentB ?? 0xd8d4c8,
     // 下ろした頭巾は外套より明るく（外套と髪の境目を見せる）
     cloakInner: new THREE.Color(look.cloak?.color ?? look.cloth).multiplyScalar(1.45).getHex(),
     hairDark: new THREE.Color(look.hair.color).multiplyScalar(0.62).getHex(),
