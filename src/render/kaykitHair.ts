@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { KayKitLook } from '../data/story/looks';
+import type { KayKitLook, KayKitTails } from '../data/story/looks';
 import { BONE, finish, type PartPiece } from './kaykitParts';
 
 /**
@@ -89,11 +89,12 @@ export interface HeadFit {
  * 結び目の近くは頭の骨、肩から下は胸の骨に付ける（頭を動かしても、肩より下の房が体に食い込まないように）。
  * 形は、頭を縮めた後の体の座標で決め、頭の骨に付く割合に合わせて、縮める前の座標へ戻しておく
  */
-function twinTails(fit: HeadFit): { hair: THREE.BufferGeometry[]; accent: THREE.BufferGeometry[]; headWeight: (y: number) => number } {
+function twinTails(fit: HeadFit, tails?: KayKitTails): { hair: THREE.BufferGeometry[]; accent: THREE.BufferGeometry[]; headWeight: (y: number) => number } {
   const hair: THREE.BufferGeometry[] = [];
   const accent: THREE.BufferGeometry[] = [];
-  // 縮めた後の座標での、頭の骨に付く割合（結び目 1 → 肩の上 0）
-  const headWeight = (y: number) => Math.min(1, Math.max(0, (y - 1.24) / 0.2));
+  // 縮めた後の座標での、頭の骨に付く割合（結び目 1 → 肩の上 0）。胸の骨に付けない房は、すべて頭の骨
+  const chest = tails ? tails.chest === true : true;
+  const headWeight = chest ? (y: number) => Math.min(1, Math.max(0, (y - 1.24) / 0.2)) : () => 1;
   const unscale = (g: THREE.BufferGeometry) => {
     const p = g.attributes.position!;
     for (let i = 0; i < p.count; i++) {
@@ -103,10 +104,55 @@ function twinTails(fit: HeadFit): { hair: THREE.BufferGeometry[]; accent: THREE.
     return g;
   };
   // 結び目の位置（縮める前の頭の座標で、耳の後ろの低い所）を、縮めた後の座標へ
-  const tieRaw = new THREE.Vector3(0.5, 1.55, -0.28);
+  const tieRaw = new THREE.Vector3(...(tails?.tie ?? [0.5, 1.55, -0.28]));
   const tieAt = new THREE.Vector3(tieRaw.x * fit.scale, fit.pivot + (tieRaw.y - fit.pivot) * fit.scale, tieRaw.z * fit.scale);
   for (const s of [-1, 1]) {
     const longer = s > 0 ? 0 : 0.03;
+    if (tails) {
+      // 根もとが太く、先へ細くなる房（体から少し離す）。左右でわずかに長さを変える
+      const root = tails.root;
+      const bulge = tails.bulge ?? 0.2;
+      const taper = tails.taper ?? 0.85;
+      const pts: V3[] = [
+        [s * (tieAt.x - 0.03), tieAt.y + 0.02, tieAt.z + 0.0],
+        [s * tieAt.x, tieAt.y, tieAt.z],
+        ...tails.path.map(([x, y, z], k): V3 => [s * x, y - (k === tails.path.length - 1 ? longer : 0), z]),
+      ];
+      hair.push(
+        unscale(
+          smoothTube(
+            pts,
+            (u) => root * (1 + bulge * Math.sin(Math.min(1, u * 2.2) * Math.PI * 0.5)) * (1 - taper * Math.pow(u, 1.6)),
+            tails.flat ?? 0.9,
+            24,
+          ),
+        ),
+      );
+      // 結び目: 房を巻くひもの輪と、垂れたひもの端2本
+      const dir = new THREE.Vector3(...pts[2]!).sub(new THREE.Vector3(...pts[1]!)).normalize();
+      const ring = new THREE.TorusGeometry(root * 1.02, 0.017, 8, 18);
+      ring.lookAt(dir);
+      const at = new THREE.Vector3(...pts[1]!).addScaledVector(dir, 0.03);
+      ring.translate(at.x, at.y, at.z);
+      accent.push(unscale(ring));
+      const len = tails.strings ?? 0.09;
+      if (len > 0)
+        for (const k of [-1, 1]) {
+          const from = at.clone().add(new THREE.Vector3(s * 0.02 * k, -0.01, root * 0.9));
+          accent.push(
+            unscale(
+              smoothTube(
+                [from.toArray() as unknown as V3, [from.x + s * 0.015 * k, from.y - len * 0.5, from.z + 0.02], [from.x + s * 0.025 * k, from.y - len, from.z + 0.01]],
+                (u) => 0.013 * (1 - 0.4 * u),
+                0.6,
+                8,
+                8,
+              ),
+            ),
+          );
+        }
+      continue;
+    }
     hair.push(
       unscale(
         smoothTube(
@@ -266,6 +312,68 @@ function flareUp(): THREE.BufferGeometry[] {
   return out;
 }
 
+/** 面の向き out に合わせて、z 向きに作った形を回して at に置く */
+function placeOn(g: THREE.BufferGeometry, at: THREE.Vector3, out: THREE.Vector3, spin = 0): THREE.BufferGeometry {
+  g.rotateZ(spin);
+  g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), out));
+  g.translate(at.x, at.y, at.z);
+  return g;
+}
+
+/** 前髪の横の髪留め（ユナ）: 丸い金具（座金のような輪）と、髪に差した細い棒。金具は2つ目の差し色 */
+function hairPin(): THREE.BufferGeometry[] {
+  const { at, out } = onHair(38, 22, 1.04);
+  const ring = placeOn(new THREE.TorusGeometry(0.065, 0.024, 8, 16), at, out);
+  const bar = new THREE.CylinderGeometry(0.012, 0.012, 0.2, 6);
+  bar.rotateZ(Math.PI / 2 - 0.5);
+  return [ring, placeOn(bar, at.clone().addScaledVector(out, -0.012), out)];
+}
+
+/** 頭に上げた作業用の眼鏡（ユナ）: 頭を巻く帯と、額の上の丸い2つの枠とレンズ */
+function goggles(): { band: THREE.BufferGeometry[]; frame: THREE.BufferGeometry[]; lens: THREE.BufferGeometry[] } {
+  const band = new THREE.TorusGeometry(1, 0.035, 6, 32);
+  band.rotateX(Math.PI / 2);
+  band.scale(0.47, 1, 0.5);
+  band.rotateX(-0.32);
+  band.translate(0, 1.88, -0.07);
+  const frame: THREE.BufferGeometry[] = [];
+  const lens: THREE.BufferGeometry[] = [];
+  for (const az of [-24, 24]) {
+    const { at, out } = onHair(az, 30, 1.0);
+    const cup = new THREE.CylinderGeometry(0.085, 0.095, 0.07, 14);
+    cup.rotateX(Math.PI / 2);
+    frame.push(placeOn(cup, at, out));
+    const glass = new THREE.CylinderGeometry(0.062, 0.062, 0.02, 14);
+    glass.rotateX(Math.PI / 2);
+    lens.push(placeOn(glass, at.clone().addScaledVector(out, 0.03), out));
+  }
+  return { band: [band], frame, lens };
+}
+
+/** 結び目の小さなリボン（ユナ）: 結び目の外側に、羽2つと結び目の玉（差し色） */
+function bows(tails: KayKitTails | undefined): THREE.BufferGeometry[] {
+  const [tx, ty, tz] = tails?.tie ?? [0.5, 1.55, -0.28];
+  const out: THREE.BufferGeometry[] = [];
+  for (const s of [-1, 1]) {
+    const c = new THREE.Vector3(s * (tx + 0.04), ty + 0.07, tz - 0.03);
+    const dir = new THREE.Vector3(s, 0.1, -0.35).normalize();
+    for (const k of [-1, 1]) out.push(placeOn(blob([0, k * 0.1, 0], [0.095, 0.07, 0.035], [0, 0, k * 0.25]), c, dir, Math.PI / 2));
+    out.push(placeOn(blob([0, 0, 0.012], [0.042, 0.042, 0.04]), c, dir));
+  }
+  return out;
+}
+
+/** 耳の上の小さな花（ユナ）: 花びら5つ（差し色）と、真ん中（2つ目の差し色） */
+function flower(): { petals: THREE.BufferGeometry[]; middle: THREE.BufferGeometry } {
+  const { at, out } = onHair(-62, 28, 1.03);
+  const petals: THREE.BufferGeometry[] = [];
+  for (let k = 0; k < 5; k++) {
+    const a = (k / 5) * Math.PI * 2;
+    petals.push(placeOn(blob([Math.cos(a) * 0.06, Math.sin(a) * 0.06, 0], [0.052, 0.052, 0.02]), at, out));
+  }
+  return { petals, middle: placeOn(blob([0, 0, 0.014], [0.032, 0.032, 0.018]), at, out) };
+}
+
 /** 後ろのまとめ（母）: mage の髪の後ろの結い目に重ねる、大きな塊1つ */
 function bun(): THREE.BufferGeometry {
   return blob([0, 1.42, -0.6], [0.2, 0.17, 0.15]);
@@ -281,13 +389,26 @@ export function hairParts(look: KayKitLook, fit: HeadFit): PartPiece[] {
   // 穴から頭の内側（向こう側の目の裏や輪郭線の黒）が見えていたので、肌の色の玉で内側をふさぐ（顔の面と髪の外へは出ない大きさ。輪郭線は付けない）
   out.push({ ...finish(blob([0, 1.66, -0.01], [0.42, 0.4, 0.38]), 'skin', head, true), noOutline: true });
   if (extras.includes('twinTails')) {
-    const t = twinTails(fit);
+    const t = twinTails(fit, look.hair.tails);
     for (const g of t.hair) out.push(splitHeadChest(finish(g, 'hair', head, true), fit, t.headWeight));
     for (const g of t.accent) out.push(splitHeadChest(finish(g, 'accent', head, true), fit, t.headWeight));
   }
   if (extras.includes('ponytail')) {
     const t = ponytail();
     out.push(finish(t.hair, 'hair', head, true), finish(t.accent, 'accent', head, true));
+  }
+  if (extras.includes('pin')) for (const g of hairPin()) out.push(finish(g, 'accentB', head, true));
+  if (extras.includes('bows')) for (const g of bows(look.hair.tails)) out.push(finish(g, 'accent', head, true));
+  if (extras.includes('flower')) {
+    const f = flower();
+    for (const g of f.petals) out.push(finish(g, 'accent', head, true));
+    out.push(finish(f.middle, 'accentB', head, true));
+  }
+  if (extras.includes('goggles')) {
+    const g = goggles();
+    for (const x of g.band) out.push(finish(x, 'apron', head, true));
+    for (const x of g.frame) out.push(finish(x, 'accentB', head, true));
+    for (const x of g.lens) out.push(finish(x, 'metal', head, true));
   }
   if (extras.includes('bun')) out.push(finish(bun(), 'hair', head, true));
   if (extras.includes('forelock')) out.push({ ...finish(forelock(), 'hair', head, true), forelock: true });

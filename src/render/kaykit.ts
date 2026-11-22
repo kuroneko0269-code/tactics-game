@@ -178,6 +178,7 @@ function paletteTexture(look: KayKitLook): THREE.Texture {
     mantle: look.mantle ?? look.cloth,
     headwear: look.headwear?.color ?? look.cloth,
     accent: look.accent ?? look.cloth,
+    accentB: look.accentB ?? 0xd8d4c8,
     // 下ろした頭巾は外套より明るく（外套と髪の境目を見せる）
     cloakInner: new THREE.Color(look.cloak?.color ?? look.cloth).multiplyScalar(1.45).getHex(),
     hairDark: new THREE.Color(look.hair.color).multiplyScalar(0.62).getHex(),
@@ -470,6 +471,124 @@ function hairTieAsHair(g: THREE.BufferGeometry): void {
   for (let i = 0; i < uv.count; i++) if (cellOf(uv.getX(i), uv.getY(i)) === '1,1') uv.setY(i, uv.getY(i) - 0.25);
 }
 
+/** 向きごとの長さ（[向き, 長さ] の組を、ぐるりとなめらかに補う） */
+function hemAt(hem: readonly (readonly [number, number])[], az: number): number {
+  const pts = [...hem].sort((a, b) => a[0] - b[0]);
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i]!;
+    const b = pts[(i + 1) % pts.length]!;
+    const span = (b[0] - a[0] + 360) % 360 || 360;
+    const d = (az - a[0] + 360) % 360;
+    if (d <= span) {
+      const t = d / span;
+      const s = t * t * (3 - 2 * t);
+      return a[1] + (b[1] - a[1]) * s;
+    }
+  }
+  return pts[0]![1];
+}
+
+/** 頭の髪の中心（溝と段差の向きを測る） */
+const SCULPT_C = new THREE.Vector3(0, 1.7, -0.04);
+const dirOf = (az: number, el: number) => {
+  const a = THREE.MathUtils.degToRad(az);
+  const e = THREE.MathUtils.degToRad(el);
+  return new THREE.Vector3(Math.sin(a) * Math.cos(e), Math.sin(e), Math.cos(a) * Math.cos(e));
+};
+
+/**
+ * 髪の面に、浅い溝（生え際から毛先へ）と、大きな塊の段差を刻む。点を頭の中心へ向けて少し下げるだけ（面のつながりは変えない）。
+ * 細い束を重ねずに、流れと塊の分かれ目を見せるため
+ */
+function sculptHair(g: THREE.BufferGeometry, shape: KayKitHairShape): void {
+  const p = g.attributes.position!;
+  const grooves = (shape.grooves ?? []).map((gr) => ({ ...gr, pts: gr.path.map(([a, e]) => dirOf(a, e)) }));
+  const steps = (shape.steps ?? []).map((s) => ({ ...s, n: dirOf(s.az, s.el) }));
+  const v = new THREE.Vector3();
+  const seg = new THREE.Line3();
+  const closest = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) {
+    v.set(p.getX(i), p.getY(i), p.getZ(i)).sub(SCULPT_C);
+    const r = v.length();
+    const dir = v.clone().divideScalar(r);
+    let push = 0;
+    for (const gr of grooves) {
+      // 溝の線までの角度（度）と、線に沿った位置（0 が生え際、1 が毛先）
+      let best = Infinity;
+      let along = 0;
+      let total = 0;
+      const lens = gr.pts.slice(1).map((q, k) => q.distanceTo(gr.pts[k]!));
+      const sum = lens.reduce((a, b) => a + b, 0);
+      for (let k = 0; k + 1 < gr.pts.length; k++) {
+        seg.set(gr.pts[k]!, gr.pts[k + 1]!);
+        const t = seg.closestPointToPointParameter(dir, true);
+        seg.at(t, closest);
+        const d = closest.distanceTo(dir);
+        if (d < best) {
+          best = d;
+          along = (total + t * lens[k]!) / sum;
+        }
+        total += lens[k]!;
+      }
+      const w = THREE.MathUtils.degToRad(gr.width);
+      if (best < w) {
+        const prof = (1 - (best / w) ** 2) ** 2;
+        const fade = Math.min(1, along / 0.12) * (1 - 0.55 * along) * Math.min(1, (1 - along) / 0.08);
+        push = Math.max(push, gr.depth * prof * fade);
+      }
+    }
+    for (const s of steps) {
+      const az = Math.atan2(dir.x, dir.z);
+      const wave = s.wave ? THREE.MathUtils.degToRad(s.wave[0]) * Math.sin(az * s.wave[1]) : 0;
+      const side = dir.dot(s.n) - s.offset + wave;
+      // 下の側（side < 0）を下げる。境目はやや急に（段に見えるように）
+      if (side < 0) push += s.step * THREE.MathUtils.smoothstep(-side, 0, 0.05);
+    }
+    if (push > 0) {
+      v.multiplyScalar((r - push) / r).add(SCULPT_C);
+      p.setXYZ(i, v.x, v.y, v.z);
+    }
+  }
+}
+
+/** 形を細かくする（三角形を4つに分ける。点の属性は辺の両端の平均。骨の番号は片方の端の物） */
+function subdivided(g: THREE.BufferGeometry): THREE.BufferGeometry {
+  const idx = Array.from(g.index!.array);
+  const names = Object.keys(g.attributes);
+  const data: Record<string, number[]> = {};
+  for (const n of names) data[n] = Array.from((g.attributes[n] as THREE.BufferAttribute).array);
+  let count = g.attributes.position!.count;
+  const mid = new Map<string, number>();
+  const midOf = (a: number, b: number) => {
+    const key = a < b ? `${a},${b}` : `${b},${a}`;
+    const got = mid.get(key);
+    if (got !== undefined) return got;
+    for (const n of names) {
+      const size = (g.attributes[n] as THREE.BufferAttribute).itemSize;
+      const arr = data[n]!;
+      for (let k = 0; k < size; k++) arr.push(n === 'skinIndex' ? arr[a * size + k]! : (arr[a * size + k]! + arr[b * size + k]!) / 2);
+    }
+    mid.set(key, count);
+    return count++;
+  };
+  const out: number[] = [];
+  for (let t = 0; t < idx.length; t += 3) {
+    const [a, b, c] = [idx[t]!, idx[t + 1]!, idx[t + 2]!];
+    const ab = midOf(a, b);
+    const bc = midOf(b, c);
+    const ca = midOf(c, a);
+    out.push(a, ab, ca, ab, b, bc, ca, bc, c, ab, bc, ca);
+  }
+  const r = new THREE.BufferGeometry();
+  for (const n of names) {
+    const src = g.attributes[n] as THREE.BufferAttribute;
+    const Arr = src.array.constructor as new (a: number[]) => THREE.TypedArray;
+    r.setAttribute(n, new THREE.BufferAttribute(new Arr(data[n]!), src.itemSize));
+  }
+  r.setIndex(count > 65535 ? new THREE.Uint32BufferAttribute(out, 1) : out);
+  return r;
+}
+
 /** 髪を変形する（点を動かすだけ。面のつながりは変えないので、閉じた塊のまま） */
 function reshapeHair(g: THREE.BufferGeometry, shape: KayKitHairShape): void {
   const p = g.attributes.position!;
@@ -479,10 +598,12 @@ function reshapeHair(g: THREE.BufferGeometry, shape: KayKitHairShape): void {
     let y = p.getY(i);
     let z = p.getZ(i);
     if (shape.mirror) x = -x;
-    // 長さ: 耳の上（cut）より下だけを縮める・伸ばす（前髪は耳より上なので変わらない）。縮めた分、裾は頭へ少し寄せる（裾が浮いて鉢に見えないように）
-    if (shape.length !== undefined && y < cut) {
-      const ny = cut - (cut - y) * shape.length;
-      if (shape.length < 1) {
+    // 長さ: 耳の上（cut）より下だけを縮める・伸ばす（前髪は耳より上なので変わらない）。縮めた分、裾は頭へ少し寄せる（裾が浮いて鉢に見えないように）。
+    // hem で向きごとに長さを変える（縁の高さを不ぞろいに）
+    const length = shape.hem ? hemAt(shape.hem, (THREE.MathUtils.radToDeg(Math.atan2(x, z + 0.04)) + 360) % 360) : shape.length;
+    if (length !== undefined && y < cut) {
+      const ny = cut - (cut - y) * length;
+      if (length < 1) {
         const k = Math.min(1, (ny - y) / 0.3) * 0.06;
         x *= 1 - k;
         z = (z + 0.04) * (1 - k) - 0.04;
@@ -505,6 +626,7 @@ function reshapeHair(g: THREE.BufferGeometry, shape: KayKitHairShape): void {
     }
     p.setXYZ(i, x, y, z);
   }
+  if (shape.grooves || shape.steps) sculptHair(g, shape);
   if (shape.mirror) {
     // 左右を反対にしたので、面の向きを戻す
     const arr = g.index!.array as Uint16Array | Uint32Array;
@@ -516,7 +638,8 @@ function reshapeHair(g: THREE.BufferGeometry, shape: KayKitHairShape): void {
  * 頭の形から、髪（色の区画 1,0 と 1,1）だけを取り出す。眉の塊は外す。
  * fit で、barbarian の頭に合わせて縮める（barbarian の頭は knight の頭より頭頂が低く小さいため）
  */
-function hairShell(g: THREE.BufferGeometry, fit: boolean, shape: KayKitHairShape | undefined): THREE.BufferGeometry {
+function hairShell(src: THREE.BufferGeometry, fit: boolean, shape: KayKitHairShape | undefined): THREE.BufferGeometry {
+  let g = src;
   const uv = g.attributes.uv!;
   const idx = g.index!.array;
   const keep: number[] = [];
@@ -534,6 +657,7 @@ function hairShell(g: THREE.BufferGeometry, fit: boolean, shape: KayKitHairShape
       p2.setXYZ(i, p2.getX(i) * 1.02, y > 1.8 ? 1.8 + (y - 1.8) * 0.82 : y, p2.getZ(i) * 1.02 + 0.01);
     }
   }
+  for (let k = 0; k < (shape?.subdivide ?? 0); k++) g = subdivided(g);
   if (shape) reshapeHair(g, shape);
   smoothNormals(g);
   return g;

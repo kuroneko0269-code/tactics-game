@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>人形の工房</title>
+    <style>
+      body { margin: 0; background: #1b1b20; }
+      canvas { display: block; }
+    </style>
+  </head>
+  <body>
+    <canvas id="out"></canvas>
+    <script type="module">
+      // 人形の工房: 髪の案（A・B・C）を、1枚の画像に横に並べて撮るための、開発用サーバーだけで開くページ（scripts/kaykit-workshop.mjs）。
+      // ?who=touma|yuna &round=往復の番号 &kind=views（案ごとに6つの向き）| small（場面4でスマホに映る大きさの全身）
+      import * as THREE from 'three';
+      import { createKayKitPuppet, loadKayKit } from '/src/render/kaykit.ts';
+      import { LOOKS } from '/src/data/story/looks.ts';
+      import { GESTURES } from '/src/data/story/stageDefs.ts';
+      import { playGesture } from '/src/render/motion.ts';
+      import { createTweens } from '/src/render/tweens.ts';
+      import { VARIANTS } from '/scripts/kaykit-workshop-variants.js';
+
+      const q = new URLSearchParams(location.search);
+      const who = q.get('who') ?? 'touma';
+      const kind = q.get('kind') ?? 'views';
+      const round = q.get('round') ?? '1';
+      const list = VARIANTS[who][round];
+      const names = { touma: 'トウマ', yuna: 'ユナ', father: '父', mother: '母' };
+
+      const small = kind === 'small';
+      const body = q.get('frame') === 'body';
+      // 1つの画の大きさ（small は、場面4のスマホ縦向きで人物が映る大きさ: 背丈およそ 130 px）
+      const CW = small ? 120 : 250;
+      const CH = small ? 170 : 290;
+      const views = small
+        ? [
+            ['斜め前', 0.55],
+            ['斜め後ろ', 2.5],
+          ]
+        : [
+            ['正面', 0],
+            ['斜め前', 0.7],
+            ['横', Math.PI / 2],
+            ['斜め後ろ', 2.4],
+            ['後ろ', Math.PI],
+            [who === 'touma' ? 'うつむく（見下ろし）' : '見下ろし（ゲームの角度）', 0.35, 'down'],
+          ];
+      const COLS = small ? 2 : 3;
+      const ROWS = Math.ceil(views.length / COLS);
+      const HEAD = 44;
+      const GAP = 16;
+      const BW = COLS * CW;
+      const W = list.length * BW + (list.length - 1) * GAP;
+      const H = HEAD + ROWS * CH + 6;
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.setSize(CW, CH);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(small ? 0x5a4636 : 0x9a9080);
+      const hemi = new THREE.HemisphereLight(0xc8d4ff, 0x4a3a30, 1.5);
+      scene.add(hemi);
+      const sun = new THREE.DirectionalLight(0xffe2bc, 2.2);
+      sun.position.set(1.5, 3, 4);
+      scene.add(sun);
+      if (small) {
+        // 場面4の夕食の光に近づける
+        const { TIMES_OF_DAY } = await import('/src/data/lighting.ts');
+        const { applyLighting } = await import('/src/render/lighting.ts');
+        applyLighting(scene, { hemi, sun }, TIMES_OF_DAY['夕方'], undefined, 0.7);
+        const lamp = new THREE.PointLight(0xffb070, 2.2, 6, 1.4);
+        lamp.position.set(1.2, 1.4, 1.6);
+        scene.add(lamp);
+      }
+      const ground = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshLambertMaterial({ color: small ? 0x7a5a40 : 0x6a5e4c }));
+      ground.rotation.x = -Math.PI / 2;
+      scene.add(ground);
+      await loadKayKit();
+
+      const out = document.getElementById('out');
+      const dpr = window.devicePixelRatio;
+      out.width = W * dpr;
+      out.height = H * dpr;
+      out.style.width = `${W}px`;
+      out.style.height = `${H}px`;
+      const ctx = out.getContext('2d');
+      ctx.scale(dpr, dpr);
+      ctx.fillStyle = '#1b1b20';
+      ctx.fillRect(0, 0, W, H);
+
+      const camera = new THREE.PerspectiveCamera(small ? 20 : 18, CW / CH, 0.05, 100);
+      for (const [vi, v] of list.entries()) {
+        const bx = vi * (BW + GAP);
+        ctx.fillStyle = '#e8e2d0';
+        ctx.font = 'bold 22px sans-serif';
+        ctx.fillText(`${v.name}`, bx + 8, 30);
+        ctx.font = '15px sans-serif';
+        ctx.fillStyle = '#c8c0aa';
+        if (!small) ctx.fillText(v.note ?? '', bx + 8 + ctx.measureText(v.name).width * 1.5 + 14, 30);
+        const base = LOOKS[who];
+        const look = { ...base, kaykit: { ...base.kaykit, ...v.look, hair: { ...base.kaykit.hair, ...(v.look?.hair ?? {}) } } };
+        for (const [i, [label, yaw, mode]] of views.entries()) {
+          const p = createKayKitPuppet(look);
+          scene.add(p.group);
+          p.setYaw(yaw);
+          const tweens = createTweens();
+          let t = 0;
+          if (mode === 'down' && who === 'touma') void playGesture(tweens, p, GESTURES['うつむく'], {});
+          const stop = mode === 'down' && who === 'touma' ? GESTURES['うつむく'].seconds * 0.5 : 1.2;
+          while (t < stop) {
+            t += 1 / 30;
+            tweens.update(1 / 30);
+            p.update(t);
+          }
+          if (small) {
+            // ゲームのカメラに近い見下ろし（約 35 度）
+            const e = THREE.MathUtils.degToRad(35);
+            camera.position.set(0, 0.42 + Math.sin(e) * 3.3, Math.cos(e) * 3.3);
+            camera.lookAt(0, 0.42, 0);
+          } else if (mode === 'down') {
+            const e = THREE.MathUtils.degToRad(24);
+            camera.position.set(0, 0.66 + Math.sin(e) * 1.75, Math.cos(e) * 1.75);
+            camera.lookAt(0, 0.66, 0);
+          } else if (body) {
+            camera.position.set(0, 0.6, 3.2);
+            camera.lookAt(0, 0.45, 0);
+            //
+            camera.lookAt(0, 0.5, 0);
+          } else {
+            camera.position.set(0, 0.74, 1.75);
+            camera.lookAt(0, 0.64, 0);
+          }
+          renderer.render(scene, camera);
+          const col = i % COLS;
+          const row = Math.floor(i / COLS);
+          const x = bx + col * CW;
+          const y = HEAD + row * CH;
+          ctx.drawImage(renderer.domElement, x, y, CW, CH);
+          ctx.fillStyle = '#000a';
+          ctx.font = small ? '11px sans-serif' : '13px sans-serif';
+          const tw = ctx.measureText(label).width;
+          ctx.fillRect(x + 4, y + CH - (small ? 18 : 22), tw + 10, small ? 15 : 19);
+          ctx.fillStyle = '#fff';
+          ctx.fillText(label, x + 9, y + CH - (small ? 7 : 8));
+          scene.remove(p.group);
+        }
+        // 案の区切り
+        if (vi > 0) {
+          ctx.fillStyle = '#e8e2d0';
+          ctx.fillRect(bx - GAP / 2 - 1, 8, 2, H - 16);
+        }
+      }
+      document.title = `${names[who]} ${round}`;
+      window.done = true;
+    </script>
+  </body>
+</html>
