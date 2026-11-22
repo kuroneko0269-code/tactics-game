@@ -3,7 +3,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import type { Direction } from '../core/geometry';
 import type { KayKitBase, KayKitHairShape, KayKitHead, KayKitLook, LookDefinition, LookItemSlot } from '../data/story/looks';
 import { GESTURES } from '../data/story/stageDefs';
-import { hairParts } from './kaykitHair';
+import { FORELOCK_ROOT, hairParts } from './kaykitHair';
 import { BONE, customParts, finish, PART_CELLS, type PartCell, type PartPiece } from './kaykitParts';
 import { buildModel } from './props';
 import { YAW_OF, type Puppet, type PuppetPose } from './puppet';
@@ -159,11 +159,15 @@ function hairLightOf(hex: number): number {
   return c.setHSL(hsl.h, hsl.s, Math.min(0.6, hsl.l * 1.3 + 0.035)).getHex();
 }
 
-/** 人物の色の画像（64×128。区画は横 8・縦 32 画素）。区画ごとに、上が明るく下が暗い縦の濃淡で塗る */
+/** 色の画像の1区画の画素（横 CELL_W・縦 CELL_H。油染みを描けるように、区画を細かくする） */
+const CELL_W = 32;
+const CELL_H = 128;
+
+/** 人物の色の画像（256×512。区画は横 8・縦 4）。区画ごとに、上が明るく下が暗い縦の濃淡で塗る */
 function paletteTexture(look: KayKitLook): THREE.Texture {
   const canvas = document.createElement('canvas');
-  canvas.width = 64;
-  canvas.height = 128;
+  canvas.width = CELL_W * 8;
+  canvas.height = CELL_H * 4;
   const g = canvas.getContext('2d')!;
   const roles = roleColors(look);
   const map = { ...ROLE_MAP[look.base], ...ROLE_MAP.head };
@@ -183,6 +187,12 @@ function paletteTexture(look: KayKitLook): THREE.Texture {
     blush: new THREE.Color(look.skin).lerp(new THREE.Color(0xd77a6e), 0.3).getHex(),
     skirt: look.skirt?.color ?? look.cloth,
     eye: 0x17110d,
+    skin: look.skin,
+    // 素手（省いた時は革の手袋の色）・油染み（服を暗くした色）・工具の木の柄と鉄
+    hands: look.hands ?? look.leather ?? 0x5e4430,
+    stain: new THREE.Color(look.cloth).lerp(new THREE.Color(0x3a3028), 0.32).getHex(),
+    wood: 0x7a5a3a,
+    metal: 0x6f7272,
     shine: 0xf4eee2,
     // 白目は真っ白にしない（夜の灯の場面で、白目だけが光って浮かないように。肌の明るさに近い生成り）
     sclera: 0xcfc4ae,
@@ -191,7 +201,7 @@ function paletteTexture(look: KayKitLook): THREE.Texture {
   const fill = (cx: number, cy: number, hex: number, side?: string, strong = false) => {
     // 画像には sRGB の値で塗る（three.js の色は、内部では直線の値で持っている）
     const c = muted(hex).convertLinearToSRGB();
-    const grad = g.createLinearGradient(0, cy * 32, 0, cy * 32 + 32);
+    const grad = g.createLinearGradient(0, cy * CELL_H, 0, cy * CELL_H + CELL_H);
     // 暗い色でも濃淡が見えるように、明るくする時は少し足す
     const at = (k: number) => {
       const add = k > 1 ? (k - 1) * 0.12 : 0;
@@ -201,7 +211,17 @@ function paletteTexture(look: KayKitLook): THREE.Texture {
     grad.addColorStop(0, at(strong ? 1.35 : 1.1));
     grad.addColorStop(1, at(strong ? 0.7 : 0.78));
     g.fillStyle = grad;
-    g.fillRect(cx * 8 + (side === 'r' ? 4 : 0), cy * 32, side ? 4 : 8, 32);
+    g.fillRect(cx * CELL_W + (side === 'r' ? CELL_W / 2 : 0), cy * CELL_H, side ? CELL_W / 2 : CELL_W, CELL_H);
+  };
+  /** 油染み: 区画の中の決まった所に、暗い楕円をいくつか描く（区画の中の位置が、服の形のどこに当たるかは素材の作り次第なので、染みはまばらに置く） */
+  const stains = (cx: number, cy: number, hex: number, spots: readonly (readonly [number, number, number, number])[]) => {
+    const c = muted(hex).convertLinearToSRGB();
+    g.fillStyle = `rgb(${Math.round(c.r * 255)},${Math.round(c.g * 255)},${Math.round(c.b * 255)})`;
+    for (const [u, v, rw, rh] of spots) {
+      g.beginPath();
+      g.ellipse(cx * CELL_W + u * CELL_W, cy * CELL_H + v * CELL_H, rw * CELL_W, rh * CELL_H, 0.4, 0, Math.PI * 2);
+      g.fill();
+    }
   };
   for (let cy = 0; cy < 4; cy++)
     for (let cx = 0; cx < 8; cx++) {
@@ -209,6 +229,23 @@ function paletteTexture(look: KayKitLook): THREE.Texture {
       fill(cx, cy, role ? roles[role] : look.cloth);
     }
   for (const [part, ref] of Object.entries(PART_CELLS) as [PartCell, readonly (number | string)[]][]) fill(ref[0] as number, ref[1] as number, partColor[part], ref[2] as string | undefined, part === 'hair' || part === 'hairLight');
+  if (look.stains) {
+    // 服（rogue の 0,1）・ズボン（7,1）・素手。[区画の中の横, 縦, 横の半径, 縦の半径]（区画の大きさに対する割合）
+    stains(0, 1, partColor.stain, [
+      [0.2, 0.62, 0.05, 0.016],
+      [0.58, 0.4, 0.045, 0.014],
+      [0.66, 0.66, 0.04, 0.02],
+    ]);
+    stains(7, 1, new THREE.Color(look.pants ?? 0x3e342c).lerp(new THREE.Color(0x3a3028), 0.32).getHex(), [
+      [0.3, 0.6, 0.08, 0.04],
+      [0.55, 0.8, 0.06, 0.03],
+    ]);
+    const [hx, hy] = PART_CELLS.hands;
+    stains(hx, hy, new THREE.Color(partColor.hands).lerp(new THREE.Color(0x3a3028), 0.4).getHex(), [
+      [0.3, 0.55, 0.16, 0.06],
+      [0.7, 0.8, 0.14, 0.07],
+    ]);
+  }
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.flipY = false;
@@ -732,15 +769,18 @@ function blushParts(surf: FaceSurface): PartPiece[] {
 }
 
 /** 頭の骨に付く点を、首の付け根（頭の骨）から縮める */
-function scaleHead(g: THREE.BufferGeometry, pivotY: number): void {
+function scaleHead(g: THREE.BufferGeometry, pivotY: number, forelockBone: number, headScale: number): void {
   const p = g.attributes.position!;
   const si = g.attributes.skinIndex!;
   const sw = g.attributes.skinWeight!;
   for (let i = 0; i < p.count; i++) {
     let w = 0;
-    for (let k = 0; k < 4; k++) if (si.getComponent(i, k) === BONE.head) w += sw.getComponent(i, k);
+    for (let k = 0; k < 4; k++) {
+      const b = si.getComponent(i, k);
+      if (b === BONE.head || b === forelockBone) w += sw.getComponent(i, k);
+    }
     if (w <= 0) continue;
-    const s = 1 + (HEAD_SCALE - 1) * w;
+    const s = 1 + (headScale - 1) * w;
     p.setXYZ(i, p.getX(i) * s, pivotY + (p.getY(i) - pivotY) * s, p.getZ(i) * s);
   }
 }
@@ -771,6 +811,48 @@ function outlineMaterial(): THREE.MeshBasicMaterial {
   return m;
 }
 
+/** 区画の UV を、区画の中の位置を保ったまま、別の区画へ移す */
+function moveToCell(u: number, v: number, cell: readonly [number, number] | readonly [number, number, string]): [number, number] {
+  const fu = u * 8 - Math.min(7, Math.floor(u * 8));
+  const fv = v * 4 - Math.min(3, Math.floor(v * 4));
+  return [(cell[0] + fu) / 8, (cell[1] + fv) / 4];
+}
+
+/**
+ * rogue の腕の塗り分けを変える（袖をまくる・素手）。腕の形は、肩から手首までが服の区画（0,1）、袖口が 1,1、手が革の 5,2。
+ * 骨を付けた時の姿勢（腕を横へ伸ばした形）で、肩からの距離（|x|）で分ける。面ごとに分けるので、面の点を面ごとに別にする（色がにじまないように）
+ */
+function recolorArms(g: THREE.BufferGeometry, rolled: boolean, hands: boolean): THREE.BufferGeometry {
+  const src = g.index!.array;
+  const n = src.length;
+  const out = new THREE.BufferGeometry();
+  for (const [name, attr] of Object.entries(g.attributes)) {
+    const a = attr as THREE.BufferAttribute;
+    const arr = new (a.array.constructor as new (len: number) => THREE.TypedArray)(n * a.itemSize);
+    for (let i = 0; i < n; i++) for (let k = 0; k < a.itemSize; k++) arr[i * a.itemSize + k] = a.getComponent(src[i]!, k);
+    out.setAttribute(name, new THREE.BufferAttribute(arr, a.itemSize, a.normalized));
+  }
+  out.setIndex([...Array(n).keys()]);
+  const p = out.attributes.position!;
+  const uv = out.attributes.uv!;
+  for (let t = 0; t < n; t += 3) {
+    const x = Math.abs(p.getX(t) + p.getX(t + 1) + p.getX(t + 2)) / 3;
+    const y = (p.getY(t) + p.getY(t + 1) + p.getY(t + 2)) / 3;
+    if (y < 0.93 || y > 1.28 || x < 0.38) continue;
+    const cell = cellOf((uv.getX(t) + uv.getX(t + 1) + uv.getX(t + 2)) / 3, (uv.getY(t) + uv.getY(t + 1) + uv.getY(t + 2)) / 3);
+    let to: readonly [number, number] | undefined;
+    if (rolled && cell === '0,1') to = x >= 0.47 ? [0, 0] : x >= 0.4 ? [1, 1] : undefined;
+    else if (rolled && cell === '1,1' && x > 0.58) to = [0, 0];
+    else if (hands && cell === '5,2') to = PART_CELLS.hands;
+    if (!to) continue;
+    for (let k = 0; k < 3; k++) {
+      const [nu, nv] = moveToCell(uv.getX(t + k), uv.getY(t + k), to);
+      uv.setXY(t + k, nu, nv);
+    }
+  }
+  return out;
+}
+
 const BLOB_OPACITY = 0.34;
 let blobShape: THREE.BufferGeometry | undefined;
 
@@ -788,17 +870,39 @@ export function createKayKitPuppet(look: LookDefinition): Puppet {
     if (!b) throw new Error(`KayKit の骨 ${name} が見つかりません`);
     return b;
   });
-  const skeleton = new THREE.Skeleton(
-    bones,
-    A.boneInverses.map((m) => m.clone()),
-  );
+  const inverses = A.boneInverses.map((m) => m.clone());
+  // 頭を縮める割合（人物ごとの倍率を掛ける。ユナは、頭と体の比を大人に少し近づける）
+  const headScale = HEAD_SCALE * (k.headScale ?? 1);
+  const headPivot = new THREE.Vector3().setFromMatrixPosition(A.boneInverses[BONE.head]!.clone().invert()).y;
+  const hairPieces = hairParts(k, { pivot: headPivot, scale: headScale });
+  // 前髪の1房の骨（頭の骨の子。生え際を軸に揺れて、うつむくと垂れる）。骨を付けた時の位置は、頭を縮めた後の生え際
+  const FORELOCK_BONE = bones.length;
+  let forelockBone: THREE.Bone | undefined;
+  if (hairPieces.some((p) => p.forelock)) {
+    const headBind = A.boneInverses[BONE.head]!.clone().invert();
+    const headBindQ = new THREE.Quaternion().setFromRotationMatrix(headBind);
+    const [rx, ry, rz] = FORELOCK_ROOT;
+    const at = new THREE.Vector3(rx * headScale, headPivot + (ry - headPivot) * headScale, rz * headScale);
+    const bind = new THREE.Matrix4().compose(at, headBindQ, new THREE.Vector3(1, 1, 1));
+    const local = headBind.clone().invert().multiply(bind);
+    forelockBone = new THREE.Bone();
+    forelockBone.name = 'forelock';
+    local.decompose(forelockBone.position, forelockBone.quaternion, forelockBone.scale);
+    bones[BONE.head]!.add(forelockBone);
+    bones.push(forelockBone);
+    inverses.push(bind.clone().invert());
+  }
+  const skeleton = new THREE.Skeleton(bones, inverses);
   const boneMapOf = (mesh: THREE.SkinnedMesh) => mesh.skeleton.bones.map((b) => A.boneNames.indexOf(b.name));
 
   // ---- 形: 体の部品 + 頭 + 自作の部品を1つにまとめる ----
   const pieces: THREE.BufferGeometry[] = [];
+  const recolor = k.base === 'rogue' && (k.sleeves === 'rolled' || k.hands !== undefined);
   src.traverse((o) => {
     const m = o as THREE.SkinnedMesh;
-    if (m.isSkinnedMesh) pieces.push(normalized(m.geometry, boneMapOf(m)));
+    if (!m.isSkinnedMesh) return;
+    const g = normalized(m.geometry, boneMapOf(m));
+    pieces.push(recolor ? recolorArms(g, k.sleeves === 'rolled', k.hands !== undefined) : g);
   });
   const headName = k.head ?? 'knight';
   const head = normalized(A.heads[headName].geometry, boneMapOf(A.heads[headName]));
@@ -829,18 +933,26 @@ export function createKayKitPuppet(look: LookDefinition): Puppet {
     (g.attributes.outline as THREE.BufferAttribute).array.fill(0);
     pieces.push(g);
   }
-  for (const p of [...hairParts(k), ...customParts(k)]) pieces.push(normalized(p.geometry, null));
+  for (const p of [...hairPieces, ...customParts(k)]) {
+    const g = normalized(p.geometry, null);
+    if (p.noOutline) (g.attributes.outline as THREE.BufferAttribute).array.fill(0);
+    if (p.forelock && forelockBone) {
+      const si = g.attributes.skinIndex as THREE.BufferAttribute;
+      for (let i = 0; i < si.count; i++) si.setX(i, FORELOCK_BONE);
+    }
+    pieces.push(g);
+  }
   const merged = mergeGeometries(pieces)!;
   for (const p of pieces) p.dispose();
-  // 頭（頭の骨に付く点）を、首の付け根から縮める
-  const headPivot = new THREE.Vector3().setFromMatrixPosition(A.boneInverses[BONE.head]!.clone().invert()).y;
-  scaleHead(merged, headPivot);
+  // 頭（頭の骨と前髪の骨に付く点）を、首の付け根から縮める
+  scaleHead(merged, headPivot, FORELOCK_BONE, headScale);
 
   const map = paletteTexture(k);
+  // 裏も描く（髪と頬のすき間から、髪の内側の代わりに輪郭線の黒が見えて、頬の横に黒い帯が出ていたため。トウマの短くした横の髪）
   const material =
     shading.value === 'toon'
-      ? new THREE.MeshToonMaterial({ map, gradientMap: toonGradient() })
-      : new THREE.MeshLambertMaterial({ map });
+      ? new THREE.MeshToonMaterial({ map, gradientMap: toonGradient(), side: THREE.DoubleSide })
+      : new THREE.MeshLambertMaterial({ map, side: THREE.DoubleSide });
   const mesh = new THREE.SkinnedMesh(merged, material);
   mesh.frustumCulled = false;
   mesh.castShadow = false;
@@ -1072,7 +1184,7 @@ export function createKayKitPuppet(look: LookDefinition): Puppet {
   /** 頭の上の位置（話者の印）を、骨の位置から見積もる（形の全部の点を動かして測ると重いため） */
   const box = new THREE.Box3();
   const tmpV = new THREE.Vector3();
-  const headTopOffset = (2.32 - headPivot) * HEAD_SCALE;
+  const headTopOffset = (2.32 - headPivot) * headScale;
   const updateBounds = () => {
     rig.updateMatrixWorld(true);
     const inv = mesh.matrixWorld.clone().invert();
@@ -1096,11 +1208,47 @@ export function createKayKitPuppet(look: LookDefinition): Puppet {
   const uprightItems = () => {
     for (const slot of ['hand', 'handL'] as const) anchors[slot].quaternion.copy(parentRotation(anchors[slot])).invert().multiply(outward[slot]);
   };
+  /**
+   * うつむく時は、首を少し前へ出す（あごが外套の襟に沈まないように。頭の骨の回転だけでうつむくと、首の付け根を軸に、あごが襟の中へ入るため）。
+   * 前髪の1房は、頭の前への傾きの一部を打ち消して、生え際から垂れる（うつむくと目元にかかる）。急に動かず、少し遅れて付いてくる
+   */
+  const headRestPos = B.head.position.clone();
+  const headBindQ = new THREE.Quaternion().setFromRotationMatrix(A.boneInverses[BONE.head]!.clone().invert()).invert();
+  const forelockRestQ = forelockBone?.quaternion.clone();
+  const upV = new THREE.Vector3();
+  const fwdV = new THREE.Vector3();
+  let forelockAngle = 0;
+  /** 頭の前への傾き（ラジアン。前へ倒すと正）。骨を付けた時の姿勢からの回り方で測る */
+  const headPitch = () => {
+    const q = parentRotation(forelockBone ?? B.head).clone();
+    if (!forelockBone) q.multiply(B.head.quaternion);
+    q.multiply(headBindQ);
+    upV.set(0, 1, 0).applyQuaternion(q);
+    return Math.atan2(upV.z, upV.y);
+  };
+  const neckAndForelock = (dt: number) => {
+    const pitch = headPitch();
+    const bowAmount = Math.min(1, Math.max(0, pitch / 0.7));
+    if (bowAmount > 0) {
+      // 体の前の向きを、頭の骨の親から見た向きに直して、首を前へ（素材の頭の座標で最大 0.15）
+      fwdV.set(0, -0.35, 1).normalize().applyQuaternion(parentRotation(B.head).clone().invert());
+      B.head.position.addScaledVector(fwdV, 0.15 * bowAmount);
+    }
+    if (forelockBone && forelockRestQ) {
+      // 前へ倒した分の 0.45 だけ打ち消す（後ろへ反らした時は打ち消さない。生え際から額へ食い込むため）
+      const target = -0.45 * Math.max(0, headPitch());
+      forelockAngle += (target - forelockAngle) * Math.min(1, dt * 7);
+      forelockBone.quaternion.copy(forelockRestQ);
+      rotateBone(forelockBone, AX, forelockAngle);
+    }
+  };
   const apply = (elapsed: number, dt: number) => {
     overlayBones.forEach((b, i) => b.quaternion.copy(rest[i]!));
+    B.head.position.copy(headRestPos);
     blend(dt);
     mixer.update(dt);
     overlay(elapsed);
+    neckAndForelock(dt);
     uprightItems();
     updateBounds();
   };

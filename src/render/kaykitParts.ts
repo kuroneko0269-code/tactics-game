@@ -34,6 +34,13 @@ export const PART_CELLS = {
   iris: [7, 3, 'r'],
   // 素材の頭の目の区画（まつ毛を目と同じ色にする）
   eye: [2, 0],
+  // 素材の頭の肌の区画（頭の中の玉）
+  skin: [0, 0],
+  // 素材の体が使っていない区画（どの体・頭も使っていないことを確かめた）: 素手・油染み・工具の木の柄・工具の鉄
+  hands: [4, 1],
+  stain: [5, 1],
+  wood: [6, 1],
+  metal: [1, 2],
 } as const satisfies Record<string, readonly [number, number] | readonly [number, number, 'l' | 'r']>;
 export type PartCell = keyof typeof PART_CELLS;
 
@@ -45,6 +52,10 @@ export interface PartPiece {
   readonly geometry: THREE.BufferGeometry;
   /** 頭の骨に付く（組み立てる時に頭と一緒に縮める） */
   readonly onHead: boolean;
+  /** 前髪の1房（生え際を軸に揺れる骨に付け直す。src/render/kaykit.ts） */
+  readonly forelock?: boolean;
+  /** 輪郭線を付けない（頭の中の玉。穴から見えた時に、輪郭線の黒が出ないように） */
+  readonly noOutline?: boolean;
 }
 
 type V3 = readonly [number, number, number];
@@ -301,8 +312,42 @@ export function scarfParts(look: KayKitLook): PartPiece[] {
   return [finish(g, 'accent', { a: BONE.chest }, false)];
 }
 
+/**
+ * 腰の工具（ユナ）: 右の腰に、帯から下げた革の袋と、袋から出た金槌の柄と頭、ねじ回し。腰の骨に付ける（歩く時に体と一緒に動く）
+ */
+export function toolParts(look: KayKitLook): PartPiece[] {
+  if (!look.tools) return [];
+  const b = BODY_SIZE[look.base];
+  const hip = { a: BONE.hips };
+  const side = b.halfW + 0.02;
+  const pouch = roundedShell([side, 0.6, 0.1], [0.08, 0.12, 0.11], 0.55, 10, 8);
+  const flap = roundedShell([side + 0.005, 0.7, 0.1], [0.085, 0.035, 0.115], 0.6, 10, 6);
+  // 金槌: 袋から上へ出た柄と、横向きの頭
+  const handle = new THREE.CylinderGeometry(0.022, 0.026, 0.26, 8);
+  handle.rotateZ(-0.12);
+  handle.translate(side + 0.02, 0.78, 0.13);
+  const head = new THREE.CylinderGeometry(0.035, 0.035, 0.15, 8);
+  head.rotateX(Math.PI / 2);
+  head.translate(side + 0.035, 0.91, 0.13);
+  // ねじ回し: 袋の後ろから出た細い軸と柄
+  const shaft = new THREE.CylinderGeometry(0.012, 0.012, 0.12, 6);
+  shaft.rotateZ(0.2);
+  shaft.translate(side - 0.01, 0.76, 0.03);
+  const grip = new THREE.CylinderGeometry(0.026, 0.022, 0.08, 8);
+  grip.rotateZ(0.2);
+  grip.translate(side - 0.025, 0.84, 0.03);
+  return [
+    finish(pouch, 'apron', hip, false),
+    finish(flap, 'apron', hip, false),
+    finish(handle, 'wood', hip, false),
+    finish(head, 'metal', hip, false),
+    finish(shaft, 'metal', hip, false),
+    finish(grip, 'wood', hip, false),
+  ];
+}
+
 /** 人物の自作の部品をすべて */
 export function customParts(look: KayKitLook): PartPiece[] {
   // 髪は src/render/kaykitHair.ts（頭巾をかぶる時は作らない）
-  return [...headwearParts(look), ...cloakParts(look), ...mantleParts(look), ...skirtParts(look), ...apronParts(look), ...scarfParts(look)];
+  return [...headwearParts(look), ...cloakParts(look), ...mantleParts(look), ...skirtParts(look), ...apronParts(look), ...scarfParts(look), ...toolParts(look)];
 }

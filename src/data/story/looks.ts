@@ -96,6 +96,8 @@ export interface KayKitLook {
   readonly head?: KayKitHead;
   /** 背丈の倍率（1 が大人。体を小さくする時は、頭も同じ割合で小さくなる） */
   readonly height?: number;
+  /** 頭の大きさの倍率（1 がふつう。小さくすると、頭と体の比が大人に近づく） */
+  readonly headScale?: number;
   /** 肩幅の倍率（1 がふつう） */
   readonly width?: number;
   /** 肌の色 */
@@ -117,8 +119,11 @@ export interface KayKitLook {
     /** 作者が頭と一体で作った髪のどれを使うか（knight 短い・rogue 中くらいの長さ・mage 長い） */
     readonly kit: Exclude<KayKitHead, 'barbarian'>;
     readonly color: number;
-    /** 自作で足す、なめらかな大きな塊（bun 後ろのまとめ・twinTails 二つ結びのおさげ・ponytail 後ろで1つに結んだ房・forelock 垂れた前髪の1房・spikes ギザギザ頭（頭のまわりの、先のとがった太い房）） */
-    readonly extras?: readonly ('bun' | 'twinTails' | 'ponytail' | 'forelock' | 'spikes')[];
+    /**
+     * 自作で足す、なめらかな大きな塊（bun 後ろのまとめ・twinTails 二つ結びのおさげ・ponytail 後ろで1つに結んだ房・forelock 垂れた前髪の1房（うつむくと垂れる）・
+     * flicks 寝かせた毛先（耳の後ろと後ろ頭の裾の、毛先だけ少し跳ねる平たい房）・flareUp 跳ねた短い髪（見比べ用の仮の頭だけ））
+     */
+    readonly extras?: readonly ('bun' | 'twinTails' | 'ponytail' | 'forelock' | 'flicks' | 'flareUp')[];
     /** 作者の髪の形を変える（長さ・量・前髪・分け目・立たせる） */
     readonly shape?: KayKitHairShape;
   };
@@ -134,6 +139,14 @@ export interface KayKitLook {
   readonly accent?: number;
   /** スカート（腰から膝の上まで。脚の動きに付いてくる） */
   readonly skirt?: { readonly color: number };
+  /** 袖をまくる（rogue の体だけ。肘から先を肌にし、肘にまくった袖の帯を見せる） */
+  readonly sleeves?: 'rolled';
+  /** 手の色（rogue の体だけ。省くと革の手袋。素手の時は、肌の色に油の汚れを混ぜた色にする） */
+  readonly hands?: number;
+  /** 服と手の油染み（色の画像の、服・ズボン・手の区画に、暗い染みを描く） */
+  readonly stains?: boolean;
+  /** 腰の工具（腰の帯に下げた革の袋と、金槌・ねじ回し） */
+  readonly tools?: boolean;
   /**
    * 顔（目と眉は顔の面に沿わせて描く。省くと落ち着いた大人の目と、ふつうの太さの眉）。eyes: 'large' で少し大きくまつ毛のある目、'narrow' で切れ長の目、iris で瞳の色、
    * round で輪郭を丸く、slim で目より下を細く（0.1 で 1 割）、blush で頬の赤み、brows で眉の太さ、browLift で眉の高さ
@@ -187,8 +200,10 @@ const TOUMA_KAYKIT: KayKitLook = {
   boots: LEATHER_DARK,
   // 青年らしく（場面4の顔の直し。設計書「二十歳前後・中背の細身・黒の短髪」）: 作者の中くらいの長さの髪（rogue）を、横と後ろを短くし、
   // 分け目をユナと反対にして使う（前髪が額にかかり、生え際が下がる）。色は、外套と分かれて見えるように、真っ黒より明るく暖かい黒。
-  // 発注者の依頼で、垂れた前髪の1房と、頭全体のギザギザ（先のとがった太い房）を足した
-  hair: { kit: 'rogue', color: 0x382c28, shape: { length: 0.22, mirror: true }, extras: ['forelock', 'spikes'] },
+  // 垂れた前髪の1房は、うつむくと目元にかかる（気持ちを見せる手段）。毛先は立てずに寝かせ、横と後ろの裾だけ少し跳ねる
+  // （2026-11-22 物語の担当の決定。立った毛先は元気で熱い主人公に見えやすく、後で作るジンの跳ねた髪ともかぶるため）
+  // 色は黒に寄せた（観客の検査: 5人とも茶色と答えた）。外套の濃紺より暗く、暖かい黒
+  hair: { kit: 'rogue', color: 0x2a2224, shape: { length: 0.22, mirror: true }, extras: ['forelock', 'flicks'] },
   // 切れ長の目と、目に近いまっすぐな眉（怒った角度にしない）。あごを細く
   face: { eyes: 'narrow', brows: 'normal', browLift: -0.01, slim: 0.1 },
   width: 0.9,
@@ -247,7 +262,7 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
     items: [{ model: 'medicineBox', slot: 'waist' }],
   },
   // ---- 操作しない人物 ----
-  /** ユナ: 十六歳、小柄、黒髪をひとつに結ぶ、油の染みた生成りの作業着。袖をまくり、革の前掛けと腰の袋。差し色は結い紐の赤茶 */
+  /** ユナ: 十六歳、小柄、黒髪の二つ結びのおさげ、油の染みた生成りの作業着。袖をまくり、革の前掛けと腰の工具。差し色は結い紐の赤茶 */
   yuna: {
     body: 0xc9bb9b,
     accent: 0x9a4a32,
@@ -266,20 +281,28 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
     kaykit: {
       base: 'rogue',
       head: 'rogue',
-      height: 0.86,
+      // 十代半ばに見えるように（10歳前後に見えないように）: 背丈を少し高く（トウマ 1・母 0.97 より低いまま）、頭を少し小さく（頭と体の比をほかの3人に近づける）
+      height: 0.9,
+      headScale: 0.93,
       width: 0.94,
       skin: 0xc8a993,
+      // 生成りの作業着（上着もズボンも生成り。スカートはやめた）。袖をまくり、素手。服と手に油染み。腰に工具
       cloth: 0xd2c3a3,
       cloth2: 0xb9a888,
       leather: 0x6a4e38,
-      pants: 0x6a5446,
+      pants: 0xb4a284,
       boots: 0x4e3a2e,
-      // 二つ結びのおさげ（発注者が案 A に決めた。設計書は「黒髪をひとつに結ぶ（仮）」なので、作者への確かめが要る）
-      hair: { kit: 'rogue', color: 0x1e1a1e, extras: ['twinTails'] },
-      skirt: { color: 0xa88f74 },
+      sleeves: 'rolled',
+      hands: 0xbc9c84,
+      stains: true,
+      tools: true,
+      // 二つ結びのおさげ（2026-11-22 ゲームの人形で決定）。肩より下まで下ろす
+      // 前髪は少し短く（観客の検査: 夕食の画で、前髪が片目にかかって眠そう・無表情に見えた）
+      hair: { kit: 'rogue', color: 0x1e1a1e, shape: { fringe: 0.8 }, extras: ['twinTails'] },
       apron: { color: 0x6e5038 },
       accent: 0xa4503a,
-      face: { eyes: 'large', iris: 0x553624, round: true, blush: true, brows: 'thin' },
+      // 少し大きい目とまつ毛（可愛さは残す）。輪郭は丸すぎないように（丸い輪郭はやめ、ほんの少し細く）
+      face: { eyes: 'large', iris: 0x553624, slim: 0.03, blush: true, brows: 'thin', browLift: 0.012 },
     },
   },
   /** テオ: 十七歳、小柄、柔らかい茶髪、時守の濃紺に白い襟 */

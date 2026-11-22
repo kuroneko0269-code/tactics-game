@@ -1856,8 +1856,10 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
   await pressButton('待機');
   await waitFor('向きを選ぶ', () => window.__tactics.mode() === 'facing');
   const koFacing = (await getMode()).facing;
+  // 重い時（2つの画面サイズを同時に動かす時など）は、1こまの描画が遅く、動きが同じ秒数でも待ち時間が延びるので、長めに待つ。
+  // 様子は、こまごとに確かめる（polling: 'raf'。一定の間隔で確かめると、重い時に、退く動きの短い間を見落とすことがあった）
   const sawRevive = page
-    .waitForFunction((t) => [...document.querySelectorAll('.popup')].some((p) => p.textContent === t), text.knockout.revived, { timeout: 30000, polling: 20 })
+    .waitForFunction((t) => [...document.querySelectorAll('.popup')].some((p) => p.textContent === t), text.knockout.revived, { timeout: 120000, polling: 'raf' })
     .then(() => true)
     .catch(() => false);
   // 退場: 膝をついた敵が立ち上がり（膝の度合いが 0 に戻る）、マスの外へ歩いて退く（体の位置がマスの中央から離れる）
@@ -1872,7 +1874,7 @@ async function playOneBattleInner(browser, baseUrl, name, core, expected, plan, 
         return c ? Math.hypot(p.world.x - c.x, p.world.z - c.z) > 0.3 : true;
       },
       ko.enemyId,
-      { timeout: 30000, polling: 20 },
+      { timeout: 120000, polling: 'raf' },
     )
     .then(() => true)
     .catch(() => false);
@@ -2456,19 +2458,27 @@ async function storyRun(browser, baseUrl, name, core) {
       await until((ms) => (window.__tactics.dialogue()?.listenMs ?? 0) >= ms, pauseAt, 30000);
       const playing = await T(() => window.__tactics.sound().melody);
       check(playing && playing.melody === 'ユナの鼻歌' && playing.timbre === '石' && playing.index >= 1, `押している間に、石の節が鳴っていません（${JSON.stringify(playing)}）`);
+      // 指を離す直前の進み具合と、離す操作にかかった時間を測る（重い時は、離す操作が画面に届くまでに数百ミリ秒かかり、
+      // その間は押したままなので進む。以前は「pauseAt から 400 ミリ秒以内」で確かめていたため、重い時に失敗した）
+      const before = await T(() => window.__tactics.dialogue()?.listenMs ?? 0);
+      const upStart = Date.now();
       await page.mouse.up();
+      const upMs = Date.now() - upStart;
       await page.waitForTimeout(700);
       const paused = await T(() => ({ d: window.__tactics.dialogue(), melody: window.__tactics.sound().melody }));
       check(paused.d.waiting === 'listen' && !paused.d.listening && paused.melody === null, '指を離しても、音が止まっていません');
       const kept = paused.d.listenMs;
-      check(kept >= pauseAt && kept < pauseAt + 400, `指を離した後も、聞く操作が進んでいます（${kept}）`);
+      check(kept >= pauseAt && kept - before < upMs + 400, `指を離した後も、聞く操作が進んでいます（離す直前 ${before} → ${kept}。離す操作 ${upMs}ms）`);
       await page.waitForTimeout(400);
       check((await status()).listenMs === kept, '指を離している間に、聞く操作が進んでいます');
+      const downStart = Date.now();
       await page.mouse.down();
       await page.waitForTimeout(150);
       const resumed = await T(() => ({ melody: window.__tactics.sound().melody, ms: window.__tactics.dialogue()?.listenMs ?? -1 }));
+      // 押し直してから測るまでの時間（重い時に延びる）の分だけ進んでいてよい
+      const downSpan = Date.now() - downStart;
       check(
-        resumed.melody && resumed.melody.index <= 1 && resumed.melody.index < playing.index && resumed.ms >= 3000 && resumed.ms < 3000 + 600,
+        resumed.melody && resumed.melody.index <= 1 && resumed.melody.index < playing.index && resumed.ms >= 3000 && resumed.ms < 3000 + Math.max(600, downSpan + 300),
         `押し直した時に、節の頭から鳴り直していません（離す前 ${playing.index} 音目 → 押し直し ${resumed.melody?.index} 音目・${resumed.ms}ms）`,
       );
       await screenshot('listen');
