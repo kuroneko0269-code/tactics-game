@@ -126,6 +126,8 @@ export interface KayKitLook {
     readonly extras?: readonly ('bun' | 'twinTails' | 'ponytail' | 'forelock' | 'flicks' | 'flareUp')[];
     /** 作者の髪の形を変える（長さ・量・前髪・分け目・立たせる） */
     readonly shape?: KayKitHairShape;
+    /** 二つ結びの房の形（twinTails の時。省くと胸の前へ下ろす元の形） */
+    readonly tails?: KayKitTails;
   };
   /** かぶり物（hood 頭巾・hat 帽子） */
   readonly headwear?: { readonly kind: 'hood' | 'hat'; readonly color: number };
@@ -175,6 +177,38 @@ export interface KayKitHairShape {
   readonly mirror?: boolean;
   /** 立たせる量（頭のてっぺんの髪を上へ伸ばす。0 がそのまま） */
   readonly lift?: number;
+  /**
+   * 向きごとの長さ（length の代わり。[向き（度。0 が正面、90 が左の耳）, 長さの割合] の組を、ぐるりと補って使う）。
+   * 耳の上を短く、もみあげとえり足を長くして、縁の高さを不ぞろいにする（0〜360 度をぐるりと書くので、左右を変えられる）
+   */
+  readonly hem?: readonly (readonly [number, number])[];
+  /** 生え際から毛先へ向かう浅い溝（[向き, 高さ]（度）の点の列・深さ・幅（度）） */
+  readonly grooves?: readonly { readonly path: readonly (readonly [number, number])[]; readonly depth: number; readonly width: number }[];
+  /**
+   * 大きな塊に分ける段差。面（向き・高さ（度）で表す向きの、頭の中心からの平面）より下の側を、step だけ内へ下げる。
+   * wave で境目を波打たせる（[振れ幅（度）, 回数]）
+   */
+  readonly steps?: readonly { readonly az: number; readonly el: number; readonly offset: number; readonly step: number; readonly wave?: readonly [number, number] }[];
+  /** 形を細かくする回数（溝と段差を出すため。0〜2） */
+  readonly subdivide?: number;
+}
+
+/** 二つ結びの房の形（右の房で書く。左は左右を反対にする） */
+export interface KayKitTails {
+  /** 結び目の位置（縮める前の頭の座標） */
+  readonly tie: readonly [number, number, number];
+  /** 結び目から先の房の通り道（頭を縮めた後の体の座標） */
+  readonly path: readonly (readonly [number, number, number])[];
+  /** 根もとの太さ・いちばん太い所の太さ（根もとからの増え）・先の細り（1 で先がほぼ点） */
+  readonly root: number;
+  readonly bulge?: number;
+  readonly taper?: number;
+  /** 断面のつぶれ（1 で丸） */
+  readonly flat?: number;
+  /** 結び目のひもの垂れ（長さ。0 で輪だけ） */
+  readonly strings?: number;
+  /** 胸の骨に付けるか（肩より下まで垂れる時） */
+  readonly chest?: boolean;
 }
 
 // 色は、彩度を落とした土の色（布・革・くすんだ金属）。人形は描く時にさらに彩度を落とす（puppet.ts の muted）。
