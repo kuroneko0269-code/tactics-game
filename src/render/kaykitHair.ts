@@ -117,6 +117,66 @@ function ponytail(): { hair: THREE.BufferGeometry; accent: THREE.BufferGeometry 
   return { hair, accent: tie };
 }
 
+/**
+ * 垂れた前髪の1房（トウマ）: 生え際から額の前へ下り、眉の上で止まる、先の細い房。顔の面から少し浮かせる
+ */
+function forelock(): THREE.BufferGeometry {
+  return smoothTube(
+    [
+      [0.02, 2.02, 0.36],
+      [0.06, 1.92, 0.5],
+      [0.1, 1.8, 0.53],
+      [0.13, 1.71, 0.5],
+    ],
+    (u) => 0.068 * (1 - u * 0.8),
+    0.55,
+  );
+}
+
+/**
+ * ギザギザ頭（トウマ）: 頭の横と後ろの輪郭に、先のとがった太い房を数個並べる。細い束を重ねるのではなく、
+ * 根もとの太い、なめらかな円すいの塊（作者の髪の面から生えて、外と下へ少し反る）。前髪の側には付けない
+ */
+function spikes(): THREE.BufferGeometry[] {
+  const out: THREE.BufferGeometry[] = [];
+  // 頭の髪を、中心 (0, 1.86, -0.06)・半径 (0.5, 0.42, 0.52) の楕円の玉と見て、その面から生やす
+  const c = new THREE.Vector3(0, 1.86, -0.06);
+  const r = new THREE.Vector3(0.5, 0.42, 0.52);
+  // [向き（0 が正面、右回り。度）, 高さ（度）, 長さ, 太さ]
+  const tufts: readonly [number, number, number, number][] = [
+    [125, 22, 0.26, 0.12],
+    [155, 8, 0.24, 0.12],
+    [180, 34, 0.28, 0.125],
+    [205, 8, 0.24, 0.12],
+    [235, 22, 0.26, 0.12],
+    [160, 58, 0.22, 0.11],
+    [200, 58, 0.22, 0.11],
+  ];
+  for (const [az, el, len, th] of tufts) {
+    const a = THREE.MathUtils.degToRad(az);
+    const e = THREE.MathUtils.degToRad(el);
+    const dir = new THREE.Vector3(Math.sin(a) * Math.cos(e), Math.sin(e), Math.cos(a) * Math.cos(e));
+    const onSurface = (k: number) => new THREE.Vector3(c.x + r.x * dir.x * k, c.y + r.y * dir.y * k, c.z + r.z * dir.z * k);
+    // 根もとは髪の奥に沈め、まっすぐ外へ（少し下へ）伸びて、先がとがる。断面は丸い
+    // 後ろから見て丸い玉に見えないように、頭の面に沿って下へ流し、毛先だけ外へ出す（後ろからは下向きの三角に見える）
+    const base = onSurface(0.72);
+    const mid = onSurface(1.0 + len * 0.25);
+    mid.y -= len * 0.35;
+    const tip = onSurface(1.0 + len * 1.0);
+    tip.y -= len * 0.8;
+    out.push(
+      smoothTube(
+        [base.toArray() as unknown as V3, mid.toArray() as unknown as V3, tip.toArray() as unknown as V3],
+        (u) => th * Math.max(0.03, 1 - u),
+        0.85,
+        10,
+        10,
+      ),
+    );
+  }
+  return out;
+}
+
 /** 後ろのまとめ（母）: mage の髪の後ろの結い目に重ねる、大きな塊1つ */
 function bun(): THREE.BufferGeometry {
   return blob([0, 1.42, -0.6], [0.2, 0.17, 0.15]);
@@ -138,5 +198,7 @@ export function hairParts(look: KayKitLook): PartPiece[] {
     out.push(finish(t.hair, 'hair', head, true), finish(t.accent, 'accent', head, true));
   }
   if (extras.includes('bun')) out.push(finish(bun(), 'hair', head, true));
+  if (extras.includes('forelock')) out.push(finish(forelock(), 'hair', head, true));
+  if (extras.includes('spikes')) for (const g of spikes()) out.push(finish(g, 'hair', head, true));
   return out;
 }

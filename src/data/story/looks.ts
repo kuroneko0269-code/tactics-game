@@ -117,8 +117,8 @@ export interface KayKitLook {
     /** 作者が頭と一体で作った髪のどれを使うか（knight 短い・rogue 中くらいの長さ・mage 長い） */
     readonly kit: Exclude<KayKitHead, 'barbarian'>;
     readonly color: number;
-    /** 自作で足す、なめらかな大きな塊（bun 後ろのまとめ・twinTails 二つ結びのおさげ・ponytail 後ろで1つに結んだ房） */
-    readonly extras?: readonly ('bun' | 'twinTails' | 'ponytail')[];
+    /** 自作で足す、なめらかな大きな塊（bun 後ろのまとめ・twinTails 二つ結びのおさげ・ponytail 後ろで1つに結んだ房・forelock 垂れた前髪の1房・spikes ギザギザ頭（横と後ろの、先のとがった太い房）） */
+    readonly extras?: readonly ('bun' | 'twinTails' | 'ponytail' | 'forelock' | 'spikes')[];
     /** 作者の髪の形を変える（長さ・量・前髪・分け目・立たせる） */
     readonly shape?: KayKitHairShape;
   };
@@ -186,8 +186,9 @@ const TOUMA_KAYKIT: KayKitLook = {
   pants: 0x2e2c2c,
   boots: LEATHER_DARK,
   // 青年らしく（場面4の顔の直し。設計書「二十歳前後・中背の細身・黒の短髪」）: 作者の中くらいの長さの髪（rogue）を、横と後ろを短くし、
-  // 分け目をユナと反対にして使う（前髪が額にかかり、生え際が下がる）。色は、外套と分かれて見えるように、真っ黒より明るく暖かい黒
-  hair: { kit: 'rogue', color: 0x382c28, shape: { length: 0.22, mirror: true } },
+  // 分け目をユナと反対にして使う（前髪が額にかかり、生え際が下がる）。色は、外套と分かれて見えるように、真っ黒より明るく暖かい黒。
+  // 発注者の依頼で、垂れた前髪の1房と、横と後ろのギザギザ（先のとがった太い房）を足した
+  hair: { kit: 'rogue', color: 0x382c28, shape: { length: 0.22, mirror: true }, extras: ['forelock', 'spikes'] },
   // 切れ長の目と、目に近いまっすぐな眉（怒った角度にしない）。あごを細く
   face: { eyes: 'narrow', brows: 'normal', browLift: -0.01, slim: 0.1 },
   width: 0.9,
