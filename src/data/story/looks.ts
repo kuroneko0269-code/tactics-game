@@ -132,8 +132,8 @@ export interface KayKitLook {
   };
   /** かぶり物（hood 頭巾・hat 帽子） */
   readonly headwear?: { readonly kind: 'hood' | 'hat'; readonly color: number };
-  /** 背のマント・外套（long 足もとまで・knee 膝まで・short 腰まで）。hoodDown で首の後ろに下ろした頭巾を付ける。edge で襟と裾に細い縁（色は accentB） */
-  readonly cloak?: { readonly color: number; readonly length: 'long' | 'knee' | 'short'; readonly hoodDown?: boolean; readonly edge?: boolean };
+  /** 背のマント・外套（long 足もとまで・knee 膝まで・short 腰まで）。hoodDown で首の後ろに下ろした頭巾を付ける。edge で襟と裾に細い縁（色は accentB）。front で前にも身頃を付ける（前の開きに縁） */
+  readonly cloak?: { readonly color: number; readonly length: 'long' | 'knee' | 'short'; readonly hoodDown?: boolean; readonly edge?: boolean; readonly front?: boolean };
   /** 肩掛けの色 */
   readonly mantle?: number;
   /** 前掛け（bib で胸当てつき） */

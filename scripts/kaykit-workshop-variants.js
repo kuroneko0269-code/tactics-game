@@ -23,12 +23,55 @@ const toumaA = (grooves, extra = {}) => ({
   ...TOUMA,
   shape: { mirror: true, fringe: 0.88, volume: 0.97, subdivide: 2, hem: TOUMA_HEM, grooves, ...extra },
 });
+const A1_HAIR = {
+  ...TOUMA,
+  shape: {
+    mirror: true, fringe: 0.88, volume: 0.97, subdivide: 2, hem: TOUMA_HEM,
+    grooves: [
+      { path: [[-15, 28], [-25, 62], [-140, 60], [-168, 22]], depth: 0.085, width: 10 },
+      { path: [[35, 30], [55, 60], [125, 52], [150, 18]], depth: 0.085, width: 10 },
+      { path: [[-75, 34], [-98, 24], [-114, 6]], depth: 0.07, width: 9 },
+    ],
+  },
+};
 const YUNA_B = { tie: [0.48, 1.48, -0.12], path: [[0.33, 1.3, -0.06], [0.37, 1.2, -0.03], [0.38, 1.12, -0.02]], root: 0.058, bulge: 0.3, taper: 0.8, chest: true };
 const YUNA = { kit: 'rogue', color: 0x1e1a1e, shape: { fringe: 0.8 }, tails: YUNA_B };
 
 export const VARIANTS = {
   touma: {
     0: [{ name: '今', look: {} }],
+    3: [
+      {
+        name: 'T1 濃紺と白',
+        note: '濃紺の外套に白の縁・炭色の上着・暗い茶の革',
+        look: {
+          cloak: { color: 0x2f3a55, length: 'knee', hoodDown: true, edge: true, front: true },
+          accentB: WHITE, accent: 0x3a4560, emblem: 'chest',
+          cloth: 0x3a3a40, cloth2: 0x2e2e34, trim: 0x4a4a52, pants: 0x2c2b2e, leather: 0x3a2a20, boots: 0x2e221c,
+          hair: A1_HAIR,
+        },
+      },
+      {
+        name: 'T2 濃紺と銀',
+        note: '銀の縁・灰青の上着・襟に鈍い青緑',
+        look: {
+          cloak: { color: 0x2c3650, length: 'knee', hoodDown: true, edge: true, front: true },
+          accentB: SILVER, accent: 0x4f7476, emblem: 'shoulder',
+          cloth: 0x56627a, cloth2: 0x48536a, trim: 0x6a7488, pants: 0x30323a, leather: 0x4a3426, boots: 0x33261e,
+          hair: A1_HAIR,
+        },
+      },
+      {
+        name: 'T3 濃紺と白と革',
+        note: '白の縁・明るい灰の上着・飴色の革',
+        look: {
+          cloak: { color: 0x2f3a55, length: 'knee', hoodDown: true, edge: true, front: true },
+          accentB: WHITE, accent: 0x2f3a55, emblem: 'chest',
+          cloth: 0x8c8a84, cloth2: 0x77756f, trim: 0x9a978f, pants: 0x3a3634, leather: 0x7a4e2c, boots: 0x5a3820,
+          hair: A1_HAIR,
+        },
+      },
+    ],
     2: [
       {
         name: 'A1 溝3本',

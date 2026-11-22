@@ -214,6 +214,31 @@ export function cloakParts(look: KayKitLook): PartPiece[] {
     finish(bothSides(panel), 'cloak', { a: BONE.chest, b: BONE.hips, topY: 0.9, lowY: bottom }, false),
     finish(bothSides(yoke), 'cloak', { a: BONE.chest }, false),
   ];
+  if (c.front) {
+    // 前の身頃（左右。真ん中は開けて、上着と帯を見せる）。体の前へ食い込まないように、前は少し外へ
+    for (const [start, len] of [
+      [0.3, 0.85],
+      [Math.PI * 2 - 1.15, 0.85],
+    ] as const) {
+      const f = new THREE.CylinderGeometry(0.4, rBottom + 0.02, h, 6, 5, true, start, len);
+      f.scale(1, 1, 0.98);
+      f.translate(0, bottom + h / 2, 0);
+      pieces.push(finish(bothSides(f), 'cloak', { a: BONE.chest, b: BONE.hips, topY: 0.9, lowY: bottom }, false));
+      if (c.edge) {
+        // 前の開きの縦の縁と、前の裾の縁
+        const at = start < Math.PI ? start : start + len - 0.07;
+        const v = new THREE.CylinderGeometry(0.408, rBottom + 0.028, h, 2, 5, true, at, 0.07);
+        v.scale(1, 1, 0.98);
+        v.translate(0, bottom + h / 2, 0);
+        pieces.push(finish(bothSides(v), 'accentB', { a: BONE.chest, b: BONE.hips, topY: 0.9, lowY: bottom }, false));
+        const t = 0.045;
+        const fh = new THREE.CylinderGeometry(rBottom + 0.03, rBottom + 0.03, t, 6, 1, true, start, len);
+        fh.scale(1, 1, 0.98);
+        fh.translate(0, bottom + t / 2, 0);
+        pieces.push(finish(bothSides(fh), 'accentB', { a: BONE.chest, b: BONE.hips, topY: 0.9, lowY: bottom }, false));
+      }
+    }
+  }
   if (c.edge) {
     // 裾の細い縁（暗い場面でも外套の輪郭が残るように）
     const t = 0.045;
@@ -257,9 +282,12 @@ export function emblemParts(look: KayKitLook): PartPiece[] {
   dot.rotateX(Math.PI / 2);
   const g = [ring, dot];
   if (look.emblem === 'chest') {
+    // 外套の前の身頃がある時は、その上（左胸）に
+    const onCoat = look.cloak?.front === true;
     for (const x of g) {
       x.rotateX(-0.12);
-      x.translate(0.16, b.shoulder - 0.2, b.front + 0.035);
+      if (onCoat) x.rotateY(0.5);
+      x.translate(onCoat ? 0.21 : 0.16, b.shoulder - (onCoat ? 0.18 : 0.2), onCoat ? 0.405 : b.front + 0.035);
     }
   } else {
     for (const x of g) {
