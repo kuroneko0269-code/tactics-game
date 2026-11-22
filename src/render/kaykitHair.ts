@@ -135,7 +135,7 @@ function forelock(): THREE.BufferGeometry {
 
 /**
  * ギザギザ頭（トウマ）: 頭の横と後ろの輪郭に、先のとがった太い房を数個並べる。細い束を重ねるのではなく、
- * 根もとの太い、なめらかな円すいの塊（作者の髪の面から生えて、外と下へ少し反る）。前髪の側には付けない
+ * 根もとの太い、なめらかな円すいの塊（作者の髪の面から生えて、外と下へ少し反る）。 額の上の房は、眉より上で止める
  */
 function spikes(): THREE.BufferGeometry[] {
   const out: THREE.BufferGeometry[] = [];
@@ -144,6 +144,7 @@ function spikes(): THREE.BufferGeometry[] {
   const r = new THREE.Vector3(0.5, 0.42, 0.52);
   // [向き（0 が正面、右回り。度）, 高さ（度）, 長さ, 太さ]
   const tufts: readonly [number, number, number, number][] = [
+    // 後ろ
     [125, 22, 0.26, 0.12],
     [155, 8, 0.24, 0.12],
     [180, 34, 0.28, 0.125],
@@ -151,6 +152,18 @@ function spikes(): THREE.BufferGeometry[] {
     [235, 22, 0.26, 0.12],
     [160, 58, 0.22, 0.11],
     [200, 58, 0.22, 0.11],
+    // 横（耳の上）
+    [85, 28, 0.22, 0.115],
+    [275, 28, 0.22, 0.115],
+    [60, 45, 0.2, 0.11],
+    [300, 45, 0.2, 0.11],
+    // てっぺん
+    [110, 72, 0.22, 0.115],
+    [250, 72, 0.22, 0.115],
+    [0, 78, 0.2, 0.11],
+    // 前（額の上。前へ出て、眉より上で止まる）
+    [35, 50, 0.22, 0.11],
+    [325, 50, 0.22, 0.11],
   ];
   for (const [az, el, len, th] of tufts) {
     const a = THREE.MathUtils.degToRad(az);
@@ -161,9 +174,11 @@ function spikes(): THREE.BufferGeometry[] {
     // 後ろから見て丸い玉に見えないように、頭の面に沿って下へ流し、毛先だけ外へ出す（後ろからは下向きの三角に見える）
     const base = onSurface(0.72);
     const mid = onSurface(1.0 + len * 0.25);
-    mid.y -= len * 0.35;
-    const tip = onSurface(1.0 + len * 1.0);
-    tip.y -= len * 0.8;
+    // 上の房ほど垂らさない（てっぺんの房が垂れると、髪の上に乗ったこぶに見えた）
+    const droop = 1 - Math.min(1, el / 90) * 0.75;
+    mid.y -= len * 0.35 * droop;
+    const tip = onSurface(1.0 + len * (1.0 + 0.3 * (1 - droop)));
+    tip.y -= len * 0.8 * droop;
     out.push(
       smoothTube(
         [base.toArray() as unknown as V3, mid.toArray() as unknown as V3, tip.toArray() as unknown as V3],
