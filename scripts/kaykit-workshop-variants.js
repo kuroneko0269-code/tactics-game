@@ -338,3 +338,50 @@ Object.assign(VARIANTS, {
     ],
   },
 });
+
+// ---- 往復2: 隊の4人。A 時守のそろい（濃紺・白い縁・胸の印。外套の形と持ち物を職業ごとに）・B 印と濃紺だけそろえ、服は職業らしく・C そろえず、職業らしい服と各自の色 ----
+const T_NAVY = 0x2f3a55;
+const T_WHITE = 0xe2ded2;
+const UNIFORM = { accent: T_NAVY, accentB: T_WHITE, emblem: 'chest' };
+const BADGE = { accentB: T_WHITE, emblem: 'chest' };
+const NAVY_CLOTH = { cloth: 0x34405a, cloth2: 0x2a3449 };
+const FEN_HAIR = { kit: 'knight', color: 0x8e8a84 };
+const NONO_HAIR = {
+  kit: 'mage', color: 0x6a4228,
+  shape: { length: 0.62, volume: 1.12, subdivide: 1, steps: [{ az: 180, el: -10, offset: 0.1, step: 0.05, wave: [14, 7] }, { az: 0, el: 20, offset: 0.25, step: 0.03, wave: [10, 6] }] },
+};
+const KIRI_HAIR = { kit: 'rogue', color: 0x2a2018, shape: { length: 0.7 }, extras: ['ponytail'] };
+const NONO_ITEMS = { items: [{ model: 'staffRing', slot: 'hand' }, { model: 'medicineBox', slot: 'waist' }] };
+const GORD_BODY = { base: 'barbarian', head: 'knight', height: 1.1, width: 1.15, skin: 0xb8967e, trim: 0x8a7a5a, ...EARTH, hair: GORD_HAIR };
+const KIRI_BODY = { base: 'rogue', head: 'rogue', width: 0.88, skin: 0xbf9f86, ...EARTH, hair: KIRI_HAIR };
+const FEN_BODY = { base: 'mage', head: 'knight', height: 0.9, skin: 0xbf9f86, trim: 0x4a4650, ...EARTH, hair: FEN_HAIR };
+const NONO_BODY = { base: 'mage', head: 'mage', width: 1.2, skin: 0xc8a890, trim: 0x8a7a5a, ...EARTH, hair: NONO_HAIR, face: { brows: 'thin' } };
+
+Object.assign(VARIANTS.gord, {
+  2: [
+    { name: 'A 時守のそろい', note: '濃紺の短い外套（前の身頃）・白い縁・胸の印・鉄の肩当て', def: GORD_ITEMS, look: { ...GORD_BODY, cloth: 0x7a3e34, cloth2: 0x66342c, pauldrons: 'iron', cloak: { color: T_NAVY, length: 'short', edge: true, front: true }, ...UNIFORM } },
+    { name: 'B 印と濃紺', note: '濃紺の上着・胸の印・鉄の肩当て（外套なし）', def: GORD_ITEMS, look: { ...GORD_BODY, ...NAVY_CLOTH, pauldrons: 'iron', ...BADGE } },
+    { name: 'C 戦士の服', note: '鈍い赤の上着・鉄の肩当て・赤い短いマント', def: GORD_ITEMS, look: { ...GORD_BODY, cloth: 0x7a3e34, cloth2: 0x66342c, pauldrons: 'iron', cloak: { color: 0x6a3a32, length: 'short' } } },
+  ],
+});
+Object.assign(VARIANTS.kiri, {
+  2: [
+    { name: 'A 時守のそろい', note: '濃紺の腰までの外套・下ろした頭巾・白い縁・胸の印・緑の上着', def: KIRI_ITEMS, look: { ...KIRI_BODY, cloth: 0x4a5a44, cloth2: 0x3e4c3a, cloak: { color: T_NAVY, length: 'short', hoodDown: true, edge: true, front: true }, ...UNIFORM } },
+    { name: 'B 印と濃紺', note: '濃紺の上着と肩掛け・胸の印・弓と矢筒', def: KIRI_ITEMS, look: { ...KIRI_BODY, ...NAVY_CLOTH, mantle: 0x2c3650, ...BADGE } },
+    { name: 'C 狩人の服', note: '深い緑の上着・頭巾つきの緑の外套', def: KIRI_ITEMS, look: { ...KIRI_BODY, cloth: 0x4a5a44, cloth2: 0x3e4c3a, cloak: { color: 0x3a5440, length: 'short', hoodDown: true } } },
+  ],
+});
+Object.assign(VARIANTS.fen, {
+  2: [
+    { name: 'A 時守のそろい', note: '濃紺の足もとまでの外套（前の身頃）・白い縁・胸の印・黒の長衣', def: STAFF, look: { ...FEN_BODY, cloth: 0x2e2c30, cloth2: 0x26242a, cloak: { color: T_NAVY, length: 'long', edge: true, front: true }, ...UNIFORM } },
+    { name: 'B 印と濃紺', note: '濃紺の長衣と帽子・胸の印', def: STAFF, look: { ...FEN_BODY, ...NAVY_CLOTH, headwear: { kind: 'hat', color: 0x2a3247 }, accent: 0x6a5a7a, ...BADGE } },
+    { name: 'C 魔道士の服', note: '黒の長衣・黒い帽子・帯に紫', def: STAFF, look: { ...FEN_BODY, cloth: 0x2e2c30, cloth2: 0x26242a, headwear: { kind: 'hat', color: 0x2a282e }, accent: 0x6a5a7a } },
+  ],
+});
+VARIANTS.nono = {
+  2: [
+    { name: 'A 時守のそろい', note: '濃紺の膝までの外套（前の身頃）・白い縁・胸の印・生成りの長衣', def: NONO_ITEMS, look: { ...NONO_BODY, cloth: 0xc6b898, cloth2: 0xb0a284, cloak: { color: T_NAVY, length: 'knee', edge: true, front: true }, ...UNIFORM } },
+    { name: 'B 印と濃紺', note: '濃紺の長衣・生成りの胸当てつき前掛け・胸の印', def: NONO_ITEMS, look: { ...NONO_BODY, ...NAVY_CLOTH, apron: { color: 0xc6b898, bib: true }, ...BADGE } },
+    { name: 'C 治癒師の服', note: '生成りの長衣・毛織の肩掛け・薄緑の首の布', def: NONO_ITEMS, look: { ...NONO_BODY, cloth: 0xc6b898, cloth2: 0xb0a284, mantle: 0x6a5e4c, accent: 0x7a8a62, neckerchief: true } },
+  ],
+};
