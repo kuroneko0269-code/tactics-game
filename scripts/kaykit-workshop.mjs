@@ -25,7 +25,7 @@ for (const who of (args.who ?? 'touma,yuna').split(',')) {
   for (const kind of ['views', 'small']) {
     const page = await browser.newPage({ viewport: { width: 2400, height: 900 }, deviceScaleFactor: kind === 'small' ? 3 : 1 });
     page.on('pageerror', (e) => console.error(who, kind, e.message));
-    await page.goto(`${base}scripts/kaykit-workshop.html?who=${who}&round=${args.round}&kind=${kind}`);
+    await page.goto(`${base}scripts/kaykit-workshop.html?who=${who}&round=${args.round}&kind=${kind}${args.frame ? `&frame=${args.frame}` : ''}`);
     await page.waitForFunction(() => window.done, null, { timeout: 180000 });
     const name = `${who}-${args.round}${kind === 'small' ? '-small' : ''}.jpg`;
     await page.locator('#out').screenshot({ path: path.join(args.out, name), type: 'jpeg', quality: 86 });

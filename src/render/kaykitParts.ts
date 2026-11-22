@@ -346,6 +346,20 @@ export function apronParts(look: KayKitLook): PartPiece[] {
 
 /** 首の布（差し色。外套のない人物の差し色を見せる所） */
 export function scarfParts(look: KayKitLook): PartPiece[] {
+  if (look.neckerchief) {
+    const b = BODY_SIZE[look.base];
+    const ring = new THREE.TorusGeometry(0.24, 0.042, 5, 14);
+    ring.rotateX(Math.PI / 2);
+    ring.translate(0, b.shoulder + 0.01, 0.01);
+    // 前の結び目と、胸へ垂れる小さな三角
+    const knot = new THREE.SphereGeometry(0.05, 10, 8);
+    knot.translate(0.05, b.shoulder - 0.02, b.front - 0.08);
+    const tip = new THREE.ConeGeometry(0.075, 0.13, 3);
+    tip.rotateX(Math.PI);
+    tip.scale(1, 1, 0.4);
+    tip.translate(0.03, b.shoulder - 0.11, b.front - 0.08);
+    return [ring, knot, tip].map((g) => finish(g, 'accent', { a: BONE.chest }, false));
+  }
   if (look.accent === undefined || look.cloak || (look.hair.extras?.length ?? 0) > 0) return [];
   const b = BODY_SIZE[look.base];
   const g = new THREE.TorusGeometry(0.25, 0.06, 5, 12);

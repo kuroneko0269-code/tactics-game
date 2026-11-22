@@ -152,6 +152,35 @@ export const VARIANTS = {
     ],
   },
   yuna: {
+    3: [
+      {
+        name: 'Y1 生成りと錆色',
+        note: '明るい生成り・茶のズボン・焦げ茶の前掛け・錆色の首の布',
+        look: {
+          cloth: 0xe2d6ba, cloth2: 0xcbbb96, pants: 0x86664a, boots: 0x3e2c22, leather: 0x5a3e2c,
+          apron: { color: 0x4e3426 }, accent: 0xb0532e, accentB: 0xc09a50, neckerchief: true,
+          hair: { ...YUNA, extras: ['twinTails', 'pin'] },
+        },
+      },
+      {
+        name: 'Y2 生成りと青緑',
+        note: '生成り・灰青のズボン・胸当てつきの革の前掛け・青緑の差し色',
+        look: {
+          cloth: 0xdfd2b4, cloth2: 0xc6b591, pants: 0x5b676c, boots: 0x3e2e26, leather: 0x7a5234,
+          apron: { color: 0x8a5e3a, bib: true }, accent: 0x2f6f6a, accentB: 0xc09a50, neckerchief: true,
+          hair: { ...YUNA, extras: ['twinTails', 'pin'] },
+        },
+      },
+      {
+        name: 'Y3 発明家の小物',
+        note: '生成り・帆布の胸当て・からし色の差し色・頭に上げた眼鏡',
+        look: {
+          cloth: 0xe0d4b6, cloth2: 0xc8b893, pants: 0x6c5a42, boots: 0x3a2b22, leather: 0x6a4a30,
+          apron: { color: 0x6b6845, bib: true }, accent: 0xc8963a, accentB: 0xb8904c,
+          hair: { ...YUNA, extras: ['twinTails', 'goggles'] },
+        },
+      },
+    ],
     2: [
       { name: 'B1 リボン', note: '結び目に赤茶の小さなリボン', look: { hair: { ...YUNA, extras: ['twinTails', 'bows'] } } },
       { name: 'B2 髪留め', note: '前髪の横に真鍮の丸い髪留め', look: { accentB: 0xb8904c, hair: { ...YUNA, extras: ['twinTails', 'pin'] } } },

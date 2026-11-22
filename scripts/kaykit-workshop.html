@@ -29,6 +29,7 @@
       const names = { touma: 'トウマ', yuna: 'ユナ', father: '父', mother: '母' };
 
       const small = kind === 'small';
+      const body = q.get('frame') === 'body';
       // 1つの画の大きさ（small は、場面4のスマホ縦向きで人物が映る大きさ: 背丈およそ 130 px）
       const CW = small ? 120 : 250;
       const CH = small ? 170 : 290;
@@ -122,6 +123,11 @@
             const e = THREE.MathUtils.degToRad(24);
             camera.position.set(0, 0.66 + Math.sin(e) * 1.75, Math.cos(e) * 1.75);
             camera.lookAt(0, 0.66, 0);
+          } else if (body) {
+            camera.position.set(0, 0.6, 3.2);
+            camera.lookAt(0, 0.45, 0);
+            //
+            camera.lookAt(0, 0.5, 0);
           } else {
             camera.position.set(0, 0.74, 1.75);
             camera.lookAt(0, 0.64, 0);

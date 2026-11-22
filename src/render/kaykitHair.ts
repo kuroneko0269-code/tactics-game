@@ -329,6 +329,27 @@ function hairPin(): THREE.BufferGeometry[] {
   return [ring, placeOn(bar, at.clone().addScaledVector(out, -0.012), out)];
 }
 
+/** 頭に上げた作業用の眼鏡（ユナ）: 頭を巻く帯と、額の上の丸い2つの枠とレンズ */
+function goggles(): { band: THREE.BufferGeometry[]; frame: THREE.BufferGeometry[]; lens: THREE.BufferGeometry[] } {
+  const band = new THREE.TorusGeometry(1, 0.035, 6, 32);
+  band.rotateX(Math.PI / 2);
+  band.scale(0.47, 1, 0.5);
+  band.rotateX(-0.32);
+  band.translate(0, 1.88, -0.07);
+  const frame: THREE.BufferGeometry[] = [];
+  const lens: THREE.BufferGeometry[] = [];
+  for (const az of [-24, 24]) {
+    const { at, out } = onHair(az, 30, 1.0);
+    const cup = new THREE.CylinderGeometry(0.085, 0.095, 0.07, 14);
+    cup.rotateX(Math.PI / 2);
+    frame.push(placeOn(cup, at, out));
+    const glass = new THREE.CylinderGeometry(0.062, 0.062, 0.02, 14);
+    glass.rotateX(Math.PI / 2);
+    lens.push(placeOn(glass, at.clone().addScaledVector(out, 0.03), out));
+  }
+  return { band: [band], frame, lens };
+}
+
 /** 結び目の小さなリボン（ユナ）: 結び目の外側に、羽2つと結び目の玉（差し色） */
 function bows(tails: KayKitTails | undefined): THREE.BufferGeometry[] {
   const [tx, ty, tz] = tails?.tie ?? [0.5, 1.55, -0.28];
@@ -382,6 +403,12 @@ export function hairParts(look: KayKitLook, fit: HeadFit): PartPiece[] {
     const f = flower();
     for (const g of f.petals) out.push(finish(g, 'accent', head, true));
     out.push(finish(f.middle, 'accentB', head, true));
+  }
+  if (extras.includes('goggles')) {
+    const g = goggles();
+    for (const x of g.band) out.push(finish(x, 'apron', head, true));
+    for (const x of g.frame) out.push(finish(x, 'accentB', head, true));
+    for (const x of g.lens) out.push(finish(x, 'metal', head, true));
   }
   if (extras.includes('bun')) out.push(finish(bun(), 'hair', head, true));
   if (extras.includes('forelock')) out.push({ ...finish(forelock(), 'hair', head, true), forelock: true });
