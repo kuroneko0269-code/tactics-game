@@ -40,6 +40,7 @@ const YUNA = { kit: 'rogue', color: 0x1e1a1e, shape: { fringe: 0.8 }, tails: YUN
 export const VARIANTS = {
   touma: {
     0: [{ name: '今', look: {} }],
+    final: [{ name: '決定（A1・T3）', look: {} }],
     3: [
       {
         name: 'T1 濃紺と白',
@@ -195,6 +196,7 @@ export const VARIANTS = {
     ],
   },
   yuna: {
+    final: [{ name: '決定（B・Y1）', look: {} }],
     3: [
       {
         name: 'Y1 生成りと錆色',

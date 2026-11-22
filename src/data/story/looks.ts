@@ -233,24 +233,53 @@ const TOUMA_KAYKIT: KayKitLook = {
   // 顔は髪と同じ rogue の頭（knight の頭は rogue の髪より頭頂が高く、髪から肌が透けるため）
   head: 'rogue',
   skin: 0xbd9e88,
-  cloth: 0x2e3546,
-  cloth2: 0x262c3a,
-  trim: 0x3a4152,
-  leather: LEATHER_DARK,
-  pants: 0x2e2c2c,
-  boots: LEATHER_DARK,
-  // 青年らしく（場面4の顔の直し。設計書「二十歳前後・中背の細身・黒の短髪」）: 作者の中くらいの長さの髪（rogue）を、横と後ろを短くし、
-  // 分け目をユナと反対にして使う（前髪が額にかかり、生え際が下がる）。色は、外套と分かれて見えるように、真っ黒より明るく暖かい黒。
-  // 垂れた前髪の1房は、うつむくと目元にかかる（気持ちを見せる手段）。毛先は立てずに寝かせ、横と後ろの裾だけ少し跳ねる
-  // （2026-11-22 物語の担当の決定。立った毛先は元気で熱い主人公に見えやすく、後で作るジンの跳ねた髪ともかぶるため）
-  // 色は黒に寄せた（観客の検査: 5人とも茶色と答えた）。外套の濃紺より暗く、暖かい黒
-  hair: { kit: 'rogue', color: 0x2a2224, shape: { length: 0.22, mirror: true }, extras: ['forelock', 'flicks'] },
+  // 衣装（2026-11-22 人形の工房で決定。案 T3「濃紺と白と革」）: 濃紺の膝丈の外套の内側に、明るい灰の上着を見せ（暗い場面でも人の形が分かるように）、
+  // 帯・手袋・長靴は飴色の革。外套の襟・前の開き・裾に塔の白の細い縁、左胸に門の輪をかたどった丸い印
+  cloth: 0x8c8a84,
+  cloth2: 0x77756f,
+  trim: 0x9a978f,
+  leather: 0x7a4e2c,
+  pants: 0x3a3634,
+  boots: 0x5a3820,
+  // 黒の短髪（2026-11-22 人形の工房で決定。案 A1）: 作者の中くらいの長さの髪（rogue）を短くし、分け目をユナと反対に。
+  // ヘルメットに見えないように、縁の高さを向きごとに変え（もみあげを残し、耳の上を短く、えり足を少し長く）、面に生え際から毛先へ向かう太い溝を3本刻む。
+  // 垂れた前髪の1房は、うつむくと目元にかかる。毛先は立てずに寝かせ、横と後ろの裾だけ少し跳ねる（物語の担当の決定）
+  hair: {
+    kit: 'rogue',
+    color: 0x2a2224,
+    shape: {
+      mirror: true,
+      fringe: 0.88,
+      volume: 0.97,
+      subdivide: 2,
+      hem: [
+        [0, 0.3],
+        [55, 0.45],
+        [92, 0.08],
+        [125, 0.2],
+        [160, 0.36],
+        [180, 0.44],
+        [200, 0.36],
+        [235, 0.2],
+        [268, 0.08],
+        [305, 0.45],
+      ],
+      grooves: [
+        { path: [[-15, 28], [-25, 62], [-140, 60], [-168, 22]], depth: 0.085, width: 10 },
+        { path: [[35, 30], [55, 60], [125, 52], [150, 18]], depth: 0.085, width: 10 },
+        { path: [[-75, 34], [-98, 24], [-114, 6]], depth: 0.07, width: 9 },
+      ],
+    },
+    extras: ['forelock', 'flicks'],
+  },
   // 切れ長の目と、目に近いまっすぐな眉（怒った角度にしない）。あごを細く
   face: { eyes: 'narrow', brows: 'normal', browLift: -0.01, slim: 0.1 },
   width: 0.9,
-  // 外套は、今の人形の濃紺より少し明るく（夜の部屋で、髪と外套が1つの黒い塊に見えないように。観客の検査）
-  cloak: { color: 0x34405a, length: 'long', hoodDown: true },
-  accent: 0x5c7f80,
+  cloak: { color: 0x2f3a55, length: 'knee', hoodDown: true, edge: true, front: true },
+  // 襟は外套と同じ濃紺（差し色は縁の白に任せる）
+  accent: 0x2f3a55,
+  accentB: 0xe2ded2,
+  emblem: 'chest',
 };
 
 export const LOOKS: Readonly<Record<string, LookDefinition>> = {
@@ -327,21 +356,42 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
       headScale: 0.93,
       width: 0.94,
       skin: 0xc8a993,
-      // 生成りの作業着（上着もズボンも生成り。スカートはやめた）。袖をまくり、素手。服と手に油染み。腰に工具
-      cloth: 0xd2c3a3,
-      cloth2: 0xb9a888,
-      leather: 0x6a4e38,
-      pants: 0xb4a284,
-      boots: 0x4e3a2e,
+      // 生成りの作業着（2026-11-22 人形の工房で決定。案 Y1「生成りと錆色」）: 明るい生成りの上着、明るさの違う茶のズボン（全身が1色の塊に見えないように）、
+      // 焦げ茶の革の前掛け。差し色は錆色1色（首の布・結い紐）。袖をまくり、素手。服と手に油染み。腰に工具
+      cloth: 0xe2d6ba,
+      cloth2: 0xcbbb96,
+      leather: 0x5a3e2c,
+      pants: 0x86664a,
+      boots: 0x3e2c22,
       sleeves: 'rolled',
       hands: 0xbc9c84,
       stains: true,
       tools: true,
-      // 二つ結びのおさげ（2026-11-22 ゲームの人形で決定）。肩より下まで下ろす
+      // 二つ結びのおさげ（2026-11-22 ゲームの人形で決定）。人形の工房で、低い位置で結んで肩の外に沿って短めに下ろす形（案 B）に決定
+      // （胸の前へ下ろす形は、2本の帯が肩から掛かっているように見えたため）。前髪の横に真鍮の丸い髪留め
       // 前髪は少し短く（観客の検査: 夕食の画で、前髪が片目にかかって眠そう・無表情に見えた）
-      hair: { kit: 'rogue', color: 0x1e1a1e, shape: { fringe: 0.8 }, extras: ['twinTails'] },
-      apron: { color: 0x6e5038 },
-      accent: 0xa4503a,
+      hair: {
+        kit: 'rogue',
+        color: 0x1e1a1e,
+        shape: { fringe: 0.8 },
+        extras: ['twinTails', 'pin'],
+        tails: {
+          tie: [0.48, 1.48, -0.12],
+          path: [
+            [0.33, 1.3, -0.06],
+            [0.37, 1.2, -0.03],
+            [0.38, 1.12, -0.02],
+          ],
+          root: 0.058,
+          bulge: 0.3,
+          taper: 0.8,
+          chest: true,
+        },
+      },
+      apron: { color: 0x4e3426 },
+      accent: 0xb0532e,
+      accentB: 0xc09a50,
+      neckerchief: true,
       // 少し大きい目とまつ毛（可愛さは残す）。輪郭は丸すぎないように（丸い輪郭はやめ、ほんの少し細く）
       face: { eyes: 'large', iris: 0x553624, slim: 0.03, blush: true, brows: 'thin', browLift: 0.012 },
     },
