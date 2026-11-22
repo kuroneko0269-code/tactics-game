@@ -100,6 +100,8 @@ export interface KayKitLook {
   readonly headScale?: number;
   /** 肩幅の倍率（1 がふつう） */
   readonly width?: number;
+  /** 背丈と肩幅の倍率を体だけに掛ける（頭はどの人物も同じ大きさにし、headScale だけで変える。大柄・小柄でも頭が大きく・小さく見えないように） */
+  readonly bodyOnly?: boolean;
   /** 肌の色 */
   readonly skin: number;
   /** 服の主な色 */

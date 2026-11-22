@@ -907,7 +907,7 @@ function blushParts(surf: FaceSurface): PartPiece[] {
 }
 
 /** 頭の骨に付く点を、首の付け根（頭の骨）から縮める */
-function scaleHead(g: THREE.BufferGeometry, pivotY: number, forelockBone: number, headScale: number): void {
+function scaleHead(g: THREE.BufferGeometry, pivotY: number, forelockBone: number, headScale: number, flat = 1): void {
   const p = g.attributes.position!;
   const si = g.attributes.skinIndex!;
   const sw = g.attributes.skinWeight!;
@@ -919,7 +919,9 @@ function scaleHead(g: THREE.BufferGeometry, pivotY: number, forelockBone: number
     }
     if (w <= 0) continue;
     const s = 1 + (headScale - 1) * w;
-    p.setXYZ(i, p.getX(i) * s, pivotY + (p.getY(i) - pivotY) * s, p.getZ(i) * s);
+    // flat: 横と前後だけに掛ける倍率（肩幅を体だけに掛ける時、頭の横幅を元に戻す）
+    const sh = s * (1 + (flat - 1) * w);
+    p.setXYZ(i, p.getX(i) * sh, pivotY + (p.getY(i) - pivotY) * s, p.getZ(i) * sh);
   }
 }
 
@@ -1010,7 +1012,9 @@ export function createKayKitPuppet(look: LookDefinition): Puppet {
   });
   const inverses = A.boneInverses.map((m) => m.clone());
   // 頭を縮める割合（人物ごとの倍率を掛ける。ユナは、頭と体の比を大人に少し近づける）
-  const headScale = HEAD_SCALE * (k.headScale ?? 1);
+  // 体だけを大きく・小さくする人物（bodyOnly）は、背丈と肩幅の倍率を頭に掛けない（頭はどの人物も同じ大きさ × headScale）
+  const headScale = HEAD_SCALE * (k.headScale ?? 1) / (k.bodyOnly ? (k.height ?? 1) : 1);
+  const headFlat = k.bodyOnly ? 1 / (k.width ?? 1) : 1;
   const headPivot = new THREE.Vector3().setFromMatrixPosition(A.boneInverses[BONE.head]!.clone().invert()).y;
   const hairPieces = hairParts(k, { pivot: headPivot, scale: headScale });
   // 前髪の1房の骨（頭の骨の子。生え際を軸に揺れて、うつむくと垂れる）。骨を付けた時の位置は、頭を縮めた後の生え際
@@ -1020,7 +1024,7 @@ export function createKayKitPuppet(look: LookDefinition): Puppet {
     const headBind = A.boneInverses[BONE.head]!.clone().invert();
     const headBindQ = new THREE.Quaternion().setFromRotationMatrix(headBind);
     const [rx, ry, rz] = FORELOCK_ROOT;
-    const at = new THREE.Vector3(rx * headScale, headPivot + (ry - headPivot) * headScale, rz * headScale);
+    const at = new THREE.Vector3(rx * headScale * headFlat, headPivot + (ry - headPivot) * headScale, rz * headScale * headFlat);
     const bind = new THREE.Matrix4().compose(at, headBindQ, new THREE.Vector3(1, 1, 1));
     const local = headBind.clone().invert().multiply(bind);
     forelockBone = new THREE.Bone();
@@ -1083,7 +1087,7 @@ export function createKayKitPuppet(look: LookDefinition): Puppet {
   const merged = mergeGeometries(pieces)!;
   for (const p of pieces) p.dispose();
   // 頭（頭の骨と前髪の骨に付く点）を、首の付け根から縮める
-  scaleHead(merged, headPivot, FORELOCK_BONE, headScale);
+  scaleHead(merged, headPivot, FORELOCK_BONE, headScale, headFlat);
 
   const map = paletteTexture(k);
   // 裏も描く（髪と頬のすき間から、髪の内側の代わりに輪郭線の黒が見えて、頬の横に黒い帯が出ていたため。トウマの短くした横の髪）

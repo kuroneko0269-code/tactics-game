@@ -385,3 +385,26 @@ VARIANTS.nono = {
     { name: 'C 治癒師の服', note: '生成りの長衣・毛織の肩掛け・薄緑の首の布', def: NONO_ITEMS, look: { ...NONO_BODY, cloth: 0xc6b898, cloth2: 0xb0a284, mantle: 0x6a5e4c, accent: 0x7a8a62, neckerchief: true } },
   ],
 };
+
+// ---- 往復3（size）: B（印と濃紺）に決定。ゴードとノノの頭と体の大きさを、キリ・フェンに合わせる（bodyOnly: 背丈と肩幅を体だけに掛ける） ----
+const gordB = VARIANTS.gord[2][1];
+const nonoB = VARIANTS.nono[2][1];
+const sized = (v, name, note, extra) => ({ name, note, def: v.def, look: { ...v.look, ...extra } });
+VARIANTS.gord.size = [
+  sized(gordB, 'A 頭はキリと同じ', '大柄の体（背 1.1・肩幅 1.15）・頭は大人のふつうの大きさ', { bodyOnly: true, headScale: 1 }),
+  sized(gordB, 'B 頭を少し小さく', '大柄の体・頭 0.92（体が大きく見える）', { bodyOnly: true, headScale: 0.92 }),
+  sized(gordB, 'C 体も少し控えめ', '背 1.05・肩幅 1.1・頭 0.95', { bodyOnly: true, height: 1.05, width: 1.1, headScale: 0.95 }),
+];
+VARIANTS.nono.size = [
+  sized(nonoB, 'A 頭はキリと同じ', 'ふくよかな体（肩幅 1.2）・頭は大人のふつうの大きさ', { bodyOnly: true, headScale: 1 }),
+  sized(nonoB, 'B 頭を少し小さく', 'ふくよかな体・頭 0.95', { bodyOnly: true, headScale: 0.95 }),
+  sized(nonoB, 'C 体も少し控えめ', '肩幅 1.12・頭 0.97', { bodyOnly: true, width: 1.12, headScale: 0.97 }),
+];
+VARIANTS.kiri.size = [{ ...VARIANTS.kiri[2][1], name: 'B 決定' }];
+VARIANTS.fen.size = [{ ...VARIANTS.fen[2][1], name: 'B 決定' }];
+// トウマとユナを同じ決まりにした場合（見比べだけ。ゲームには入れない）
+VARIANTS.touma.size = [{ name: '今', look: {} }, { name: '合わせた場合', note: '肩幅 0.9 を体だけに（頭の横幅がふつうに戻る）', look: { bodyOnly: true } }];
+VARIANTS.yuna.size = [
+  { name: '今', look: {} },
+  { name: '合わせた場合', note: '背 0.9 を体だけに・頭 0.9（フェンと同じ大きさ）', look: { bodyOnly: true, headScale: 0.9 } },
+];
