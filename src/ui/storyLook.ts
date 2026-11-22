@@ -18,6 +18,39 @@ const LOADERS: Readonly<Record<StoryFont, () => Promise<unknown>>> = {
 
 const loaded = new Set<StoryFont>();
 
+/** 端末に入っている書体を使うものの、書体の名前（CSS の font-family。style.css の --kr-mincho と合わせる） */
+const DEVICE_FONTS: Readonly<Partial<Record<StoryFont, readonly string[]>>> = {
+  hiraginoMincho: ['Hiragino Mincho ProN', 'Hiragino Mincho Pro'],
+};
+const found = new Map<StoryFont, boolean>();
+
+/**
+ * 端末に書体が入っているか（文字の幅を測って調べる）: 書体を指定した文字列と、代わりの書体だけの文字列の幅を比べ、
+ * どの代わりの書体とも幅が同じなら、その書体は無い（指定が効かず、代わりで出ている）。同梱の書体は、いつも true
+ */
+export function deviceHasFont(font: StoryFont): boolean {
+  const names = DEVICE_FONTS[font];
+  if (!names) return true;
+  const cached = found.get(font);
+  if (cached !== undefined) return cached;
+  let ok = false;
+  try {
+    const g = document.createElement('canvas').getContext('2d');
+    if (g) {
+      const sample = '消された暦の夜、灯を手渡す。ABCabc123';
+      const width = (family: string) => {
+        g.font = `40px ${family}`;
+        return g.measureText(sample).width;
+      };
+      ok = names.some((name) => ['monospace', 'sans-serif', 'serif'].some((fallback) => Math.abs(width(`'${name}', ${fallback}`) - width(fallback)) > 0.5));
+    }
+  } catch {
+    ok = false;
+  }
+  found.set(font, ok);
+  return ok;
+}
+
 export function applyStoryLook(font: StoryFont, size: TextSize): void {
   const root = document.documentElement;
   root.dataset.storyFont = font;

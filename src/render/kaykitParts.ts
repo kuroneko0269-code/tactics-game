@@ -203,10 +203,11 @@ export function cloakParts(look: KayKitLook): PartPiece[] {
   // 襟（差し色）
   if (look.accent !== undefined) {
     // 襟は太め（髪と外套が1つの黒い塊に見えないように、境目に差し色を見せる。観客の検査）
-    const collar = new THREE.TorusGeometry(0.28, 0.075, 5, 12);
+    // 口元にかからない高さ（場面4の顔の直しの観客の検査: 口元の青緑の襟が、顔の下半分の緑の肌やひげの影に見えたため下げた）
+    const collar = new THREE.TorusGeometry(0.28, 0.062, 5, 12);
     collar.rotateX(Math.PI / 2);
     collar.scale(1, 1, 0.9);
-    collar.translate(0, b.shoulder + 0.1, 0.0);
+    collar.translate(0, b.shoulder + 0.075, 0.0);
     pieces.push(finish(collar, 'accent', { a: BONE.chest }, false));
   }
   if (c.hoodDown) {

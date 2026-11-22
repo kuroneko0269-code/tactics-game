@@ -182,7 +182,7 @@ function main(): void {
   /** 人形を KayKit で作るか（試しの場面で、設定が「KayKit」で、素材を読み込み済みの時だけ） */
   const kaykitOn = () => kaykitScene && settings.puppetKind === 'kaykit' && kaykit !== undefined;
   /** 人形の作り方: KayKit の見た目がある人物は KayKit の人形、ほかは今の人形 */
-  const makePuppet = (look: PuppetLook) => (kaykitOn() && look.kaykit && kaykit ? kaykit.createKayKitPuppet(look, settings.yunaHair) : createPuppet(look));
+  const makePuppet = (look: PuppetLook) => (kaykitOn() && look.kaykit && kaykit ? kaykit.createKayKitPuppet(look) : createPuppet(look));
   /** 確認用の機能の印と「勝ったことにする」（設定で入にした時だけ） */
   const checkBadge = createCheckBadge(document.getElementById('app') ?? document.body);
   checkBadge.setEnabled(settings.checkTools);

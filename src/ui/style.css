@@ -3487,6 +3487,8 @@ body.in-dialogue #hud {
   flex-direction: column;
   gap: 2px;
   line-height: 1.8;
+  /* 読み返しの名前と台詞も、設定の書体で（場面4の顔の直しの PR で、語りだけが書体に従っていたのを直した） */
+  font-family: var(--kr-mincho);
 }
 
 .backlog-row.narration .backlog-text {
@@ -4051,23 +4053,7 @@ body.in-dialogue #hud {
   font-size: 12px;
 }
 
-/* 人形とユナの髪（確認用の機能）: 2つの列を左右に並べ、それぞれ名前を上、ボタンを下にする */
-.settings-pair {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.settings-look .settings-pair .settings-choices {
-  grid-template-columns: minmax(0, 1fr);
-  gap: 2px;
-}
-
-.settings-pair .settings-label {
-  font-size: 12px;
-}
-
-/* 選び肢の列の名前の下に添える短い説明（書体の「ヒラギノ明朝は iPhone・iPad・Mac だけ」）。列の高さを増やさないように小さく */
+/* 選び肢の列の名前の下に添える短い説明（書体の「ヒラギノ明朝はこの端末では使えません」）。列の高さを増やさないように小さく */
 .settings-label-note {
   display: block;
   margin-top: 2px;
