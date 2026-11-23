@@ -66,6 +66,7 @@ const ITEM_POSE: Readonly<Record<string, { scale: number; tilt?: number; y?: num
   bow: { scale: 0.8 },
   measuringRod: { scale: 0.7, tilt: 0.55, y: -0.32 },
   quiver: { scale: 0.75, tilt: -0.2, y: -0.25 },
+  shieldBack: { scale: 0.85, y: -0.15 },
 };
 const GESTURE_NAME = new Map<object, string>(Object.entries(GESTURES).map(([name, g]) => [g, name]));
 

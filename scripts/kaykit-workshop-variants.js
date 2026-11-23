@@ -475,3 +475,31 @@ VARIANTS.father.head = [
   { name: 'B もう少し', note: 'A ＋ 頭 0.95（およそ 0.9 倍）', look: { bodyOnly: true, headScale: 0.95 } },
   { name: 'C はっきり', note: 'A ＋ 頭 0.91（およそ 0.86 倍）', look: { bodyOnly: true, headScale: 0.91 } },
 ];
+
+// ---- 往復7: ハルド・イェルマ・テオ。体つきは決まりどおり細く（胴と腕・脚 0.8）。頭は大きくしない（bodyOnly） ----
+const SILVER2 = 0xaeb3bc;
+const HALD_BODY = { base: 'barbarian', head: 'knight', height: 1.04, width: 1.12, bodyOnly: true, headScale: 0.95, torso: 0.8, limbs: 0.8, skin: 0xb8967e, cloth: 0x34405a, cloth2: 0x2a3449, trim: 0x8a8a8a, ...EARTH, hair: { kit: 'knight', color: 0x6a5c4e, shape: { length: 0.6 } } };
+VARIANTS.hald = {
+  7: [
+    { name: 'A 濃紺の外套', note: '膝までの濃紺の外套・銀の縁と胸の留め具（監督官らしく）', def: { items: [{ model: 'parcel', slot: 'waist' }] }, look: { ...HALD_BODY, cloak: { color: 0x2f3a55, length: 'knee', edge: true, front: true }, accent: 0x2f3a55, accentB: SILVER2, emblem: 'chest' } },
+    { name: 'B 長衣と灰の肩掛け', note: '長衣の体・濃紺・灰の肩掛け・銀の留め具（話を聞き取る役）', def: { items: [{ model: 'parcel', slot: 'waist' }] }, look: { ...HALD_BODY, base: 'mage', mantle: 0x6a6e78, accentB: SILVER2, emblem: 'chest' } },
+    { name: 'C 守護騎士', note: '濃紺の上着・鉄の肩当て・背に丸い盾・銀の留め具', def: { items: [{ model: 'shieldBack', slot: 'back' }] }, look: { ...HALD_BODY, pauldrons: 'iron', accentB: SILVER2, emblem: 'chest' } },
+  ],
+};
+const YELMA_BODY = { base: 'mage', head: 'mage', height: 1.1, bodyOnly: true, torso: 0.8, limbs: 0.8, skin: 0xc8aa94, cloth: 0xd8d0be, cloth2: 0xc4bca8, trim: 0x8a8a90, ...EARTH, pants: 0x4a5274, face: { brows: 'thin' } };
+VARIANTS.yelma = {
+  7: [
+    { name: 'A 白い長衣と灰の肩掛け', note: '銀の長い髪（服より暗い銀）・塔の白の長衣・灰の肩掛け・濃い青の帯', def: { items: [{ model: 'charm', slot: 'waist' }] }, look: { ...YELMA_BODY, hair: { kit: 'mage', color: 0x6e6e78, shape: { length: 1.35 } }, mantle: 0x4a4e5e, accent: 0x34405e } },
+    { name: 'B 灰の長い外套', note: '白の長衣に、足もとまでの灰の外套（前の身頃・細い白の縁）', def: { items: [{ model: 'charm', slot: 'waist' }] }, look: { ...YELMA_BODY, hair: { kit: 'mage', color: 0x6e6e78, shape: { length: 1.35 } }, cloak: { color: 0x5a5e6a, length: 'long', edge: true, front: true }, accent: 0x5a5e6a, accentB: 0xe2ded2 } },
+    { name: 'C 下ろした頭巾', note: '灰の長い外套に下ろした頭巾・髪は後ろでゆるくまとめる', def: { items: [{ model: 'charm', slot: 'waist' }] }, look: { ...YELMA_BODY, hair: { kit: 'mage', color: 0x6e6e78, extras: ['ponytail'] }, cloak: { color: 0x5a5e6a, length: 'long', hoodDown: true }, accent: 0x34405e } },
+  ],
+};
+const TEO_BODY = { base: 'rogue', head: 'rogue', height: 0.92, torso: 0.8, limbs: 0.8, skin: 0xc4a48c, cloth: 0x34405a, cloth2: 0x2a3449, ...EARTH };
+const TEO_HAIR = { kit: 'rogue', color: 0x7a5e44 };
+VARIANTS.teo = {
+  7: [
+    { name: 'A ふくらんだ髪・短い外套', note: '柔らかくふくらんだ茶髪・腰までの濃紺の外套・白い襟', def: { items: [{ model: 'charm', slot: 'waist' }] }, look: { ...TEO_BODY, hair: { ...TEO_HAIR, shape: { volume: 1.12, fringe: 1.15 } }, cloak: { color: 0x2f3a55, length: 'short' }, accent: 0xe2ded2 } },
+    { name: 'B 耳を隠す髪・長衣', note: '耳にかかる長さの茶髪・濃紺の長衣・白い首の布・短い杖', def: { items: [{ model: 'staff', slot: 'hand' }] }, look: { ...TEO_BODY, base: 'mage', hair: { ...TEO_HAIR, shape: { length: 1.15, volume: 1.06, fringe: 1.1 } }, accent: 0xe2ded2, neckerchief: true } },
+    { name: 'C 下ろした前髪・膝の外套', note: '丸く下ろした前髪・膝までの濃紺の外套と白い襟・星図の巻物', def: { items: [{ model: 'scroll', slot: 'hand' }] }, look: { ...TEO_BODY, hair: { kit: 'knight', color: 0x7a5e44, shape: { volume: 1.1, fringe: 1.3 } }, cloak: { color: 0x2f3a55, length: 'knee', front: true }, accent: 0xe2ded2 } },
+  ],
+};
