@@ -47,7 +47,7 @@ export const PART_CELLS = {
 export type PartCell = keyof typeof PART_CELLS;
 
 /** 骨の番号（KayKit の5人で共通の骨の順番） */
-export const BONE = { hips: 1, spine: 2, chest: 3, head: 14, upperlegL: 15, upperlegR: 19 } as const;
+export const BONE = { hips: 1, spine: 2, chest: 3, upperarmL: 4, upperarmR: 9, head: 14, upperlegL: 15, upperlegR: 19 } as const;
 
 /** 1つの部品: 形と、付く骨（2つまで。重さは高さで決める） */
 export interface PartPiece {
@@ -430,8 +430,21 @@ export function toolParts(look: KayKitLook): PartPiece[] {
   ];
 }
 
+/** 肩当て（戦う人）: 左右の肩に、丸くなめらかな大きな板を1枚ずつ。胸の骨に付ける */
+export function pauldronParts(look: KayKitLook): PartPiece[] {
+  if (!look.pauldrons) return [];
+  const b = BODY_SIZE[look.base];
+  const cell: PartCell = look.pauldrons === 'iron' ? 'metal' : 'stain';
+  return [-1, 1].map((sx) => {
+    // 腕の付け根の上にかぶせる丸い殻（骨を付けた時の姿勢は腕を横に広げた形なので、上腕の骨に付けて腕と一緒に下ろす）
+    const shell = roundedShell([sx * (b.halfW + 0.02), b.shoulder + 0.01, 0], [0.17, 0.13, 0.2], 0.6, 12, 8);
+    const g = clip(shell, (_x, y) => y > b.shoulder - 0.07);
+    return finish(bothSides(g), cell, { a: sx > 0 ? BONE.upperarmL : BONE.upperarmR }, false);
+  });
+}
+
 /** 人物の自作の部品をすべて */
 export function customParts(look: KayKitLook): PartPiece[] {
   // 髪は src/render/kaykitHair.ts（頭巾をかぶる時は作らない）
-  return [...headwearParts(look), ...cloakParts(look), ...emblemParts(look), ...mantleParts(look), ...skirtParts(look), ...apronParts(look), ...scarfParts(look), ...toolParts(look)];
+  return [...headwearParts(look), ...cloakParts(look), ...emblemParts(look), ...mantleParts(look), ...skirtParts(look), ...apronParts(look), ...scarfParts(look), ...toolParts(look), ...pauldronParts(look)];
 }

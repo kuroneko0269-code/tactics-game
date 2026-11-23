@@ -54,6 +54,20 @@ const GESTURE_CLIPS: Readonly<Record<string, { clip: Clip; from?: number; to?: n
 };
 /** 平たい物（暦盤・帳面）を手に持つ時の、面の起こし方（物の見た目の id → ラジアン。負で、面を持つ人の顔の方へ起こす。自分で見ている持ち方） */
 const HELD_TILT: Readonly<Record<string, number>> = { calendarSmall: -0.85, ledger: -0.85, scroll: -0.6 };
+/**
+ * 武器と背負う物の大きさと傾き（KayKit の体は今の人形より頭が大きく背が低いので、長い物は小さめにし、背の物は斜めに負う）。
+ * scale 倍率・tilt 体の左右への傾き（ラジアン）・y 上下へずらす量
+ */
+const ITEM_POSE: Readonly<Record<string, { scale: number; tilt?: number; y?: number }>> = {
+  sword: { scale: 0.72 },
+  spear: { scale: 0.85 },
+  staff: { scale: 0.8 },
+  staffRing: { scale: 0.8 },
+  bow: { scale: 0.8 },
+  measuringRod: { scale: 0.7, tilt: 0.55, y: -0.32 },
+  quiver: { scale: 0.75, tilt: -0.2, y: -0.25 },
+  shieldBack: { scale: 0.85, y: -0.15 },
+};
 const GESTURE_NAME = new Map<object, string>(Object.entries(GESTURES).map(([name, g]) => [g, name]));
 
 interface Assets {
@@ -191,7 +205,8 @@ function paletteTexture(look: KayKitLook): THREE.Texture {
     skin: look.skin,
     // 素手（省いた時は革の手袋の色）・油染み（服を暗くした色）・工具の木の柄と鉄
     hands: look.hands ?? look.leather ?? 0x5e4430,
-    stain: new THREE.Color(look.cloth).lerp(new THREE.Color(0x3a3028), 0.32).getHex(),
+    // 油染みの色（染みのない人物で革の肩当ての時は、この区画を革の色に使う）
+    stain: look.pauldrons === 'leather' && !look.stains ? (look.leather ?? 0x5e4430) : new THREE.Color(look.cloth).lerp(new THREE.Color(0x3a3028), 0.32).getHex(),
     wood: 0x7a5a3a,
     metal: 0x6f7272,
     shine: 0xf4eee2,
@@ -892,8 +907,34 @@ function blushParts(surf: FaceSurface): PartPiece[] {
   return [1, -1].map((sign) => finish(conform(flatDisc(sign * 0.27, 1.5, 0.062, 0.038), surf, 0.004), 'blush', { a: BONE.head }, true));
 }
 
+
+/** 腕と脚の骨に付く点を、骨の軸（骨の付け根から次の骨へ）のまわりで細くする（重さの割合だけ） */
+function thinLimbs(g: THREE.BufferGeometry, axes: readonly { bone: number; from: THREE.Vector3; to: THREE.Vector3 }[], factor: number): void {
+  const p = g.attributes.position!;
+  const si = g.attributes.skinIndex!;
+  const sw = g.attributes.skinWeight!;
+  const v = new THREE.Vector3();
+  const on = new THREE.Vector3();
+  const off = new THREE.Vector3();
+  const delta = new THREE.Vector3();
+  const byBone = new Map(axes.map((a) => [a.bone, { from: a.from, dir: a.to.clone().sub(a.from).normalize() }]));
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i);
+    delta.set(0, 0, 0);
+    for (let k = 0; k < 4; k++) {
+      const a = byBone.get(si.getComponent(i, k));
+      const w = sw.getComponent(i, k);
+      if (!a || w <= 0) continue;
+      const t = off.copy(v).sub(a.from).dot(a.dir);
+      on.copy(a.from).addScaledVector(a.dir, t);
+      delta.addScaledVector(off.copy(v).sub(on), (factor - 1) * w);
+    }
+    if (delta.lengthSq() > 0) p.setXYZ(i, v.x + delta.x, v.y + delta.y, v.z + delta.z);
+  }
+}
+
 /** 頭の骨に付く点を、首の付け根（頭の骨）から縮める */
-function scaleHead(g: THREE.BufferGeometry, pivotY: number, forelockBone: number, headScale: number): void {
+function scaleHead(g: THREE.BufferGeometry, pivotY: number, forelockBone: number, headScale: number, flat = 1): void {
   const p = g.attributes.position!;
   const si = g.attributes.skinIndex!;
   const sw = g.attributes.skinWeight!;
@@ -905,7 +946,9 @@ function scaleHead(g: THREE.BufferGeometry, pivotY: number, forelockBone: number
     }
     if (w <= 0) continue;
     const s = 1 + (headScale - 1) * w;
-    p.setXYZ(i, p.getX(i) * s, pivotY + (p.getY(i) - pivotY) * s, p.getZ(i) * s);
+    // flat: 横と前後だけに掛ける倍率（肩幅を体だけに掛ける時、頭の横幅を元に戻す）
+    const sh = s * (1 + (flat - 1) * w);
+    p.setXYZ(i, p.getX(i) * sh, pivotY + (p.getY(i) - pivotY) * s, p.getZ(i) * sh);
   }
 }
 
@@ -996,7 +1039,9 @@ export function createKayKitPuppet(look: LookDefinition): Puppet {
   });
   const inverses = A.boneInverses.map((m) => m.clone());
   // 頭を縮める割合（人物ごとの倍率を掛ける。ユナは、頭と体の比を大人に少し近づける）
-  const headScale = HEAD_SCALE * (k.headScale ?? 1);
+  // 体だけを大きく・小さくする人物（bodyOnly）は、背丈と肩幅の倍率を頭に掛けない（頭はどの人物も同じ大きさ × headScale）
+  const headScale = HEAD_SCALE * (k.headScale ?? 1) / (k.bodyOnly ? (k.height ?? 1) : 1);
+  const headFlat = (k.bodyOnly ? 1 / (k.width ?? 1) : 1) * (k.headWidth ?? 1);
   const headPivot = new THREE.Vector3().setFromMatrixPosition(A.boneInverses[BONE.head]!.clone().invert()).y;
   const hairPieces = hairParts(k, { pivot: headPivot, scale: headScale });
   // 前髪の1房の骨（頭の骨の子。生え際を軸に揺れて、うつむくと垂れる）。骨を付けた時の位置は、頭を縮めた後の生え際
@@ -1006,7 +1051,7 @@ export function createKayKitPuppet(look: LookDefinition): Puppet {
     const headBind = A.boneInverses[BONE.head]!.clone().invert();
     const headBindQ = new THREE.Quaternion().setFromRotationMatrix(headBind);
     const [rx, ry, rz] = FORELOCK_ROOT;
-    const at = new THREE.Vector3(rx * headScale, headPivot + (ry - headPivot) * headScale, rz * headScale);
+    const at = new THREE.Vector3(rx * headScale * headFlat, headPivot + (ry - headPivot) * headScale, rz * headScale * headFlat);
     const bind = new THREE.Matrix4().compose(at, headBindQ, new THREE.Vector3(1, 1, 1));
     const local = headBind.clone().invert().multiply(bind);
     forelockBone = new THREE.Bone();
@@ -1068,8 +1113,36 @@ export function createKayKitPuppet(look: LookDefinition): Puppet {
   }
   const merged = mergeGeometries(pieces)!;
   for (const p of pieces) p.dispose();
+  // 腕と脚を細くする（骨の軸のまわりに、軸からの離れを縮める）
+  if (k.limbs !== undefined && k.limbs !== 1) {
+    const bindPos = (name: string) => new THREE.Vector3().setFromMatrixPosition(A.boneInverses[A.boneNames.indexOf(sanitized(name))]!.clone().invert());
+    const chains: [string, string][] = [];
+    for (const side of ['l', 'r']) {
+      chains.push([`upperarm.${side}`, `lowerarm.${side}`], [`lowerarm.${side}`, `wrist.${side}`], [`wrist.${side}`, `hand.${side}`]);
+      chains.push([`upperleg.${side}`, `lowerleg.${side}`], [`lowerleg.${side}`, `foot.${side}`]);
+    }
+    thinLimbs(
+      merged,
+      chains.map(([a, b]) => ({ bone: A.boneNames.indexOf(sanitized(a)), from: bindPos(a), to: bindPos(b) })),
+      k.limbs,
+    );
+  }
+  // 胴を細くする（腰・背骨・胸の骨に付く点を、体の縦の軸のまわりで、重さの割合だけ縮める。胴に付いた外套や前掛けも一緒に）
+  if (k.torso !== undefined && k.torso !== 1) {
+    const torsoBones = new Set([BONE.hips, BONE.spine, BONE.chest]);
+    const p = merged.attributes.position!;
+    const si = merged.attributes.skinIndex!;
+    const sw = merged.attributes.skinWeight!;
+    for (let i = 0; i < p.count; i++) {
+      let w = 0;
+      for (let c = 0; c < 4; c++) if (torsoBones.has(si.getComponent(i, c) as 1 | 2 | 3)) w += sw.getComponent(i, c);
+      if (w <= 0) continue;
+      const f = 1 + (k.torso - 1) * w;
+      p.setXYZ(i, p.getX(i) * f, p.getY(i), p.getZ(i) * f);
+    }
+  }
   // 頭（頭の骨と前髪の骨に付く点）を、首の付け根から縮める
-  scaleHead(merged, headPivot, FORELOCK_BONE, headScale);
+  scaleHead(merged, headPivot, FORELOCK_BONE, headScale, headFlat);
 
   const map = paletteTexture(k);
   // 裏も描く（髪と頬のすき間から、髪の内側の代わりに輪郭線の黒が見えて、頬の横に黒い帯が出ていたため。トウマの短くした横の髪）
@@ -1130,7 +1203,7 @@ export function createKayKitPuppet(look: LookDefinition): Puppet {
     back: anchorOn(boneByName('chest'), 0.05, 0.2, -0.42),
   };
   const defaults: Partial<Record<LookItemSlot, string>> = {};
-  for (const item of look.items ?? []) defaults[item.slot] = item.model;
+  for (const item of look.kaykit?.items ?? look.items ?? []) defaults[item.slot] = item.model;
   let itemMaterials: THREE.MeshLambertMaterial[] = [];
   let opacity = 1;
   /** 手に物を持っているか（持っている手は、前へ少し上げて体の横へ出す。素材の立つ動きは手が体の前に寄り、持ち物が隠れるため） */
@@ -1148,6 +1221,12 @@ export function createKayKitPuppet(look: LookDefinition): Puppet {
         holder.rotation.x = flat ? HELD_TILT[model]! : 0;
         // 平たい物は少し大きく持つ（KayKit の体は今の人形より幅があり、同じ大きさでは体の陰に隠れるため。暦盤）
         if (flat) holder.scale.setScalar(1.4);
+        const pose = ITEM_POSE[model];
+        if (pose) {
+          holder.scale.setScalar(pose.scale);
+          holder.rotation.z = pose.tilt ?? 0;
+          holder.position.y = pose.y ?? 0;
+        }
         a.add(holder);
         itemMaterials.push(...buildModel(model, holder));
       }

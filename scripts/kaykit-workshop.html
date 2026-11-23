@@ -10,6 +10,7 @@
   </head>
   <body>
     <canvas id="out"></canvas>
+    <canvas id="gray"></canvas>
     <script type="module">
       // 人形の工房: 髪の案（A・B・C）を、1枚の画像に横に並べて撮るための、開発用サーバーだけで開くページ（scripts/kaykit-workshop.mjs）。
       // ?who=touma|yuna &round=往復の番号 &kind=views（案ごとに6つの向き）| small（場面4でスマホに映る大きさの全身）
@@ -19,21 +20,112 @@
       import { GESTURES } from '/src/data/story/stageDefs.ts';
       import { playGesture } from '/src/render/motion.ts';
       import { createTweens } from '/src/render/tweens.ts';
-      import { VARIANTS } from '/scripts/kaykit-workshop-variants.js';
+      import { VARIANTS, NAMES, DECIDED } from '/scripts/kaykit-workshop-variants.js';
+      import { DEFAULT_LOOK } from '/src/data/story/looks.ts';
 
       const q = new URLSearchParams(location.search);
       const who = q.get('who') ?? 'touma';
       const kind = q.get('kind') ?? 'views';
       const round = q.get('round') ?? '1';
-      const list = VARIANTS[who][round];
-      const names = { touma: 'トウマ', yuna: 'ユナ', father: '父', mother: '母' };
+      const names = NAMES;
+      /** 案の見た目: looks.ts の見た目に、案の値を重ねる（KayKit の見た目がまだ無い人物は、案の look をそのまま使う） */
+      const lookOf = (id, v = {}) => {
+        const base = LOOKS[id] ?? DEFAULT_LOOK;
+        const bk = base.kaykit;
+        const kk = bk ? { ...bk, ...(v.look ?? {}), hair: { ...bk.hair, ...(v.look?.hair ?? {}) } } : v.look;
+        return { ...base, ...(v.def ?? {}), kaykit: kk };
+      };
+      // 並び（lineup）: 決まった人物と、この往復の案を、スマホに映る大きさで横に並べる
+      const lineup = kind === 'lineup';
+      const list = lineup
+        ? [
+            ...DECIDED.map((id) => ({ id, name: names[id], sub: '決定', v: {} })),
+            ...who.split(',').filter(Boolean).flatMap((id) => VARIANTS[id][round].map((v) => ({ id, name: names[id], sub: v.name.split(' ')[0], v }))),
+          ]
+        : VARIANTS[who][round];
+      if (lineup) {
+        await renderLineup();
+      }
+
+      async function renderLineup() {
+        const CW = 104, CH = 160, HEAD = 8, FOOT = 40;
+        const W = list.length * CW;
+        const H = HEAD + CH + FOOT;
+        const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(CW, CH);
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x8a7e6a);
+        const hemi = new THREE.HemisphereLight(0xc8d4ff, 0x4a3a30, 1.5);
+        const sun = new THREE.DirectionalLight(0xffe2bc, 2.2);
+        sun.position.set(1.5, 3, 4);
+        scene.add(hemi, sun);
+        const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshLambertMaterial({ color: 0x6a5e4c }));
+        ground.rotation.x = -Math.PI / 2;
+        scene.add(ground);
+        await loadKayKit();
+        const out = document.getElementById('out');
+        const dpr = window.devicePixelRatio;
+        out.width = W * dpr;
+        out.height = H * dpr;
+        out.style.width = `${W}px`;
+        out.style.height = `${H}px`;
+        const ctx = out.getContext('2d');
+        ctx.scale(dpr, dpr);
+        ctx.fillStyle = '#1b1b20';
+        ctx.fillRect(0, 0, W, H);
+        const camera = new THREE.PerspectiveCamera(20, CW / CH, 0.05, 100);
+        const e = THREE.MathUtils.degToRad(35);
+        camera.position.set(0, 0.55 + Math.sin(e) * 4.2, Math.cos(e) * 4.2);
+        camera.lookAt(0, 0.55, 0);
+        for (const [i, item] of list.entries()) {
+          const p = createKayKitPuppet(lookOf(item.id, item.v));
+          scene.add(p.group);
+          p.setYaw(0.45);
+          for (let t = 0; t < 1.2; t += 1 / 30) p.update(t);
+          renderer.render(scene, camera);
+          const x = i * CW;
+          ctx.drawImage(renderer.domElement, x, HEAD, CW, CH);
+          ctx.textAlign = 'center';
+          ctx.fillStyle = item.sub === '決定' ? '#c8c0aa' : '#ffe9a8';
+          ctx.font = 'bold 14px sans-serif';
+          ctx.fillText(item.name, x + CW / 2, HEAD + CH + 17);
+          ctx.font = '12px sans-serif';
+          ctx.fillText(item.sub, x + CW / 2, HEAD + CH + 33);
+          scene.remove(p.group);
+          if (i > 0 && list[i - 1].id !== item.id) {
+            ctx.fillStyle = '#e8e2d0';
+            ctx.fillRect(x - 1, 4, 2, H - 8);
+          }
+        }
+        // 白黒の版（輪郭で見分けられるか）
+        const gray = document.getElementById('gray');
+        gray.width = out.width;
+        gray.height = out.height;
+        gray.style.width = out.style.width;
+        gray.style.height = out.style.height;
+        const g = gray.getContext('2d');
+        g.filter = 'grayscale(1)';
+        g.drawImage(out, 0, 0);
+        document.title = `並び ${round}`;
+        window.done = true;
+      }
+      if (lineup) throw new Error('lineup done');
 
       const small = kind === 'small';
-      const body = q.get('frame') === 'body';
+      const body = q.get('frame') === 'body' || kind === 'trio';
       // 1つの画の大きさ（small は、場面4のスマホ縦向きで人物が映る大きさ: 背丈およそ 130 px）
-      const CW = small ? 120 : 250;
-      const CH = small ? 170 : 290;
-      const views = small
+      const CW = small ? 120 : kind === 'trio' ? 230 : 250;
+      const CH = small ? 170 : kind === 'trio' ? 340 : 290;
+      const trio = kind === 'trio';
+      const views = trio
+        ? [
+            ['正面', 0],
+            ['斜め前', 0.7],
+            ['後ろ', Math.PI],
+          ]
+        : small
         ? [
             ['斜め前', 0.55],
             ['斜め後ろ', 2.5],
@@ -74,7 +166,7 @@
         lamp.position.set(1.2, 1.4, 1.6);
         scene.add(lamp);
       }
-      const ground = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshLambertMaterial({ color: small ? 0x7a5a40 : 0x6a5e4c }));
+      const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshLambertMaterial({ color: small ? 0x7a5a40 : 0x6a5e4c }));
       ground.rotation.x = -Math.PI / 2;
       scene.add(ground);
       await loadKayKit();
@@ -99,8 +191,7 @@
         ctx.font = '15px sans-serif';
         ctx.fillStyle = '#c8c0aa';
         if (!small) ctx.fillText(v.note ?? '', bx + 8 + ctx.measureText(v.name).width * 1.5 + 14, 30);
-        const base = LOOKS[who];
-        const look = { ...base, kaykit: { ...base.kaykit, ...v.look, hair: { ...base.kaykit.hair, ...(v.look?.hair ?? {}) } } };
+        const look = lookOf(who, v);
         for (const [i, [label, yaw, mode]] of views.entries()) {
           const p = createKayKitPuppet(look);
           scene.add(p.group);
@@ -123,6 +214,9 @@
             const e = THREE.MathUtils.degToRad(24);
             camera.position.set(0, 0.66 + Math.sin(e) * 1.75, Math.cos(e) * 1.75);
             camera.lookAt(0, 0.66, 0);
+          } else if (trio) {
+            camera.position.set(0, 0.66, 3.8);
+            camera.lookAt(0, 0.55, 0);
           } else if (body) {
             camera.position.set(0, 0.6, 3.2);
             camera.lookAt(0, 0.45, 0);
