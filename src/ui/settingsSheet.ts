@@ -81,8 +81,6 @@ export function showSettingsSheet(root: HTMLElement, current: () => GameSettings
       }),
       choices(TEXT.settings.textSize, TEXT_SIZES, TEXT.settings.textSizes, s.textSize, (v) => set({ textSize: v }), 'text-size'),
     );
-    // 人形（確認用の機能）
-    if (s.checkTools) look.append(choices(TEXT.settings.puppetKind, PUPPET_KINDS, TEXT.settings.puppetKinds, s.puppetKind, (v) => set({ puppetKind: v }), 'puppet'));
     body.append(
       look,
       volumeRow,
@@ -102,6 +100,8 @@ export function showSettingsSheet(root: HTMLElement, current: () => GameSettings
         el('p', 'screen-note', TEXT.settings.checkNote),
       ),
     );
+    // 人形（確認用の機能）。切り替えのボタンの後に置き、低い画面では切り替えと組にして並べる（style.css。書体の列が2段になった分の高さを空ける）
+    if (s.checkTools) body.append(choices(TEXT.settings.puppetKind, PUPPET_KINDS, TEXT.settings.puppetKinds, s.puppetKind, (v) => set({ puppetKind: v }), 'puppet'));
   };
   render();
   ref.sheet = showSheet(root, { kind: 'settings', title: TEXT.settings.title, body: [body], closeLabel: TEXT.settings.close, onClose: close });

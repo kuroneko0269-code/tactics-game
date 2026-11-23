@@ -4174,6 +4174,52 @@ body.in-dialogue #hud {
   }
 }
 
+/* 確認用の機能が入の時（人形の列がある時）: 低い縦向きの画面では、切り替えと人形を2列に並べる（欄が画面の高さに収まるように） */
+@media (orientation: portrait) and (max-height: 700px) {
+  .settings-body:has(> .settings-puppet) {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+
+  .settings-body:has(> .settings-puppet) > .settings-look,
+  .settings-body:has(> .settings-puppet) > .settings-volume {
+    grid-column: 1 / -1;
+  }
+
+  .settings-body:has(> .settings-puppet) .settings-item .screen-button {
+    font-size: 14px;
+  }
+
+  .settings-body > .settings-puppet {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+}
+
+/* 横向きの低い画面: 音量を2つ分の幅にして横に消音を置き、空いた3つ目の場所に人形を置く */
+@media (orientation: landscape) and (max-height: 500px) {
+  .settings-body:has(> .settings-puppet) > .settings-volume {
+    grid-column: span 2;
+  }
+
+  /* 名前は左に短く置き、ボタンの高さ（48px）に収める */
+  .settings-body > .settings-puppet {
+    grid-column: auto;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 4px;
+  }
+
+  .settings-body > .settings-puppet .settings-label {
+    font-size: 12px;
+  }
+
+  .settings-body > .settings-puppet .screen-button.settings-choice {
+    padding: 2px 3px;
+    font-size: 12px;
+  }
+}
+
 .settings-mute[aria-pressed='true'] {
   border-color: var(--accent);
 }
