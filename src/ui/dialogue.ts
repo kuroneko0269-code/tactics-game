@@ -410,7 +410,7 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
   };
 
   /**
-   * 名前の札の色: 名前は真鍮色の明朝体で出し（画面の体裁「暦盤」）、人物の服の色は、名前の左の小さな印の色にだけ使う（だれの台詞かを色でも見分けられるように）
+   * 名前の札の色: 名前は真鍮色の太い字で出し（画面の体裁「暦盤」）、人物の服の色は、名前の左の小さな印の色にだけ使う（だれの台詞かを色でも見分けられるように）
    */
   const paintPlate = (node: HTMLElement, who: string) => {
     const c = deps.speakerColors?.(who);

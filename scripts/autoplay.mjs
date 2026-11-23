@@ -2546,57 +2546,31 @@ async function storyRun(browser, baseUrl, name, core) {
   const enableCheckTools = async () => {
     await press(text.settings.open);
     await press(text.settings.checkOff);
-    // 書体・文字の大きさ（見た目の見本の2回目）・人形（KayKit の人形の試し）: 押すと画面に効き、元に戻せる
+    // 文字の大きさ（見た目の見本の2回目）・人形（KayKit の人形の試し）: 押すと画面に効き、元に戻せる
     const choice = (group, label) => press(text.settings.choiceLabel(group, label));
     const root = () => T(() => ({ ...document.documentElement.dataset }));
-    check((await root()).storyFont === 'zenOldMincho' && (await root()).textSize === 'medium', '書体と文字の大きさの初めの値が違います');
+    check((await root()).textSize === 'medium', '文字の大きさの初めの値が「中」ではありません');
     await choice(text.settings.textSize, text.settings.textSizes.large);
-    await choice(text.settings.font, text.settings.fonts.shipporiMincho);
-    check((await root()).textSize === 'large' && (await root()).storyFont === 'shipporiMincho', '文字の大きさか書体の切り替えが画面に効いていません');
+    check((await root()).textSize === 'large', '文字の大きさの切り替えが画面に効いていません');
     check((await T(() => window.__tactics.settings().textSize)) === 'large', '文字の大きさが設定に残っていません');
-    // ヒラギノ明朝（端末の書体。無い端末では Zen Old Mincho で出る）: この端末にあるかの説明（文字の幅で調べる。この環境には無い）
-    check(
-      (await T(() => document.querySelector('.settings-font .settings-notes')?.textContent ?? '')).includes(text.settings.fontNotOnDevice.hiraginoMincho),
-      'ヒラギノ明朝が「この端末では使えません」と出ていません',
-    );
-    // ヒラギノ丸ゴ（端末の書体。無い端末では Zen Maru Gothic で出る）も同じ。この環境には無い
-    check(
-      (await T(() => document.querySelector('.settings-font .settings-notes')?.textContent ?? '')).includes(text.settings.fontNotOnDevice.hiraginoMaru),
-      'ヒラギノ丸ゴが「この端末では使えません（Zen Maru Gothic で表示します）」と出ていません',
-    );
-    // 書体の指定の順を確かめる
-    await choice(text.settings.font, text.settings.fonts.hiraginoMincho);
-    const family = await T(() => getComputedStyle(document.documentElement).getPropertyValue('--kr-mincho'));
-    check(
-      (await root()).storyFont === 'hiraginoMincho' && /^\s*'Hiragino Mincho ProN',\s*'Hiragino Mincho Pro',\s*'Zen Old Mincho'/.test(family),
-      `ヒラギノ明朝の書体の指定が違います: ${family}`,
-    );
-    // ヒラギノ丸ゴ（無い端末では Zen Maru Gothic）: 指定の順と、この環境（ヒラギノが無い）では代わりの Zen Maru Gothic を読み込むこと
-    const fontOf = () => T(() => getComputedStyle(document.documentElement).getPropertyValue('--kr-mincho'));
-    const maruLoaded = () =>
-      T(async () => {
-        await document.fonts.load("500 16px 'Zen Maru Gothic'", '消された暦');
-        return [...document.fonts].some((f) => f.family.replace(/["']/g, '') === 'Zen Maru Gothic' && f.status === 'loaded');
-      });
-    await choice(text.settings.font, text.settings.fonts.hiraginoMaru);
-    const maruFamily = await fontOf();
-    check(
-      (await root()).storyFont === 'hiraginoMaru' && /^\s*'Hiragino Maru Gothic ProN',\s*'Hiragino Maru Gothic Pro',\s*'Zen Maru Gothic'/.test(maruFamily),
-      `ヒラギノ丸ゴの書体の指定が違います: ${maruFamily}`,
-    );
+    // 書体は1つに決めた（ヒラギノ丸ゴ。無い端末は Zen Maru Gothic）: 設定の「書体」の欄はない
+    check((await T(() => document.querySelector('.settings-font'))) === null, '設定に「書体」の欄が残っています');
+    // 書体の指定の順（ゲーム全体。設定の欄にも同じ書体が効く）と、この環境（ヒラギノ丸ゴが無い）では Zen Maru Gothic を読み込むこと
+    const family = await T(() => getComputedStyle(document.documentElement).fontFamily);
+    check(/^\s*"?Hiragino Maru Gothic ProN"?,\s*"?Hiragino Maru Gothic Pro"?,\s*"?Zen Maru Gothic"?/.test(family), `書体の指定が違います: ${family}`);
+    check((await T(() => getComputedStyle(document.querySelector('.sheet[data-sheet="settings"] button')).fontFamily)) === family, '設定の欄のボタンが、ゲーム全体の書体に従っていません');
+    check((await root()).font === 'bundled', `ヒラギノ丸ゴが無い端末なのに、端末の書体を使う印になっています（${(await root()).font}）`);
     await until(() => document.fonts.status === 'loaded' && [...document.fonts].some((f) => f.family.replace(/["']/g, '') === 'Zen Maru Gothic'), undefined, 15000);
-    check(await maruLoaded(), 'ヒラギノ丸ゴが無い端末で、代わりの Zen Maru Gothic が読み込まれていません');
-    // Zen Maru Gothic: ヒラギノを指定に入れず、先頭が Zen Maru Gothic
-    await choice(text.settings.font, text.settings.fonts.zenMaruGothic);
-    const zenMaruFamily = await fontOf();
     check(
-      (await root()).storyFont === 'zenMaruGothic' && /^\s*'Zen Maru Gothic'/.test(zenMaruFamily) && !/Hiragino/.test(zenMaruFamily),
-      `Zen Maru Gothic の書体の指定が違います: ${zenMaruFamily}`,
+      await T(async () => {
+        await document.fonts.load("500 16px 'Zen Maru Gothic'", '消された暦');
+        await document.fonts.load("700 16px 'Zen Maru Gothic'", '消された暦');
+        const faces = [...document.fonts].filter((f) => f.family.replace(/["']/g, '') === 'Zen Maru Gothic' && f.status === 'loaded');
+        return faces.some((f) => f.weight === '500') && faces.some((f) => f.weight === '700');
+      }),
+      'ヒラギノ丸ゴが無い端末で、代わりの Zen Maru Gothic（500 と 700）が読み込まれていません',
     );
-    // 設定の欄の文字も、選んだ書体で出る
-    check(/Zen Maru Gothic/.test(await T(() => getComputedStyle(document.querySelector('.sheet[data-sheet="settings"]')).fontFamily)), '設定の欄が書体に従っていません');
     await choice(text.settings.textSize, text.settings.textSizes.medium);
-    await choice(text.settings.font, text.settings.fonts.zenOldMincho);
     check((await T(() => window.__tactics.settings().puppetKind)) === 'kaykit', '人形の初めの値が KayKit ではありません');
     await choice(text.settings.puppetKind, text.settings.puppetKinds.current);
     check((await T(() => window.__tactics.settings().puppetKind)) === 'current', '人形を「今の人形」に切り替えられません');
@@ -2866,6 +2840,35 @@ async function storyRun(browser, baseUrl, name, core) {
   const st = await T(() => window.__tactics.story());
   check(!st.main, '試しの台本で、物語の進み具合が変わっています');
   log(`会話の見せ方（顔の枠・名前の札の色・肩書き・声だけの人物・顔なし・強調なし・話者の印とカメラの寄せ・語りの字幕・同時・渡す・片付ける）✔（${shown.length}行）`);
+
+  // ---- 書体: ヒラギノ丸ゴがある端末では、Zen Maru Gothic を読み込まない ----
+  // この環境にヒラギノ丸ゴは無いので、文字の幅を測る仕組みに「ヒラギノ丸ゴを指定した時だけ幅が変わる」（＝端末にある）と答えさせて確かめる
+  {
+    const deviceContext = await browser.newContext(contextOptions);
+    const devicePage = await deviceContext.newPage();
+    await devicePage.addInitScript(() => {
+      const measure = CanvasRenderingContext2D.prototype.measureText;
+      CanvasRenderingContext2D.prototype.measureText = function (s) {
+        const m = measure.call(this, s);
+        return /Hiragino Maru Gothic/.test(this.font) ? { width: m.width + 7 } : m;
+      };
+    });
+    const fontRequests = [];
+    devicePage.on('request', (r) => {
+      if (/zen-maru-gothic/i.test(r.url())) fontRequests.push(r.url());
+    });
+    await devicePage.goto(`${baseUrl}?seed=${SEED}&speed=${SPEED}`);
+    await devicePage.waitForFunction(() => window.__tactics?.screen() === 'title', undefined, { timeout: 90000 });
+    await devicePage.waitForTimeout(1500);
+    const deviceFont = await devicePage.evaluate(() => ({
+      mark: document.documentElement.dataset.font,
+      faces: [...document.fonts].filter((f) => f.family.replace(/["']/g, '') === 'Zen Maru Gothic').length,
+    }));
+    check(deviceFont.mark === 'device', `ヒラギノ丸ゴがある端末なのに、端末の書体を使う印になっていません（${deviceFont.mark}）`);
+    check(fontRequests.length === 0 && deviceFont.faces === 0, `ヒラギノ丸ゴがある端末で、Zen Maru Gothic を読み込んでいます（${fontRequests.length}件）`);
+    await deviceContext.close();
+    log('書体: ヒラギノ丸ゴがある端末では Zen Maru Gothic を読み込まない ✔');
+  }
 
   // ---- 1回目: タップで進める ----
   check(!(await page.getByRole('button', { name: '試しの場面', exact: true }).count()), '題名の画面に「試しの場面」が残っています');

@@ -1,11 +1,10 @@
 /**
  * 物語の場面の画面写真を撮る（初見の検査のため。手順は docs/STORY_REVIEW.md）。
  *
- *   npm run story-shots -- --out=フォルダ [--speed=3] [--scenes=0,1,2] [--from=4] [--puppet=current] [--font=zenMaruGothic] [--scale=2]
+ *   npm run story-shots -- --out=フォルダ [--speed=3] [--scenes=0,1,2] [--from=4] [--puppet=current] [--scale=2]
  *
  * --puppet=current で、設定の「人形」を「今の人形」にして撮る（KayKit の人形の試し。--from と一緒に使う。省くと KayKit）。
- * --scale=2 で、画素の密度 2 で撮る（書体の見比べのような、人が細部を見る写真のため。省くと 1）。
- * --font=zenMaruGothic で、設定の「書体」をその書体にして撮る（id は src/save/saveStore.ts の STORY_FONTS。--from と一緒に使う。省くと初めの書体）。
+ * --scale=2 で、画素の密度 2 で撮る（文字の見え方のような、人が細部を見る写真のため。省くと 1）。
  * --from=4 で、確認用の機能の「場面を選ぶ」から、その脚本の場面の始めから動かし、--scenes の最後の場面を過ぎたら止める（1場面だけを見る時）。
  *
  * 序章を題名の画面から最後まで、スマホ縦向き（iPhone 13 の大きさ、画素の密度 1）で動かし、
@@ -255,7 +254,6 @@ async function main() {
     await press(text.settings.open);
     await press(text.settings.checkOff);
     if (args.puppet) await press(text.settings.choiceLabel(text.settings.puppetKind, text.settings.puppetKinds[args.puppet]));
-    if (args.font) await press(text.settings.choiceLabel(text.settings.font, text.settings.fonts[args.font]));
     await press(text.settings.close);
     await press(text.title.story);
     await until(() => window.__tactics.screen() === 'story-menu');

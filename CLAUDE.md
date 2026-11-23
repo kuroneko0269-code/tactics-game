@@ -202,8 +202,9 @@ npm run balance      # バランス確認: 画面を使わず AI 同士を戦わ
   台本の新しい指示（光・節・音・章題・持つ・離す・姿勢）は `src/core/script.ts`・`dialogue.ts`、戦場の定義の `cast`・`looks`・`afterVictory`・`tutorial` は `src/core/sortie.ts`。
   物の形は `src/data/story/models.ts`、人物の見た目は `src/data/story/looks.ts`、会話用のマップは `src/data/story/stages.ts`（文字の行は `mapRows.ts`）、旋律と効果音の名前は `src/data/sounds.ts`、章のために決めた部隊は `src/data/story/parties.ts`。
   音の合成は `src/ui/sound.ts`、手ほどきは `src/ui/tutorial.ts`、設定の欄と音の印は `src/ui/settingsSheet.ts`。
-  設定（音量・消音・見た手ほどき・書体・文字の大きさ・人形）はセーブデータとは別に `src/save/saveStore.ts` の `createSettingsStore` で保存する（「はじめから」でも消さない）。
-  書体と文字の大きさを画面に当てるのは `src/ui/storyLook.ts`（選ばれている書体だけを読み込む）。
+  設定（音量・消音・見た手ほどき・文字の大きさ・人形）はセーブデータとは別に `src/save/saveStore.ts` の `createSettingsStore` で保存する（「はじめから」でも消さない）。
+  書体はゲーム全体で1つ（発注者が決定）: ヒラギノ丸ゴ（Hiragino Maru Gothic ProN → Pro。同梱せず端末の書体）、無い端末では Zen Maru Gothic（同梱）。指定は `src/ui/style.css` の `--kr-font`。
+  書体の用意（ヒラギノ丸ゴが無い端末でだけ Zen Maru Gothic を読み込む）と文字の大きさを画面に当てるのは `src/ui/storyLook.ts`。設定に書体の選び肢は置かない。
 - 序章（ゲーム脚本の PR）: 台本は `src/data/story/scripts/prologue.ts`（ゲーム脚本の表の1行ずつを `@脚本 場面-行` の印のついた指示の組として書く。
   対応はテスト `src/data/story/gameScript.test.ts` で確かめる）、章と場面は `src/data/story/books.ts`（脚本の10場面。堰と丘は戦闘の前と戦闘に分けて 12 の場面）、
   見込みの時間は `src/core/scriptTiming.ts`（数値は `src/data/story/scriptTiming.ts`。`npm run script-rules` で場面ごとに出す）、2つの戦闘は `src/data/battles/prologue/`、

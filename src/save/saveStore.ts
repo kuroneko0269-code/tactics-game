@@ -142,20 +142,12 @@ export interface GameSettings {
   readonly skipSeenTutorials: boolean;
   readonly seenTutorials: readonly string[];
   readonly checkTools: boolean;
-  /** 物語の画面の書体（見た目の見本の2回目。発注者が1つに決めた後で、残りを外す） */
-  readonly storyFont: StoryFont;
   /** 物語の画面の文字の大きさ（中が標準。大は見本の1回目までの大きさ） */
   readonly textSize: TextSize;
   /** 人形（KayKit の人形の試し: KayKit・今の人形。確認用の機能が入の時だけ、設定の欄に出す。KayKit は序章の場面4だけに効く） */
   readonly puppetKind: PuppetKind;
 }
 
-/**
- * hiraginoMincho・hiraginoMaru は同梱せず、端末に入っている書体を使う（iPhone・iPad・Mac。無い端末では、明朝は Zen Old Mincho、
- * 丸ゴは Zen Maru Gothic で出る）。zenMaruGothic は同梱の Zen Maru Gothic を、ヒラギノ丸ゴがある端末でも必ず使う
- */
-export const STORY_FONTS = ['zenOldMincho', 'shipporiAntique', 'shipporiMincho', 'hiraginoMincho', 'hiraginoMaru', 'zenMaruGothic'] as const;
-export type StoryFont = (typeof STORY_FONTS)[number];
 export const TEXT_SIZES = ['small', 'medium', 'large'] as const;
 export type TextSize = (typeof TEXT_SIZES)[number];
 export const PUPPET_KINDS = ['kaykit', 'current'] as const;
@@ -167,7 +159,6 @@ export const DEFAULT_SETTINGS: GameSettings = {
   skipSeenTutorials: true,
   seenTutorials: [],
   checkTools: false,
-  storyFont: 'zenOldMincho',
   textSize: 'medium',
   puppetKind: 'kaykit',
 };
@@ -194,7 +185,7 @@ export function normalizeSettings(raw: unknown): GameSettings {
     skipSeenTutorials: typeof r.skipSeenTutorials === 'boolean' ? r.skipSeenTutorials : DEFAULT_SETTINGS.skipSeenTutorials,
     seenTutorials: Array.isArray(r.seenTutorials) ? r.seenTutorials.filter((x): x is string => typeof x === 'string') : [],
     checkTools: r.checkTools === true,
-    storyFont: oneOf(STORY_FONTS, r.storyFont, DEFAULT_SETTINGS.storyFont),
+    // 前の版の「書体」（storyFont）は、ヒラギノ丸ゴ（無い端末は Zen Maru Gothic）の1つに決めて外した。残っていても読まない
     textSize: oneOf(TEXT_SIZES, r.textSize, DEFAULT_SETTINGS.textSize),
     // 前の版の「人形の描き方」（puppetStyle）は外した。残っていても読まない
     puppetKind: oneOf(PUPPET_KINDS, r.puppetKind, DEFAULT_SETTINGS.puppetKind),
