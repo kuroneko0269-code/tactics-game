@@ -106,6 +106,8 @@ export interface KayKitLook {
   readonly headWidth?: number;
   /** 腕と脚の太さの倍率（1 がそのまま。骨の軸のまわりで細くする） */
   readonly limbs?: number;
+  /** KayKit の体で持つ物（省くと見た目の items。今の人形は武器を weapon で持つので、KayKit の体だけ武器を持ち物で持たせる） */
+  readonly items?: readonly { readonly model: string; readonly slot: LookItemSlot }[];
   /** 胴の太さの倍率（1 がそのまま。腰・背骨・胸に付く点を、体の縦の軸のまわりで細くする。胴に付いた外套なども一緒に細くなる） */
   readonly torso?: number;
   /** 肌の色 */
@@ -298,6 +300,21 @@ const TOUMA_KAYKIT: KayKitLook = {
   emblem: 'chest',
 };
 
+/**
+ * 隊の4人の服（2026-11-23 人形の工房 その2 で決定。案 B「印と濃紺」）: 服は職業らしい物にし、色の濃紺と左胸の門の輪の印（塔の白）だけをトウマとそろえる。
+ * 革・ズボン・靴は土の色
+ */
+const TEAM_UNIFORM = {
+  cloth: 0x34405a,
+  cloth2: 0x2a3449,
+  trim: 0x8a7a5a,
+  leather: 0x5e4430,
+  pants: 0x3e342c,
+  boots: 0x3a2a20,
+  accentB: 0xe2ded2,
+  emblem: 'chest',
+} as const;
+
 export const LOOKS: Readonly<Record<string, LookDefinition>> = {
   // ---- 隊（操作する仲間） ----
   /** トウマ: 二十歳前後、中背の細身、黒の短髪、時守の濃紺の外套。革の肩当てと手袋、長靴、腰の剣。下ろした頭巾。差し色は襟の鈍い青緑 */
@@ -330,11 +347,58 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
     pauldrons: IRON,
     gloves: LEATHER,
     items: [{ model: 'measuringRod', slot: 'back' }],
+    kaykit: {
+      base: 'barbarian',
+      head: 'knight',
+      // 大柄（体だけ背 1.1・肩幅 1.15。頭は少し小さく、胴と腕・脚は細く）
+      height: 1.1,
+      width: 1.15,
+      bodyOnly: true,
+      headScale: 0.92,
+      torso: 0.8,
+      limbs: 0.8,
+      skin: 0xb8967e,
+      ...TEAM_UNIFORM,
+      hair: { kit: 'knight', color: 0x4a3222, shape: { length: 0.8 } },
+      pauldrons: 'iron',
+      items: [
+        { model: 'sword', slot: 'hand' },
+        { model: 'measuringRod', slot: 'back' },
+      ],
+    },
   },
   /** キリ: 細身、後ろで束ねた髪、深い緑。弓と短いマント */
-  kiri: { body: 0x3a5440, accent: 0x7a8a5a, hair: 0x2a2018, hairStyle: 'tied', width: 0.9, weapon: 'bow', cloak: 0x4a4a38, cloakLength: 'short', gloves: LEATHER },
+  kiri: { body: 0x3a5440, accent: 0x7a8a5a, hair: 0x2a2018, hairStyle: 'tied', width: 0.9, weapon: 'bow', cloak: 0x4a4a38, cloakLength: 'short', gloves: LEATHER,
+    kaykit: {
+      base: 'rogue',
+      head: 'rogue',
+      width: 0.88,
+      skin: 0xbf9f86,
+      ...TEAM_UNIFORM,
+      hair: { kit: 'rogue', color: 0x2a2018, shape: { length: 0.7 }, extras: ['ponytail'] },
+      mantle: 0x2c3650,
+      items: [
+        { model: 'bow', slot: 'handL' },
+        { model: 'quiver', slot: 'back' },
+      ],
+    },
+  },
   /** フェン: 小柄、白髪まじり、黒。杖と頭巾つきの長衣 */
-  fen: { body: 0x2e2c30, accent: 0x6a5a7a, hair: 0x9a9890, hairStyle: 'short', scale: 0.9, weapon: 'staff', outfit: 'robe', mantle: 0x3a3634, hood: 'down' },
+  fen: { body: 0x2e2c30, accent: 0x6a5a7a, hair: 0x9a9890, hairStyle: 'short', scale: 0.9, weapon: 'staff', outfit: 'robe', mantle: 0x3a3634, hood: 'down',
+    kaykit: {
+      base: 'mage',
+      head: 'knight',
+      height: 0.9,
+      skin: 0xbf9f86,
+      ...TEAM_UNIFORM,
+      trim: 0x4a4650,
+      hair: { kit: 'knight', color: 0x8e8a84 },
+      headwear: { kind: 'hat', color: 0x2a3247 },
+      // 差し色は帽子の帯の紫
+      accent: 0x6a5a7a,
+      items: [{ model: 'staff', slot: 'hand' }],
+    },
+  },
   /** ノノ: ふくよか、栗色の巻き髪、生成り。杖と薬箱 */
   nono: {
     body: LINEN,
@@ -346,6 +410,38 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
     outfit: 'robe',
     mantle: WOOL,
     items: [{ model: 'medicineBox', slot: 'waist' }],
+    kaykit: {
+      base: 'mage',
+      head: 'mage',
+      // ふくよか（体だけ肩幅 1.2。頭は少し小さく、胴と腕・脚は控えめに細く）
+      width: 1.2,
+      bodyOnly: true,
+      headScale: 0.95,
+      torso: 0.88,
+      limbs: 0.85,
+      skin: 0xc8a890,
+      ...TEAM_UNIFORM,
+      // 栗色の量の多い髪（巻き髪は、波打つ段差を入れたが細い束を重ねないので、量の多い髪に見える）
+      hair: {
+        kit: 'mage',
+        color: 0x6a4228,
+        shape: {
+          length: 0.62,
+          volume: 1.12,
+          subdivide: 1,
+          steps: [
+            { az: 180, el: -10, offset: 0.1, step: 0.05, wave: [14, 7] },
+            { az: 0, el: 20, offset: 0.25, step: 0.03, wave: [10, 6] },
+          ],
+        },
+      },
+      face: { brows: 'thin' },
+      apron: { color: 0xc6b898, bib: true },
+      items: [
+        { model: 'staffRing', slot: 'hand' },
+        { model: 'medicineBox', slot: 'waist' },
+      ],
+    },
   },
   // ---- 操作しない人物 ----
   /** ユナ: 十六歳、小柄、黒髪の二つ結びのおさげ、油の染みた生成りの作業着。袖をまくり、革の前掛けと腰の工具。差し色は結い紐の赤茶 */
@@ -480,6 +576,9 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
       pants: 0x4a3530,
       boots: 0x3e2e26,
       hair: { kit: 'mage', color: 0x3a2a22, extras: ['bun'] },
+      // 体つき（2026-11-23 人形の工房 その2 で決定）: トウマ・ユナと同じく、胴と腕・脚を細く
+      torso: 0.8,
+      limbs: 0.8,
       face: { brows: 'thin' },
       mantle: 0x6a604e,
       apron: { color: 0xbdb091, bib: true },
@@ -514,6 +613,9 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
       pants: 0x4a3e30,
       boots: LEATHER_DARK,
       hair: { kit: 'knight', color: 0x5a4430 },
+      // 体つき（2026-11-23 人形の工房 その2 で決定）: 胴と腕・脚を細く（がっしりした体の土台なので、細くしても父らしい幅は残る）
+      torso: 0.8,
+      limbs: 0.8,
       accent: 0x8a7040,
     },
   },

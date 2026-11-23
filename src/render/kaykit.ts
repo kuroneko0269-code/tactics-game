@@ -1202,7 +1202,7 @@ export function createKayKitPuppet(look: LookDefinition): Puppet {
     back: anchorOn(boneByName('chest'), 0.05, 0.2, -0.42),
   };
   const defaults: Partial<Record<LookItemSlot, string>> = {};
-  for (const item of look.items ?? []) defaults[item.slot] = item.model;
+  for (const item of look.kaykit?.items ?? look.items ?? []) defaults[item.slot] = item.model;
   let itemMaterials: THREE.MeshLambertMaterial[] = [];
   let opacity = 1;
   /** 手に物を持っているか（持っている手は、前へ少し上げて体の横へ出す。素材の立つ動きは手が体の前に寄り、持ち物が隠れるため） */

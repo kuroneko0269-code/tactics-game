@@ -462,3 +462,9 @@ VARIANTS.nono.team = [
 ];
 VARIANTS.kiri.team = [{ ...teamB('kiri', {}), name: '今' }, { ...teamB('kiri', SLIM), name: '細く' }];
 VARIANTS.fen.team = [{ ...teamB('fen', {}), name: '今' }, { ...teamB('fen', SLIM), name: '細く' }];
+
+// ---- 区切り1（隊の4人と、父と母の体つき）が決まった後 ----
+DECIDED.push('gord', 'kiri', 'fen', 'nono');
+VARIANTS.father = { slim: [{ name: '前', look: { torso: 1, limbs: 1 } }, { name: '決定', look: {} }] };
+VARIANTS.mother = { slim: [{ name: '前', look: { torso: 1, limbs: 1 } }, { name: '決定', look: {} }] };
+for (const id of ['gord', 'kiri', 'fen', 'nono', 'touma', 'yuna']) VARIANTS[id].final2 = [{ name: '決定', look: {} }];
