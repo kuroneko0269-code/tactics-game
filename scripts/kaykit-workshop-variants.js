@@ -503,3 +503,12 @@ VARIANTS.teo = {
     { name: 'C 下ろした前髪・膝の外套', note: '丸く下ろした前髪・膝までの濃紺の外套と白い襟・星図の巻物', def: { items: [{ model: 'scroll', slot: 'hand' }] }, look: { ...TEO_BODY, hair: { kit: 'knight', color: 0x7a5e44, shape: { volume: 1.1, fringe: 1.3 } }, cloak: { color: 0x2f3a55, length: 'knee', front: true }, accent: 0xe2ded2 } },
   ],
 };
+// 往復7 の直し: テオ C の巻物が顔の前に来たので腰に下げる。イェルマの守り袋は外す（テオの守り袋と同じ物が並ぶと、序章で伏せている事柄の手がかりになりうるため）。説明を短く
+VARIANTS.teo[7][2] = { ...VARIANTS.teo[7][2], note: '丸く下ろした前髪・膝までの濃紺の外套と白い襟・腰に星図', def: { items: [{ model: 'scroll', slot: 'waist' }] } };
+for (const v of VARIANTS.yelma[7]) v.def = { items: [] };
+VARIANTS.yelma[7][0].note = '暗い銀の長い髪・白の長衣・灰の肩掛け';
+VARIANTS.yelma[7][1].note = '白の長衣・足もとまでの灰の外套';
+VARIANTS.yelma[7][2].note = '灰の外套・下ろした頭巾・ゆるくまとめた髪';
+VARIANTS.hald[7][0].note = '膝までの濃紺の外套・銀の縁と留め具';
+VARIANTS.hald[7][1].note = '長衣の体・灰の肩掛け・銀の留め具';
+VARIANTS.hald[7][2].note = '鉄の肩当て・背に丸い盾・銀の留め具';
