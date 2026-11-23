@@ -102,6 +102,12 @@ export interface KayKitLook {
   readonly width?: number;
   /** 背丈と肩幅の倍率を体だけに掛ける（頭はどの人物も同じ大きさにし、headScale だけで変える。大柄・小柄でも頭が大きく・小さく見えないように） */
   readonly bodyOnly?: boolean;
+  /** 頭の横幅と前後の倍率（1 がふつう。小さくすると顔が細く見える） */
+  readonly headWidth?: number;
+  /** 腕と脚の太さの倍率（1 がそのまま。骨の軸のまわりで細くする） */
+  readonly limbs?: number;
+  /** 胴の太さの倍率（1 がそのまま。腰・背骨・胸に付く点を、体の縦の軸のまわりで細くする。胴に付いた外套なども一緒に細くなる） */
+  readonly torso?: number;
   /** 肌の色 */
   readonly skin: number;
   /** 服の主な色 */

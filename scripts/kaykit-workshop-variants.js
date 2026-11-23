@@ -408,3 +408,43 @@ VARIANTS.yuna.size = [
   { name: '今', look: {} },
   { name: '合わせた場合', note: '背 0.9 を体だけに・頭 0.9（フェンと同じ大きさ）', look: { bodyOnly: true, headScale: 0.9 } },
 ];
+
+// ---- 往復4（slim）: 合わせた方が太って見えた → 細く見せる3案（体を背だけ高く・肩幅を細く・頭の横幅を細く） ----
+VARIANTS.touma.slim = [
+  { name: '今', look: {} },
+  { name: 'A 背を高く', note: '体だけ背 1.08・頭の横幅 0.92', look: { bodyOnly: true, height: 1.08, width: 0.9, headWidth: 0.92 } },
+  { name: 'B 細身', note: '肩幅 0.82・頭の横幅 0.9', look: { bodyOnly: true, width: 0.82, headWidth: 0.9 } },
+  { name: 'C 背を高く細身', note: '背 1.08・肩幅 0.84・頭の横幅 0.9', look: { bodyOnly: true, height: 1.08, width: 0.84, headWidth: 0.9 } },
+];
+VARIANTS.yuna.slim = [
+  { name: '今', look: {} },
+  { name: 'A 背を高く', note: '体だけ背 0.96・頭 0.88・頭の横幅 0.92', look: { bodyOnly: true, height: 0.96, headScale: 0.88, headWidth: 0.92 } },
+  { name: 'B 細身', note: '肩幅 0.86・頭 0.86・頭の横幅 0.9', look: { bodyOnly: true, width: 0.86, headScale: 0.86, headWidth: 0.9 } },
+  { name: 'C 背を高く細身', note: '背 0.96・肩幅 0.86・頭 0.88・頭の横幅 0.9', look: { bodyOnly: true, height: 0.96, width: 0.86, headScale: 0.88, headWidth: 0.9 } },
+];
+// 往復4 の作り直し: 肩幅や背の倍率だけでは差が小さかったので、腕と脚を骨の軸のまわりで細くする（limbs）
+VARIANTS.touma.slim = [
+  { name: '今', look: {} },
+  { name: 'A 腕と脚を細く', note: '腕と脚 0.75', look: { limbs: 0.75 } },
+  { name: 'B 細く・背を高く', note: '腕と脚 0.75・体だけ背 1.08・頭の横幅 0.92', look: { limbs: 0.75, bodyOnly: true, height: 1.08, width: 0.9, headWidth: 0.92 } },
+  { name: 'C いちばん細く', note: '腕と脚 0.68・背 1.08・肩幅 0.84・頭の横幅 0.9', look: { limbs: 0.68, bodyOnly: true, height: 1.08, width: 0.84, headWidth: 0.9 } },
+];
+VARIANTS.yuna.slim = [
+  { name: '今', look: {} },
+  { name: 'A 腕と脚を細く', note: '腕と脚 0.75', look: { limbs: 0.75 } },
+  { name: 'B 細く・背を高く', note: '腕と脚 0.75・体だけ背 0.96・頭 0.88・頭の横幅 0.92', look: { limbs: 0.75, bodyOnly: true, height: 0.96, headScale: 0.88, headWidth: 0.92 } },
+  { name: 'C いちばん細く', note: '腕と脚 0.68・背 0.96・肩幅 0.86・頭 0.88・頭の横幅 0.9', look: { limbs: 0.68, bodyOnly: true, height: 0.96, width: 0.86, headScale: 0.88, headWidth: 0.9 } },
+];
+// 往復4 の作り直し2: 太く見える主な所は胴の丸さだったので、胴を細くする（torso）を加える
+VARIANTS.touma.slim = [
+  { name: '今', look: {} },
+  { name: 'A 胴を細く', note: '胴 0.8・腕と脚 0.8', look: { torso: 0.8, limbs: 0.8 } },
+  { name: 'B 胴を細く・背を高く', note: '胴 0.8・腕と脚 0.8・体だけ背 1.08・頭の横幅 0.92', look: { torso: 0.8, limbs: 0.8, bodyOnly: true, height: 1.08, width: 0.9, headWidth: 0.92 } },
+  { name: 'C いちばん細く', note: '胴 0.72・腕と脚 0.72・背 1.1・頭の横幅 0.9', look: { torso: 0.72, limbs: 0.72, bodyOnly: true, height: 1.1, width: 0.9, headWidth: 0.9 } },
+];
+VARIANTS.yuna.slim = [
+  { name: '今', look: {} },
+  { name: 'A 胴を細く', note: '胴 0.8・腕と脚 0.8', look: { torso: 0.8, limbs: 0.8 } },
+  { name: 'B 胴を細く・背を高く', note: '胴 0.8・腕と脚 0.8・体だけ背 0.96・頭 0.88・頭の横幅 0.92', look: { torso: 0.8, limbs: 0.8, bodyOnly: true, height: 0.96, headScale: 0.88, headWidth: 0.92 } },
+  { name: 'C いちばん細く', note: '胴 0.72・腕と脚 0.72・背 0.98・頭 0.88・頭の横幅 0.9', look: { torso: 0.72, limbs: 0.72, bodyOnly: true, height: 0.98, headScale: 0.88, headWidth: 0.9 } },
+];
