@@ -40,7 +40,7 @@
       const list = lineup
         ? [
             ...DECIDED.map((id) => ({ id, name: names[id], sub: '決定', v: {} })),
-            ...who.split(',').flatMap((id) => VARIANTS[id][round].map((v) => ({ id, name: names[id], sub: v.name.split(' ')[0], v }))),
+            ...who.split(',').filter(Boolean).flatMap((id) => VARIANTS[id][round].map((v) => ({ id, name: names[id], sub: v.name.split(' ')[0], v }))),
           ]
         : VARIANTS[who][round];
       if (lineup) {

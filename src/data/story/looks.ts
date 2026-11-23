@@ -613,7 +613,9 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
       pants: 0x4a3e30,
       boots: LEATHER_DARK,
       hair: { kit: 'knight', color: 0x5a4430 },
-      // 体つき（2026-11-23 人形の工房 その2 で決定）: 胴と腕・脚を細く（がっしりした体の土台なので、細くしても父らしい幅は残る）
+      // 体つき（2026-11-23 人形の工房 その2 で決定）: 胴と腕・脚を細く（がっしりした体の土台なので、細くしても父らしい幅は残る）。
+      // 背と肩幅の倍率は体だけに掛け、頭を少しだけ小さく（およそ 0.95 倍）
+      bodyOnly: true,
       torso: 0.8,
       limbs: 0.8,
       accent: 0x8a7040,

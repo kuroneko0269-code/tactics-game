@@ -99,7 +99,7 @@ npm run autoplay     # 自動プレイ（全体。手元で実行）: 実際の�
 npm run script-rules # 台本の決まり（台詞の字数・続けて話す枠・字幕の行数）に合わない所の一覧を出す
 npm run story-shots -- --out=フォルダ # （-- --from=4 --scenes=4 で、場面を選ぶから場面4だけ。-- --puppet=current で今の人形、-- --kkshade=plain で KayKit の人形を素材そのままの陰影で）序章を動かして、台本の1行ごとにスマホ縦向きの画面写真を撮り、場面ごとの一覧と観客への依頼文を作る（初見の検査。docs/STORY_REVIEW.md。約7分）
 npm run script-export # 序章の「画面に出るものだけ」（札・字幕・台詞と肩書き・物の文字・名札・操作の案内・カットの秒数・場面の光）を場面ごとに書き出す（-- --all で動き・カメラ・音も、-- --out=ファイル でファイルに）
-node scripts/kaykit-workshop.mjs --out=フォルダ --round=番号 # 人形の工房: KayKit の人形の髪や衣装の案（scripts/kaykit-workshop-variants.js）を、A・B・C を横に並べた写真と、場面4のスマホの大きさの写真に撮る（約10秒。docs/KAYKIT.md の12章）
+node scripts/kaykit-workshop.mjs --out=フォルダ --round=番号 # 人形の工房: KayKit の人形の髪や衣装の案（scripts/kaykit-workshop-variants.js）を、A・B・C を横に並べた写真と、場面4のスマホの大きさの写真に撮る（約10秒。docs/KAYKIT.md の12章）。`--who=gord,kiri --trio` で、正面・斜め前・後ろの全身と、決まった人物と並べたスマホの大きさの写真（白黒の版つき）（13章）
 npm run autoplay:ci  # 自動プレイ（短くした版。CI で実行）: 1戦は操作を一通り確かめたところで照合して打ち切る（約3〜4分）
 npm run render-perf  # 描画の重さ: 序章の場面4の夕食と夜の画で、1こまの描く回数・三角形・処理の時間・1秒あたりのこまの数を数える（-- --root=別の版の写し で、前の版と同じ条件で比べる。-- --puppet=current で今の人形。約1分）
 npm run balance      # バランス確認: 画面を使わず AI 同士を戦わせ、敵の段階ごとの勝率、ジョブごとのレベル 50 までの戦闘数・成長率の違い、ダンジョンの各戦闘の勝率と時間、装備の段階ごとの勝率・お金の速さ・買いそろえるまでの戦闘数を集計する（約15分。-- --dungeon-only でダンジョンだけ、-- --equipment-only で装備だけ、-- --jobs でジョブごとの勝率の比較だけ（1つのジョブだけを入れ替えた部隊どうしを戦わせる）、-- --unlocks で新しいジョブの解放までの戦闘数だけ、-- --prologue で序章の2つの戦闘の勝率と見込みの時間だけ）
