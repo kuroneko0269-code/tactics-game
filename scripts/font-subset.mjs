@@ -29,10 +29,10 @@ function rangeUsed(range, chars) {
 }
 
 /**
- * 書体（Shippori Mincho。npm の @fontsource から同梱。外部へは読みに行かない）の読み込みを軽くする:
+ * 書体（Zen Maru Gothic。ヒラギノ丸ゴが無い端末でだけ読み込む。npm の @fontsource から同梱。外部へは読みに行かない）の読み込みを軽くする:
  * - 文字の範囲ごとに分かれた書体のうち、src に出てくる文字を含む範囲だけを残す（使わない範囲は公開ファイルにも入れない）
  * - woff2 だけを使う（古い形式の woff の予備を外す）
- * ブラウザは、画面に出す文字を含む範囲の woff2 だけを読み込む（unicode-range）。範囲にない文字は端末の明朝体で出る
+ * ブラウザは、画面に出す文字を含む範囲の woff2 だけを読み込む（unicode-range）。範囲にない文字は端末のゴシック体で出る
  */
 export function fontSubset() {
   let chars;

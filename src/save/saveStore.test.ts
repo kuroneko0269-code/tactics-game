@@ -170,7 +170,6 @@ describe('端末ごとの設定（序章に足りない仕組み）', () => {
       skipSeenTutorials: false,
       seenTutorials: ['a'],
       checkTools: true,
-      storyFont: 'shipporiAntique',
       textSize: 'large',
       puppetKind: 'current',
     } as const;
@@ -178,17 +177,40 @@ describe('端末ごとの設定（序章に足りない仕組み）', () => {
     expect(store.load()).toEqual(saved);
     expect(normalizeSettings({ checkTools: 'yes' }).checkTools).toBe(false);
     expect(normalizeSettings({ volume: 250, muted: 'x', seenTutorials: [1, 'b'] })).toEqual({ ...DEFAULT_SETTINGS, volume: 100, seenTutorials: ['b'] });
-    // 書体・文字の大きさ（見た目の見本の2回目）・人形（KayKit の人形の試し）。前の版の設定（項目がない）は初期値。知らない値も初期値
+    // 文字の大きさ（見た目の見本の2回目）・人形（KayKit の人形の試し）。前の版の設定（項目がない）は初期値。知らない値も初期値
     expect(normalizeSettings({ volume: 40 })).toEqual({ ...DEFAULT_SETTINGS, volume: 40 });
-    expect(DEFAULT_SETTINGS).toMatchObject({ storyFont: 'zenOldMincho', textSize: 'medium', puppetKind: 'kaykit' });
-    expect(normalizeSettings({ storyFont: 'gothic', textSize: 'huge', puppetKind: 3 })).toEqual(DEFAULT_SETTINGS);
+    expect(DEFAULT_SETTINGS).toMatchObject({ textSize: 'medium', puppetKind: 'kaykit' });
+    expect(normalizeSettings({ textSize: 'huge', puppetKind: 3 })).toEqual(DEFAULT_SETTINGS);
     // 外した「人形の描き方」（ドット風）が残った設定も、読み込める
     expect(normalizeSettings({ puppetStyle: 'pixel' })).toEqual(DEFAULT_SETTINGS);
-    // 書体のヒラギノ明朝も読める。外した「ユナの髪」（案 A に決めた）が残った設定も、読み込める
-    expect(normalizeSettings({ yunaHair: 'b', storyFont: 'hiraginoMincho' })).toEqual({ ...DEFAULT_SETTINGS, storyFont: 'hiraginoMincho' });
-    // 丸ゴシックの2つ（ヒラギノ丸ゴ・Zen Maru Gothic）も読める
-    expect(normalizeSettings({ storyFont: 'hiraginoMaru' }).storyFont).toBe('hiraginoMaru');
-    expect(normalizeSettings({ storyFont: 'zenMaruGothic' }).storyFont).toBe('zenMaruGothic');
+    // 外した「ユナの髪」（案 A に決めた）が残った設定も、読み込める
+    expect(normalizeSettings({ yunaHair: 'b' })).toEqual(DEFAULT_SETTINGS);
+  });
+
+  it('外した「書体」の設定が残っていても読める（書体はヒラギノ丸ゴ（無い端末は Zen Maru Gothic）の1つに決めた）', async () => {
+    const { createSettingsStore, normalizeSettings, DEFAULT_SETTINGS } = await import('./saveStore');
+    // 前の版で選べた6つの書体と、知らない値。どれも項目ごと捨て、ほかの設定はそのまま
+    for (const storyFont of ['zenOldMincho', 'shipporiAntique', 'shipporiMincho', 'hiraginoMincho', 'hiraginoMaru', 'zenMaruGothic', 'gothic', 3]) {
+      const old = normalizeSettings({ storyFont, textSize: 'small', volume: 50 });
+      expect(old).toEqual({ ...DEFAULT_SETTINGS, textSize: 'small', volume: 50 });
+      expect(old).not.toHaveProperty('storyFont');
+    }
+    // 前の版の保存の文字列そのままでも読め、保存し直すと書体の項目が消える
+    let text: string | null = JSON.stringify({
+      volume: 30,
+      muted: true,
+      skipSeenTutorials: false,
+      seenTutorials: ['a'],
+      checkTools: true,
+      storyFont: 'shipporiAntique',
+      textSize: 'large',
+      puppetKind: 'current',
+    });
+    const store = createSettingsStore({ read: () => text, write: (t) => (text = t), remove: () => (text = null) });
+    const loaded = store.load();
+    expect(loaded).toEqual({ volume: 30, muted: true, skipSeenTutorials: false, seenTutorials: ['a'], checkTools: true, textSize: 'large', puppetKind: 'current' });
+    store.save(loaded);
+    expect(text).not.toContain('storyFont');
     text = '{壊れた';
     expect(store.load()).toEqual(DEFAULT_SETTINGS);
   });

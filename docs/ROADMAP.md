@@ -462,3 +462,14 @@
 - 並べた写真: [images/fonts/](images/fonts/)（場面4の台詞・名前・札・語りを、Zen Old Mincho と Zen Maru Gothic で並べた）
 
 **完了の目安**: 発注者が iPhone でヒラギノ丸ゴと Zen Maru Gothic を見比べて、どちらにするかを決められる。
+
+### 書体を1つに確定（ヒラギノ丸ゴ、無い端末は Zen Maru Gothic）
+
+発注者が iPhone で見比べて決めた。文字の大きさは「中」が初めの設定のまま。
+
+- ゲーム全体（題名・設定・物語・拠点・戦闘）の書体を1つにした: Hiragino Maru Gothic ProN → Pro → Zen Maru Gothic。Zen Maru Gothic はヒラギノ丸ゴが無い端末でだけ読み込む
+- 設定の「書体」の欄と、端末に書体があるかの表示を外した。使わなくなった書体（Zen Old Mincho・Shippori Antique・Shippori Mincho・ヒラギノ明朝）の部品と指定を外した
+- 前の版の設定に書体が残っていても、エラーにならず新しい書体で出る（テスト付き）
+- 丸ゴシックに合わせて、字の太さ・字の間・行間を直した（GAME_DESIGN.md の「書体」の表）。「暦盤」の色と線は変えていない
+
+**状態**: 完了。ヒラギノ丸ゴでの実際の見え方は、発注者の iPhone で確かめる。

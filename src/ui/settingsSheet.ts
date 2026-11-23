@@ -1,11 +1,10 @@
-import { PUPPET_KINDS, STORY_FONTS, TEXT_SIZES, type GameSettings } from '../save/saveStore';
-import { deviceHasFont } from './storyLook';
+import { PUPPET_KINDS, TEXT_SIZES, type GameSettings } from '../save/saveStore';
 import { el, screenButton, showSheet } from './dom';
 import { TEXT } from './text';
 
 /**
  * 設定の欄（序章に足りない仕組み）: 音量（10 ずつ）・消音・見た手ほどきを出さないか・確認用の機能。下からせり上がる欄に出す。
- * 見た目の見本の2回目で、書体・文字の大きさ（いつでも）を足した。KayKit の人形の試しで、人形（確認用の機能が入の時だけ）を足した（ドット風の描き方は外した）。
+ * 見た目の見本の2回目で、文字の大きさ（いつでも）を足した（書体の選び肢は、1つに決めて外した）。KayKit の人形の試しで、人形（確認用の機能が入の時だけ）を足した（ドット風の描き方は外した）。
  * 変えるたびに onChange を呼ぶ（保存と、音の仕組みへの反映は呼ぶ側）
  */
 export function showSettingsSheet(root: HTMLElement, current: () => GameSettings, onChange: (next: GameSettings) => void, onClose?: () => void): void {
@@ -51,7 +50,6 @@ export function showSettingsSheet(root: HTMLElement, current: () => GameSettings
       value: T,
       pick: (v: T) => void,
       key: string,
-      notes: Readonly<Partial<Record<string, string>>> = {},
     ) => {
       const row = el('div', `settings-row settings-choices settings-${key}`);
       row.append(el('span', 'settings-label', group));
@@ -63,22 +61,10 @@ export function showSettingsSheet(root: HTMLElement, current: () => GameSettings
         buttons.append(b);
       }
       row.append(buttons);
-      // 選び肢に添える短い説明は、ボタンの列の下に、欄の幅いっぱいに出す（狭い名前の列に詰め込まない）
-      const noteLines = list.flatMap((v) => (notes[v] ? [el('span', 'settings-label-note', TEXT.settings.choiceNote(labels[v], notes[v]))] : []));
-      if (noteLines.length > 0) {
-        const box = el('div', 'settings-notes');
-        box.append(...noteLines);
-        row.append(box);
-      }
       return row;
     };
     const look = el('div', 'settings-look');
     look.append(
-      // ヒラギノ明朝・丸ゴ（同梱しない端末の書体）には、この端末にあるかを添える（文字の幅を測って調べる）
-      choices(TEXT.settings.font, STORY_FONTS, TEXT.settings.fonts, s.storyFont, (v) => set({ storyFont: v }), 'font', {
-        hiraginoMincho: deviceHasFont('hiraginoMincho') ? TEXT.settings.fontOnDevice : TEXT.settings.fontNotOnDevice.hiraginoMincho,
-        hiraginoMaru: deviceHasFont('hiraginoMaru') ? TEXT.settings.fontOnDevice : TEXT.settings.fontNotOnDevice.hiraginoMaru,
-      }),
       choices(TEXT.settings.textSize, TEXT_SIZES, TEXT.settings.textSizes, s.textSize, (v) => set({ textSize: v }), 'text-size'),
     );
     body.append(
@@ -100,7 +86,7 @@ export function showSettingsSheet(root: HTMLElement, current: () => GameSettings
         el('p', 'screen-note', TEXT.settings.checkNote),
       ),
     );
-    // 人形（確認用の機能）。切り替えのボタンの後に置き、低い画面では切り替えと組にして並べる（style.css。書体の列が2段になった分の高さを空ける）
+    // 人形（確認用の機能）。切り替えのボタンの後に置き、低い画面では切り替えと組にして並べる（style.css）
     if (s.checkTools) body.append(choices(TEXT.settings.puppetKind, PUPPET_KINDS, TEXT.settings.puppetKinds, s.puppetKind, (v) => set({ puppetKind: v }), 'puppet'));
   };
   render();

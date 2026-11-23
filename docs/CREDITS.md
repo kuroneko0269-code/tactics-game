@@ -13,7 +13,7 @@
 | 使用条件 | SIL Open Font License 1.1（OFL。商用可・同梱して配布してよい・書体だけを売ってはいけない・改変した書体に元の名前を使わない）。部品の `LICENSE` に「Copyright 2021 The Zen Maru Gothic Authors … This Font Software is licensed under the SIL Open Font License, Version 1.1.」と全文が書かれていることを、取り込む前に読んで確かめた。書体そのものは改変していない（使う文字の範囲のファイルだけを公開ファイルに入れる） |
 | 取り込んだ日 | 2026-11-22 |
 | 取り込んだ物 | 太さ 500（台詞など）と 700（名前など）の2つ。src に出てくる文字を含む範囲だけ（`scripts/font-subset.mjs`） |
-| 使っている所 | 設定の書体「Zen Maru Gothic」と、「ヒラギノ丸ゴ」でヒラギノ丸ゴが無い端末の代わり（`src/ui/storyLook.ts`） |
+| 使っている所 | ゲーム全体の書体。ヒラギノ丸ゴ（端末の書体。同梱しない）が無い端末でだけ読み込む（`src/ui/storyLook.ts`。2026-11-23 に書体を1つに決め、ほかの書体（Zen Old Mincho・Shippori Antique・Shippori Mincho）は外した） |
 
 ## KayKit Character Pack : Adventurers 1.0
 

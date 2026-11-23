@@ -161,8 +161,8 @@ function main(): void {
   let settings: GameSettings = settingsStore.load();
   const sound = createSoundSystem();
   sound.setVolume(settings.volume, settings.muted);
-  // 物語の画面の書体と文字の大きさ（選ばれている書体だけを読み込む）
-  applyStoryLook(settings.storyFont, settings.textSize);
+  // 書体（ヒラギノ丸ゴが無い端末でだけ Zen Maru Gothic を読み込む）と、物語の画面の文字の大きさ
+  applyStoryLook(settings.textSize);
   /**
    * KayKit の人形（KayKit の人形の試し）の仕組みと素材。物語の場面4に入る時に、仕組みのファイルごと読み込む
    * （題名の画面の表示を遅くしないため。動きの仕組みは three.js の大きな部分なので、最初のファイルに入れない）
@@ -194,7 +194,7 @@ function main(): void {
     settings = next;
     settingsStore.save(next);
     sound.setVolume(next.volume, next.muted);
-    applyStoryLook(next.storyFont, next.textSize);
+    applyStoryLook(next.textSize);
     checkBadge.setEnabled(next.checkTools);
     refreshCheckWin();
   };

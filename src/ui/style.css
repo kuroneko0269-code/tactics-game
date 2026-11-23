@@ -1,6 +1,7 @@
 :root {
   color-scheme: dark;
-  font-family: system-ui, -apple-system, 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+  /* ゲーム全体の書体（1つに決めた。題名・設定・物語・拠点・戦闘のすべて） */
+  font-family: var(--kr-font);
   --panel: rgba(20, 28, 42, 0.82);
   --text: #f4f1e8;
   --accent: #f2c14e;
@@ -8,18 +9,22 @@
   --player-light: #6fb2ff;
   --enemy: #c8352e;
   --enemy-light: #ff7a6e;
-  /* 画面の体裁「暦盤」（物語の場面の枠・札・字幕）: 濃紺の地、真鍮色の細い線、明朝体 */
+  /* 画面の体裁「暦盤」（物語の場面の枠・札・字幕）: 濃紺の地、真鍮色の細い線 */
   --kr-ground: #0f1626;
   --kr-panel: #131b31;
   --kr-brass: #c9a45c;
   --kr-text: #ede6d3;
   --kr-sub: #c9bfa6;
   --kr-rule: #55607f;
-  /* 書体（設定で切り替える。初めは Zen Old Mincho。発注者が1つに決めた後で、残りを外す） */
-  --kr-mincho: 'Zen Old Mincho', 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif;
-  /* 文字の大きさ（設定の「中」。見た目の見本の2回目）。台詞 16px・行間 1.8、名前 17px、肩書き 11px、場所の札 13px、物の札 12px、黒地の字幕 17px */
+  /*
+   * 書体（発注者が決定）: ヒラギノ丸ゴ（同梱せず、端末に入っている書体を使う。iPhone・iPad・Mac）。
+   * 無い端末では Zen Maru Gothic（同梱。無い時だけ読み込む。src/ui/storyLook.ts）。太さは本文 500、名前や見出し 700
+   * （ヒラギノ丸ゴは太さが1つだけなので、700 の所は端末が太字を作って出す）
+   */
+  --kr-font: 'Hiragino Maru Gothic ProN', 'Hiragino Maru Gothic Pro', 'Zen Maru Gothic', sans-serif;
+  /* 文字の大きさ（設定の「中」。見た目の見本の2回目）。台詞 16px・行間 1.7（丸ゴシックに合わせて 1.8 から詰めた）、名前 17px、肩書き 11px、場所の札 13px、物の札 12px、黒地の字幕 17px */
   --kr-text-size: 16px;
-  --kr-line: 1.8;
+  --kr-line: 1.7;
   --kr-name-size: 17px;
   --kr-title-size: 11px;
   --kr-placard-size: 13px;
@@ -33,37 +38,10 @@
   --kr-face: 70px;
 }
 
-:root[data-story-font='shipporiAntique'] {
-  --kr-mincho: 'Shippori Antique', 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif;
-  /* 太さが1種だけの書体なので、太字を作り出さない（にじんだ太字にしない） */
-  font-synthesis: none;
-}
-
-:root[data-story-font='shipporiMincho'] {
-  --kr-mincho: 'Shippori Mincho', 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif;
-}
-
-/* ヒラギノ明朝: 同梱せず、端末に入っている書体を使う（iPhone・iPad・Mac）。無い端末では Zen Old Mincho で出る */
-:root[data-story-font='hiraginoMincho'] {
-  --kr-mincho: 'Hiragino Mincho ProN', 'Hiragino Mincho Pro', 'Zen Old Mincho', 'Yu Mincho', 'Noto Serif JP', serif;
-}
-
-/*
- * ヒラギノ丸ゴ: 同梱せず、端末に入っている書体を使う（iPhone・iPad・Mac）。無い端末では Zen Maru Gothic（同梱。無い時だけ読み込む）で出る。
- * Zen Maru Gothic: 同梱の書体を、ヒラギノ丸ゴがある端末でも必ず使う（ヒラギノを指定に入れない）
- */
-:root[data-story-font='hiraginoMaru'] {
-  --kr-mincho: 'Hiragino Maru Gothic ProN', 'Hiragino Maru Gothic Pro', 'Zen Maru Gothic', 'Noto Sans JP', sans-serif;
-}
-
-:root[data-story-font='zenMaruGothic'] {
-  --kr-mincho: 'Zen Maru Gothic', 'Noto Sans JP', sans-serif;
-}
-
 /* 文字の大きさ「小」（中の 1 割小さく） */
 :root[data-text-size='small'] {
   --kr-text-size: 14.5px;
-  --kr-line: 1.75;
+  --kr-line: 1.65;
   --kr-name-size: 15.5px;
   --kr-title-size: 10px;
   --kr-placard-size: 12px;
@@ -80,7 +58,7 @@
 /* 文字の大きさ「大」（見た目の見本の1回目までの大きさ） */
 :root[data-text-size='large'] {
   --kr-text-size: 20px;
-  --kr-line: 1.9;
+  --kr-line: 1.75;
   --kr-name-size: 20px;
   --kr-title-size: 12px;
   --kr-placard-size: 16px;
@@ -96,6 +74,19 @@
 
 * {
   box-sizing: border-box;
+}
+
+/* ボタンと入力の欄も、ゲーム全体の書体で（ブラウザの初めの書体にしない） */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+/* ボタンの文字は、言葉の途中で折り返さず、文節の切れ目で折り返す（「見た手ほどきは出さ／ない」と切れないように。対応しないブラウザでは今まで通り） */
+button {
+  word-break: auto-phrase;
 }
 
 html,
@@ -1326,7 +1317,7 @@ body {
   flex-direction: column;
   align-items: flex-start;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.15;
   color: #bfe9ff;
   animation: gain-up 1.4s ease-out forwards;
@@ -2909,7 +2900,7 @@ body.in-dialogue #hud {
   visibility: hidden;
 }
 
-/* ---- 会話の枠（画面の体裁「暦盤」: 濃紺の地に真鍮色の細い線、明朝体。序章の場面4の見本の PR） ---- */
+/* ---- 会話の枠（画面の体裁「暦盤」: 濃紺の地に真鍮色の細い線。序章の場面4の見本の PR） ---- */
 .dialogue-box {
   position: relative;
   width: min(100%, 760px);
@@ -2930,7 +2921,6 @@ body.in-dialogue #hud {
   cursor: pointer;
   touch-action: manipulation;
   color: var(--kr-text);
-  font-family: var(--kr-mincho);
 }
 
 .dialogue-box[hidden] {
@@ -2973,10 +2963,9 @@ body.in-dialogue #hud {
   border-radius: 0;
   background: rgba(15, 22, 38, 0.86);
   color: var(--kr-sub);
-  font-family: var(--kr-mincho);
   font-weight: 500;
   font-size: var(--kr-tool-size);
-  letter-spacing: 0.12em;
+  letter-spacing: 0.06em;
   touch-action: manipulation;
 }
 
@@ -3046,7 +3035,7 @@ body.in-dialogue #hud {
   border-radius: 50%;
 }
 
-/* 名前: 真鍮色の太い明朝体で、字間を広く。肩書きは名前の上に小さく、控えめな色で。人物の色は名前の左の小さな印 */
+/* 名前: 真鍮色の太い字（本文より太い 700）で、字間を少し広く。肩書きは名前の上に小さく、控えめな色で。人物の色は名前の左の小さな印 */
 .dialogue-plate {
   grid-area: plate;
   justify-self: start;
@@ -3077,20 +3066,18 @@ body.in-dialogue #hud {
 }
 
 .dialogue-name {
-  font-family: var(--kr-mincho);
   font-weight: 700;
   font-size: var(--kr-name-size);
-  letter-spacing: 0.24em;
+  letter-spacing: 0.12em;
   white-space: nowrap;
   color: var(--kr-brass);
 }
 
 /* 肩書き（「トウマの妹」など）。名前の上に小さく */
 .dialogue-title {
-  font-family: var(--kr-mincho);
   font-weight: 500;
   font-size: var(--kr-title-size);
-  letter-spacing: 0.14em;
+  letter-spacing: 0.08em;
   color: var(--kr-sub);
   white-space: nowrap;
   overflow: hidden;
@@ -3103,11 +3090,10 @@ body.in-dialogue #hud {
 
 .dialogue-text {
   grid-area: text;
-  font-family: var(--kr-mincho);
   font-weight: 500;
   font-size: var(--kr-text-size);
   line-height: var(--kr-line);
-  letter-spacing: 0.06em;
+  letter-spacing: 0.03em;
   color: var(--kr-text);
   padding-right: 22px;
   /* 上に細い罫（名前と台詞を分ける） */
@@ -3160,11 +3146,10 @@ body.in-dialogue #hud {
   width: min(calc(100% - 32px), 640px);
   padding: 12px 18px 10px;
   text-align: center;
-  font-family: var(--kr-mincho);
   font-weight: 500;
   font-size: var(--kr-caption-size);
   line-height: var(--kr-line);
-  letter-spacing: 0.08em;
+  letter-spacing: 0.05em;
   color: var(--kr-text);
   background: rgba(15, 22, 38, 0.88);
   border-top: 1px solid var(--kr-brass);
@@ -3190,8 +3175,8 @@ body.in-dialogue #hud {
   border: 0;
   padding: 48px 12px;
   font-size: var(--kr-centered-size);
-  line-height: 2.3;
-  letter-spacing: 0.14em;
+  line-height: 2.1;
+  letter-spacing: 0.1em;
   animation: none;
   transition: opacity 0.8s ease;
 }
@@ -3287,19 +3272,17 @@ body.in-dialogue #hud {
 }
 
 .dialogue-inscription-label {
-  font-family: var(--kr-mincho);
   font-size: var(--kr-inscription-label-size);
   color: #6a5034;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.08em;
   margin-bottom: 4px;
 }
 
 .dialogue-inscription-text {
-  font-family: var(--kr-mincho);
   font-weight: 500;
   font-size: var(--kr-inscription-size);
-  line-height: 1.7;
-  letter-spacing: 0.06em;
+  line-height: 1.6;
+  letter-spacing: 0.03em;
   /* 言葉の途中で折り返さず、文節の切れ目で折り返す（初見の検査: 「入っ／た」と切れて読みにくい。対応しないブラウザでは今まで通り） */
   word-break: auto-phrase;
 }
@@ -3338,7 +3321,6 @@ body.in-dialogue #hud {
     inset 0 0 0 3px rgba(201, 164, 92, 0.3),
     0 4px 14px rgba(0, 0, 0, 0.45);
   color: var(--kr-text);
-  font-family: var(--kr-mincho);
   pointer-events: none;
   z-index: 3;
   animation: placard-in 0.8s ease-out;
@@ -3358,10 +3340,9 @@ body.in-dialogue #hud {
   display: flex;
   align-items: center;
   padding: 4px 10px 4px 12px;
-  font-family: var(--kr-mincho);
   font-weight: 700;
   font-size: var(--kr-era-size);
-  letter-spacing: 0.16em;
+  letter-spacing: 0.1em;
   white-space: nowrap;
   border-right: 1px solid var(--kr-brass);
 }
@@ -3386,7 +3367,7 @@ body.in-dialogue #hud {
   font-weight: 500;
   font-size: var(--kr-placard-size);
   line-height: 1.4;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.08em;
   white-space: pre;
 }
 
@@ -3422,7 +3403,6 @@ body.in-dialogue #hud {
   border: 1px solid var(--kr-brass);
   background: rgba(15, 22, 38, 0.92);
   color: var(--kr-brass);
-  font-family: var(--kr-mincho);
   pointer-events: none;
   animation: caption-in 0.4s ease-out;
 }
@@ -3434,12 +3414,13 @@ body.in-dialogue #hud {
 .dialogue-nametag-name {
   font-weight: 700;
   font-size: var(--kr-name-size);
-  letter-spacing: 0.2em;
+  letter-spacing: 0.12em;
 }
 
 .dialogue-nametag-title {
+  font-weight: 500;
   font-size: var(--kr-title-size);
-  letter-spacing: 0.12em;
+  letter-spacing: 0.08em;
   color: var(--kr-sub);
 }
 
@@ -3498,19 +3479,21 @@ body.in-dialogue #hud {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  line-height: 1.8;
-  /* 読み返しの名前と台詞も、設定の書体で（場面4の顔の直しの PR で、語りだけが書体に従っていたのを直した） */
-  font-family: var(--kr-mincho);
+  line-height: 1.7;
+}
+
+/* 読み返しの台詞も、言葉の途中で折り返さず、文節の切れ目で折り返す（「おかえ／り」と切れないように） */
+.backlog-text {
+  word-break: auto-phrase;
 }
 
 .backlog-row.narration .backlog-text {
-  font-family: var(--kr-mincho);
   color: #d9e4f2;
 }
 
 .backlog-name {
   align-self: flex-start;
-  font-weight: bold;
+  font-weight: 700;
   color: var(--accent);
   font-size: 14px;
   padding: 0 8px;
@@ -3734,21 +3717,16 @@ body.in-dialogue #hud {
   }
 
   .dialogue-inscription-text {
-    line-height: 1.55;
+    line-height: 1.5;
   }
 }
 
-/* 題名の画面と設定の欄も、物語の書体で出す（設定の書体を選ぶと、その場で欄の文字が変わる） */
-.title-screen,
-.sheet[data-sheet='settings'] {
-  font-family: var(--kr-mincho);
-}
-
+/* 題名（太い方の太さで、副題と差を付ける） */
 .title-screen .game-title {
   font-size: 34px;
+  font-weight: 700;
   margin: 0 0 4px;
-  letter-spacing: 0.12em;
-  font-family: var(--kr-mincho);
+  letter-spacing: 0.1em;
 }
 
 .title-screen .game-sub {
@@ -3757,9 +3735,8 @@ body.in-dialogue #hud {
 }
 
 .recap-line {
-  font-family: var(--kr-mincho);
   font-size: 17px;
-  line-height: 1.8;
+  line-height: 1.7;
   margin: 4px 0;
 }
 
@@ -3775,7 +3752,6 @@ body.in-dialogue #hud {
   justify-content: center;
   gap: 14px;
   color: var(--text);
-  font-family: var(--kr-mincho);
   animation: chapter-in 0.9s ease-out;
   cursor: pointer;
   touch-action: manipulation;
@@ -3788,13 +3764,15 @@ body.in-dialogue #hud {
 
 .chapter-title-main {
   font-size: 22px;
-  letter-spacing: 0.4em;
+  font-weight: 500;
+  letter-spacing: 0.3em;
   color: #c8d4e6;
 }
 
 .chapter-title-sub {
   font-size: 32px;
-  letter-spacing: 0.25em;
+  font-weight: 700;
+  letter-spacing: 0.2em;
 }
 
 .chapter-title-next {
@@ -3945,9 +3923,9 @@ body.in-dialogue #hud {
 }
 
 .tutorial-bubble.inscription .tutorial-text {
-  font-family: 'Klee One', 'Hiragino Maru Gothic ProN', 'Yu Mincho', 'Noto Serif JP', serif;
+  font-weight: 500;
   font-size: 18px;
-  line-height: 1.7;
+  line-height: 1.6;
   color: #2a2016;
 }
 
@@ -4002,7 +3980,7 @@ body.in-dialogue #hud {
   flex: 1;
 }
 
-/* 音量のボタンは1行に収める（物語の書体は端末の書体より幅が広く、折り返すと欄が高くなるため） */
+/* 音量のボタンは1行に収める（丸ゴシックは幅が広めで、折り返すと欄が高くなるため） */
 .settings-volume .screen-button.settings-step {
   white-space: nowrap;
   font-size: 14px;
@@ -4040,7 +4018,7 @@ body.in-dialogue #hud {
   }
 }
 
-/* 書体・文字の大きさ・人形: 名前と、選び肢のボタンを横に並べる（押されているものを真鍮色で示す） */
+/* 文字の大きさ・人形: 名前と、選び肢のボタンを横に並べる（押されているものを真鍮色で示す） */
 .settings-look {
   display: flex;
   flex-direction: column;
@@ -4074,44 +4052,13 @@ body.in-dialogue #hud {
   line-height: 1.2;
 }
 
-.settings-font .screen-button.settings-choice {
-  padding: 2px 3px;
-  font-size: 11px;
-}
-
-/* 書体は選び肢が6つあるので、3つずつ2段に並べる（小さめのスマホでも、1つのボタンの幅が狭くなりすぎないように）。
-   名前の列は「書体」の2文字の幅にして、ボタンの幅を空ける（「ヒラギノ明朝」を1行に収める） */
-.settings-choices.settings-font {
-  grid-template-columns: 3em minmax(0, 1fr);
-}
-
-.settings-font .settings-choice-buttons {
-  grid-auto-flow: row;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-/* 選び肢のボタンの列の下に添える短い説明（書体の「ヒラギノ明朝はこの端末では使えません」）。欄の幅いっぱいに、小さく */
-.settings-notes {
-  grid-column: 1 / -1;
-  margin-top: 3px;
-}
-
-.settings-label-note {
-  display: block;
-  font-size: 10px;
-  line-height: 1.35;
-  color: #b8b0a0;
-}
-
 .settings-choice[aria-pressed='true'] {
   border-color: var(--kr-brass);
   background: rgba(201, 164, 92, 0.22);
   color: #f4e7c4;
 }
 
-/* 書体の選び肢は、その書体の名前の書体ではなく、ふつうの文字で出す（選ばれていない書体は読み込まないため） */
-
-/* 横向きの低い画面: 書体・文字の大きさ・人形の列を横に1段に並べる（欄が画面の高さに収まるように） */
+/* 横向きの低い画面: 文字の大きさ・人形の列を横に1段に並べる（欄が画面の高さに収まるように） */
 @media (orientation: landscape) and (max-height: 500px) {
   .settings-look {
     display: grid;
@@ -4121,34 +4068,25 @@ body.in-dialogue #hud {
     gap: 6px 10px;
   }
 
+  /* 文字の大きさの列は、名前を左に置いて1段に（書体の列を外して、横の幅が空いたため） */
   .settings-body .settings-look .settings-row {
     grid-column: auto;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 2px;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
   }
 
   .settings-look .settings-label {
     font-size: 12px;
   }
 
-  /* 書体の6つの選び肢は、横向きでは1段に並べる（列の幅を広げて、ボタンの幅を保つ） */
-  .settings-look {
-    grid-template-columns: minmax(0, 2.2fr);
-  }
-
-  .settings-font .settings-choice-buttons {
-    grid-auto-flow: column;
-    grid-template-columns: none;
-    gap: 4px;
-  }
-
-  /* 書体の列が広くなった分、切り替えの説明を省く（小さめの縦向きの画面と同じ。欄が画面の高さに収まるように） */
+  /* 切り替えの説明を省く（小さめの縦向きの画面と同じ。欄が画面の高さに収まるように） */
   .settings-item .screen-note {
     display: none;
   }
 }
 
-/* 低い縦向きの画面（小さめのスマホ）: 切り替えの説明を省き、欄の間を詰める（書体などの列が増えても、ボタンが画面に収まるように） */
+/* 低い縦向きの画面（小さめのスマホ）: 切り替えの説明を省き、欄の間を詰める（ボタンが画面に収まるように） */
 @media (orientation: portrait) and (max-height: 700px) {
   .settings-item .screen-note {
     display: none;
@@ -4163,12 +4101,7 @@ body.in-dialogue #hud {
     min-width: 70px;
   }
 
-  .settings-label-note {
-    font-size: 9.5px;
-    line-height: 1.3;
-  }
-
-  /* 名前の列を狭め、書体の名前をボタンの中で2行までに収める */
+  /* 名前の列を狭め、ボタンの幅を空ける */
   .settings-choices {
     grid-template-columns: 5.5em minmax(0, 1fr);
   }
@@ -4318,7 +4251,7 @@ body.in-dialogue #hud {
   }
 }
 
-/* 物の名前の札（物の上に、名前だけを短く出す）: 場所の札と同じ意匠（濃紺の地・真鍮の罫・明朝体）で、
+/* 物の名前の札（物の上に、名前だけを短く出す）: 場所の札と同じ意匠（濃紺の地・真鍮の罫・太い字）で、
    左右に菱形の飾りと、物を指す下向きの細い線を付けて、場所の札と見分ける */
 .dialogue-objlabels {
   position: absolute;
@@ -4334,10 +4267,9 @@ body.in-dialogue #hud {
   background: rgba(15, 22, 38, 0.92);
   color: var(--kr-text);
   border: 1px solid var(--kr-brass);
-  font-family: var(--kr-mincho);
   font-size: var(--kr-objlabel-size);
   font-weight: 700;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.1em;
   white-space: nowrap;
   pointer-events: none;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
