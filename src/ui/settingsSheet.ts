@@ -54,12 +54,7 @@ export function showSettingsSheet(root: HTMLElement, current: () => GameSettings
       notes: Readonly<Partial<Record<string, string>>> = {},
     ) => {
       const row = el('div', `settings-row settings-choices settings-${key}`);
-      const label = el('span', 'settings-label', group);
-      for (const v of list) {
-        const note = notes[v];
-        if (note) label.append(el('span', 'settings-label-note', TEXT.settings.choiceNote(labels[v], note)));
-      }
-      row.append(label);
+      row.append(el('span', 'settings-label', group));
       const buttons = el('div', 'settings-choice-buttons');
       for (const v of list) {
         const b = screenButton(labels[v], () => pick(v), { className: 'settings-choice', pressed: v === value });
@@ -68,13 +63,21 @@ export function showSettingsSheet(root: HTMLElement, current: () => GameSettings
         buttons.append(b);
       }
       row.append(buttons);
+      // 選び肢に添える短い説明は、ボタンの列の下に、欄の幅いっぱいに出す（狭い名前の列に詰め込まない）
+      const noteLines = list.flatMap((v) => (notes[v] ? [el('span', 'settings-label-note', TEXT.settings.choiceNote(labels[v], notes[v]))] : []));
+      if (noteLines.length > 0) {
+        const box = el('div', 'settings-notes');
+        box.append(...noteLines);
+        row.append(box);
+      }
       return row;
     };
     const look = el('div', 'settings-look');
     look.append(
-      // ヒラギノ明朝（同梱しない端末の書体）には、この端末にあるかを添える（文字の幅を測って調べる）
+      // ヒラギノ明朝・丸ゴ（同梱しない端末の書体）には、この端末にあるかを添える（文字の幅を測って調べる）
       choices(TEXT.settings.font, STORY_FONTS, TEXT.settings.fonts, s.storyFont, (v) => set({ storyFont: v }), 'font', {
-        hiraginoMincho: deviceHasFont('hiraginoMincho') ? TEXT.settings.fontOnDevice : TEXT.settings.fontNotOnDevice,
+        hiraginoMincho: deviceHasFont('hiraginoMincho') ? TEXT.settings.fontOnDevice : TEXT.settings.fontNotOnDevice.hiraginoMincho,
+        hiraginoMaru: deviceHasFont('hiraginoMaru') ? TEXT.settings.fontOnDevice : TEXT.settings.fontNotOnDevice.hiraginoMaru,
       }),
       choices(TEXT.settings.textSize, TEXT_SIZES, TEXT.settings.textSizes, s.textSize, (v) => set({ textSize: v }), 'text-size'),
     );

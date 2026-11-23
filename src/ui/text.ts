@@ -172,10 +172,20 @@ export const TEXT = {
     checkNote: '入にすると、物語の場面を選ぶ・物語の戦闘を勝ったことにする、が使えます（確かめるための機能）',
     // 見た目の見本の2回目: 書体と文字の大きさ（いつでも）。KayKit の人形の試し: 人形（確認用の機能が入の時だけ）
     font: '書体',
-    fonts: { zenOldMincho: 'Zen Old Mincho', shipporiAntique: 'Shippori Antique', shipporiMincho: 'Shippori Mincho', hiraginoMincho: 'ヒラギノ明朝' },
-    /** 書体の選び肢に添える短い説明（端末に入っている書体を使うヒラギノ明朝。文字の幅を測って、この端末にあるかを調べる） */
+    fonts: {
+      zenOldMincho: 'Zen Old Mincho',
+      shipporiAntique: 'Shippori Antique',
+      shipporiMincho: 'Shippori Mincho',
+      hiraginoMincho: 'ヒラギノ明朝',
+      hiraginoMaru: 'ヒラギノ丸ゴ',
+      zenMaruGothic: 'Zen Maru Gothic',
+    },
+    /** 書体の選び肢に添える短い説明（端末に入っている書体を使うヒラギノ明朝・丸ゴ。文字の幅を測って、この端末にあるかを調べる） */
     fontOnDevice: 'この端末で使えます',
-    fontNotOnDevice: 'この端末では使えません（Zen Old Mincho で出ます）',
+    fontNotOnDevice: {
+      hiraginoMincho: 'この端末では使えません（Zen Old Mincho で出ます）',
+      hiraginoMaru: 'この端末では使えません（Zen Maru Gothic で表示します）',
+    },
     choiceNote: (name: string, note: string) => `${name}は${note}`,
     textSize: '文字の大きさ',
     textSizes: { small: '小', medium: '中', large: '大' },

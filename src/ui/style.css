@@ -48,6 +48,18 @@
   --kr-mincho: 'Hiragino Mincho ProN', 'Hiragino Mincho Pro', 'Zen Old Mincho', 'Yu Mincho', 'Noto Serif JP', serif;
 }
 
+/*
+ * ヒラギノ丸ゴ: 同梱せず、端末に入っている書体を使う（iPhone・iPad・Mac）。無い端末では Zen Maru Gothic（同梱。無い時だけ読み込む）で出る。
+ * Zen Maru Gothic: 同梱の書体を、ヒラギノ丸ゴがある端末でも必ず使う（ヒラギノを指定に入れない）
+ */
+:root[data-story-font='hiraginoMaru'] {
+  --kr-mincho: 'Hiragino Maru Gothic ProN', 'Hiragino Maru Gothic Pro', 'Zen Maru Gothic', 'Noto Sans JP', sans-serif;
+}
+
+:root[data-story-font='zenMaruGothic'] {
+  --kr-mincho: 'Zen Maru Gothic', 'Noto Sans JP', sans-serif;
+}
+
 /* 文字の大きさ「小」（中の 1 割小さく） */
 :root[data-text-size='small'] {
   --kr-text-size: 14.5px;
@@ -3726,6 +3738,12 @@ body.in-dialogue #hud {
   }
 }
 
+/* 題名の画面と設定の欄も、物語の書体で出す（設定の書体を選ぶと、その場で欄の文字が変わる） */
+.title-screen,
+.sheet[data-sheet='settings'] {
+  font-family: var(--kr-mincho);
+}
+
 .title-screen .game-title {
   font-size: 34px;
   margin: 0 0 4px;
@@ -3984,6 +4002,13 @@ body.in-dialogue #hud {
   flex: 1;
 }
 
+/* 音量のボタンは1行に収める（物語の書体は端末の書体より幅が広く、折り返すと欄が高くなるため） */
+.settings-volume .screen-button.settings-step {
+  white-space: nowrap;
+  font-size: 14px;
+  padding-inline: 8px;
+}
+
 .settings-value {
   min-width: 90px;
   text-align: center;
@@ -4050,23 +4075,32 @@ body.in-dialogue #hud {
 }
 
 .settings-font .screen-button.settings-choice {
-  font-size: 12px;
+  padding: 2px 3px;
+  font-size: 11px;
 }
 
-/* 選び肢の列の名前の下に添える短い説明（書体の「ヒラギノ明朝はこの端末では使えません」）。列の高さを増やさないように小さく */
+/* 書体は選び肢が6つあるので、3つずつ2段に並べる（小さめのスマホでも、1つのボタンの幅が狭くなりすぎないように）。
+   名前の列は「書体」の2文字の幅にして、ボタンの幅を空ける（「ヒラギノ明朝」を1行に収める） */
+.settings-choices.settings-font {
+  grid-template-columns: 3em minmax(0, 1fr);
+}
+
+.settings-font .settings-choice-buttons {
+  grid-auto-flow: row;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* 選び肢のボタンの列の下に添える短い説明（書体の「ヒラギノ明朝はこの端末では使えません」）。欄の幅いっぱいに、小さく */
+.settings-notes {
+  grid-column: 1 / -1;
+  margin-top: 3px;
+}
+
 .settings-label-note {
   display: block;
-  margin-top: 2px;
-  font-size: 9.5px;
-  line-height: 1.2;
+  font-size: 10px;
+  line-height: 1.35;
   color: #b8b0a0;
-}
-
-@media (orientation: landscape) and (max-height: 500px) {
-  .settings-label-note {
-    display: inline;
-    margin: 0 0 0 4px;
-  }
 }
 
 .settings-choice[aria-pressed='true'] {
@@ -4096,6 +4130,22 @@ body.in-dialogue #hud {
   .settings-look .settings-label {
     font-size: 12px;
   }
+
+  /* 書体の6つの選び肢は、横向きでは1段に並べる（列の幅を広げて、ボタンの幅を保つ） */
+  .settings-look {
+    grid-template-columns: minmax(0, 2.2fr);
+  }
+
+  .settings-font .settings-choice-buttons {
+    grid-auto-flow: column;
+    grid-template-columns: none;
+    gap: 4px;
+  }
+
+  /* 書体の列が広くなった分、切り替えの説明を省く（小さめの縦向きの画面と同じ。欄が画面の高さに収まるように） */
+  .settings-item .screen-note {
+    display: none;
+  }
 }
 
 /* 低い縦向きの画面（小さめのスマホ）: 切り替えの説明を省き、欄の間を詰める（書体などの列が増えても、ボタンが画面に収まるように） */
@@ -4106,7 +4156,21 @@ body.in-dialogue #hud {
 
   .settings-body,
   .settings-look {
-    gap: 6px;
+    gap: 5px;
+  }
+
+  .settings-value {
+    min-width: 70px;
+  }
+
+  .settings-label-note {
+    font-size: 9.5px;
+    line-height: 1.3;
+  }
+
+  /* 名前の列を狭め、書体の名前をボタンの中で2行までに収める */
+  .settings-choices {
+    grid-template-columns: 5.5em minmax(0, 1fr);
   }
 }
 

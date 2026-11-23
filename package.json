@@ -27,6 +27,7 @@
   "dependencies": {
     "@fontsource/shippori-antique": "^5.3.0",
     "@fontsource/shippori-mincho": "^5.3.0",
+    "@fontsource/zen-maru-gothic": "^5.3.1",
     "@fontsource/zen-old-mincho": "^5.3.1",
     "three": "^0.187.0"
   },
