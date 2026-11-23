@@ -285,6 +285,12 @@ const TOUMA_KAYKIT: KayKitLook = {
   // 切れ長の目と、目に近いまっすぐな眉（怒った角度にしない）。あごを細く
   face: { eyes: 'narrow', brows: 'normal', browLift: -0.01, slim: 0.1 },
   width: 0.9,
+  // 体つき（2026-11-23 人形の工房 その2 で決定。細く見せる案 B）: 胴と腕・脚を細くし、体だけ背を高くする（頭は大きくしない）。頭の横幅を少し細く
+  bodyOnly: true,
+  height: 1.08,
+  headWidth: 0.92,
+  torso: 0.8,
+  limbs: 0.8,
   cloak: { color: 0x2f3a55, length: 'knee', hoodDown: true, edge: true, front: true },
   // 襟は外套と同じ濃紺（差し色は縁の白に任せる）
   accent: 0x2f3a55,
@@ -365,6 +371,9 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
       height: 0.9,
       headScale: 0.93,
       width: 0.94,
+      // 体つき（2026-11-23 人形の工房 その2 で決定。細く見せる案 A）: 胴と腕・脚を細く（背と頭は今のまま）
+      torso: 0.8,
+      limbs: 0.8,
       skin: 0xc8a993,
       // 生成りの作業着（2026-11-22 人形の工房で決定。案 Y1「生成りと錆色」）: 明るい生成りの上着、明るさの違う茶のズボン（全身が1色の塊に見えないように）、
       // 焦げ茶の革の前掛け。差し色は錆色1色（首の布・結い紐）。袖をまくり、素手。服と手に油染み。腰に工具

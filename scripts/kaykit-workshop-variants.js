@@ -448,3 +448,17 @@ VARIANTS.yuna.slim = [
   { name: 'B 胴を細く・背を高く', note: '胴 0.8・腕と脚 0.8・体だけ背 0.96・頭 0.88・頭の横幅 0.92', look: { torso: 0.8, limbs: 0.8, bodyOnly: true, height: 0.96, headScale: 0.88, headWidth: 0.92 } },
   { name: 'C いちばん細く', note: '胴 0.72・腕と脚 0.72・背 0.98・頭 0.88・頭の横幅 0.9', look: { torso: 0.72, limbs: 0.72, bodyOnly: true, height: 0.98, headScale: 0.88, headWidth: 0.9 } },
 ];
+
+// ---- 往復5（team）: トウマ B・ユナ A の細さに決定。隊の4人（B 印と濃紺）に、細くする決まりを当てるかの見比べ ----
+const SLIM = { torso: 0.8, limbs: 0.8 };
+const teamB = (who, extra) => ({ ...VARIANTS[who][2][1], look: { ...VARIANTS[who][2][1].look, ...extra } });
+VARIANTS.gord.team = [
+  { ...teamB('gord', { bodyOnly: true, headScale: 0.92 }), name: '今' },
+  { ...teamB('gord', { bodyOnly: true, headScale: 0.92, ...SLIM }), name: '細く' },
+];
+VARIANTS.nono.team = [
+  { ...teamB('nono', { bodyOnly: true, headScale: 0.95 }), name: '今' },
+  { ...teamB('nono', { bodyOnly: true, headScale: 0.95, torso: 0.88, limbs: 0.85 }), name: '細く' },
+];
+VARIANTS.kiri.team = [{ ...teamB('kiri', {}), name: '今' }, { ...teamB('kiri', SLIM), name: '細く' }];
+VARIANTS.fen.team = [{ ...teamB('fen', {}), name: '今' }, { ...teamB('fen', SLIM), name: '細く' }];
