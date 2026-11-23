@@ -186,6 +186,9 @@ describe('端末ごとの設定（序章に足りない仕組み）', () => {
     expect(normalizeSettings({ puppetStyle: 'pixel' })).toEqual(DEFAULT_SETTINGS);
     // 書体のヒラギノ明朝も読める。外した「ユナの髪」（案 A に決めた）が残った設定も、読み込める
     expect(normalizeSettings({ yunaHair: 'b', storyFont: 'hiraginoMincho' })).toEqual({ ...DEFAULT_SETTINGS, storyFont: 'hiraginoMincho' });
+    // 丸ゴシックの2つ（ヒラギノ丸ゴ・Zen Maru Gothic）も読める
+    expect(normalizeSettings({ storyFont: 'hiraginoMaru' }).storyFont).toBe('hiraginoMaru');
+    expect(normalizeSettings({ storyFont: 'zenMaruGothic' }).storyFont).toBe('zenMaruGothic');
     text = '{壊れた';
     expect(store.load()).toEqual(DEFAULT_SETTINGS);
   });
