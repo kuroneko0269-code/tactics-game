@@ -468,3 +468,10 @@ DECIDED.push('gord', 'kiri', 'fen', 'nono');
 VARIANTS.father = { slim: [{ name: '前', look: { torso: 1, limbs: 1 } }, { name: '決定', look: {} }] };
 VARIANTS.mother = { slim: [{ name: '前', look: { torso: 1, limbs: 1 } }, { name: '決定', look: {} }] };
 for (const id of ['gord', 'kiri', 'fen', 'nono', 'touma', 'yuna']) VARIANTS[id].final2 = [{ name: '決定', look: {} }];
+// 父の頭を少しだけ小さく（3案）
+VARIANTS.father.head = [
+  { name: '今', look: {} },
+  { name: 'A 少し', note: '背と肩幅の倍率を頭に掛けない（頭がおよそ 0.95 倍）', look: { bodyOnly: true } },
+  { name: 'B もう少し', note: 'A ＋ 頭 0.95（およそ 0.9 倍）', look: { bodyOnly: true, headScale: 0.95 } },
+  { name: 'C はっきり', note: 'A ＋ 頭 0.91（およそ 0.86 倍）', look: { bodyOnly: true, headScale: 0.91 } },
+];
