@@ -524,16 +524,17 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
         color: 0x2c2829,
         shape: { fringe: 0.8 },
         extras: ['twinTails', 'pin'],
+        // 房（その3 の往復2で決定）: スマホの大きさでも見えるよう、少し太く、肩の外側へ出す
         tails: {
-          tie: [0.48, 1.48, -0.12],
+          tie: [0.5, 1.47, -0.1],
           path: [
-            [0.33, 1.3, -0.06],
-            [0.37, 1.2, -0.03],
-            [0.38, 1.12, -0.02],
+            [0.4, 1.3, -0.04],
+            [0.45, 1.2, -0.01],
+            [0.47, 1.1, 0.0],
           ],
-          root: 0.058,
-          bulge: 0.3,
-          taper: 0.8,
+          root: 0.074,
+          bulge: 0.35,
+          taper: 0.7,
           chest: true,
         },
       },
@@ -616,7 +617,8 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
       boots: 0x66544a,
       // 長衣の袖口（素材では金具の色）を着物の色に
       metal: 0x43414c,
-      hair: { kit: 'mage', color: 0x6e5e58, extras: ['bun'] },
+      // 髪（往復2で決定。案 B）: 後ろの長い髪を短くし、うなじに大きなまとめ髪（横と後ろから分かる大きさ）。右の額の横にほつれ毛を1つ（正面の丸い輪郭を崩す）
+      hair: { kit: 'mage', color: 0x6e5e58, shape: { length: 0.5 }, extras: ['bunLarge', 'strand'] },
       // 体つき（2026-11-23 人形の工房 その2 で決定）: トウマ・ユナと同じく、胴と腕・脚を細く
       torso: 0.8,
       limbs: 0.8,
@@ -661,6 +663,8 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
       vest: 0x6e5448,
       sash: 0x46423f,
       shins: { color: 0x5e4c44, kind: 'wraps' },
+      // ひげ（往復2で決定。案 A）: 素材のひげを顔に沿わせて短く刈る（絵の短く整えたひげ）
+      beard: 'trim',
       // 体つき（2026-11-23 人形の工房 その2 で決定）: 胴と腕・脚を細く。背と肩幅の倍率は体だけに掛ける
       bodyOnly: true,
       torso: 0.84,
