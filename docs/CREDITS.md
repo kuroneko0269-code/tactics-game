@@ -15,6 +15,16 @@
 | 取り込んだ物 | 太さ 500（台詞など）と 700（名前など）の2つ。src に出てくる文字を含む範囲だけ（`scripts/font-subset.mjs`） |
 | 使っている所 | ゲーム全体の書体。ヒラギノ丸ゴ（端末の書体。同梱しない）が無い端末でだけ読み込む（`src/ui/storyLook.ts`。2026-11-23 に書体を1つに決め、ほかの書体（Zen Old Mincho・Shippori Antique・Shippori Mincho）は外した） |
 
+## 人物の絵（立ち絵）
+
+| 項目 | 内容 |
+| --- | --- |
+| 素材の名前 | トウマ・ユナ・父・母の立ち絵（4枚） |
+| 作者 | 人物の絵：発注者が ChatGPT で作成 |
+| 取り込んだ日 | 2026-11-28 |
+| 取り込んだ物 | 元の絵 `art/characters/<人物>.png`（公開ファイルには入れない）と、胸から上を切り抜いた顔の絵 `public/portraits/<人物>.webp`（`scripts/portraits-prepare.py`） |
+| 使っている所 | 序章の場面4の台詞の枠の顔の丸と、人形の色・形の手本（docs/KAYKIT.md の 14 章） |
+
 ## KayKit Character Pack : Adventurers 1.0
 
 | 項目 | 内容 |
