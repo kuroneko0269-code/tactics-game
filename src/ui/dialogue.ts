@@ -38,6 +38,8 @@ export interface StagePort {
 /** 顔の枠（話者の人形を別のカメラで写した canvas と、写す人物の切り替え） */
 export interface PortraitPort {
   readonly canvas: HTMLCanvasElement;
+  /** 顔の絵（立ち絵から切り抜いた絵）。省くと人形を写した canvas だけ */
+  readonly picture?: HTMLImageElement;
   show(name: string | null): void;
 }
 
@@ -228,7 +230,7 @@ export function runDialogue(script: Script, deps: DialogueDeps): DialogueRun {
   // 顔の枠（話者の人形を写す）・名前の札（名前と肩書き）・台詞
   const face = el('div', 'dialogue-face');
   face.hidden = true;
-  if (deps.portrait) face.append(deps.portrait.canvas);
+  if (deps.portrait) face.append(deps.portrait.canvas, ...(deps.portrait.picture ? [deps.portrait.picture] : []));
   const plate = el('div', 'dialogue-plate');
   const name = el('span', 'dialogue-name');
   const title = el('span', 'dialogue-title');

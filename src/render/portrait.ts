@@ -12,6 +12,8 @@ import { createPuppet, type Puppet, type PuppetLook } from './puppet';
 export interface PortraitRenderer {
   /** 顔の枠に入れる canvas */
   readonly canvas: HTMLCanvasElement;
+  /** 顔の絵（立ち絵から切り抜いた絵）を出す img。顔の絵のある人物の時だけ、canvas の代わりに見せる */
+  readonly picture: HTMLImageElement;
   /** その人物を写す（同じ人物なら描き直さない）。null で消す */
   show(name: string | null): void;
   /** 今写している人物（自動テスト用） */
@@ -24,11 +26,22 @@ export interface PortraitRenderer {
 /** canvas の画素の大きさ（CSS の大きさは style.css。画素の密度 2 までを見込む） */
 const PIXELS = 192;
 
-export function createPortraitRenderer(lookOf: (name: string) => PuppetLook, makePuppet: (look: PuppetLook) => Puppet = createPuppet): PortraitRenderer {
+/**
+ * pictureOf: その人物の顔の絵の URL（無ければ undefined。人形を写す）。序章の場面4の4人は、発注者の立ち絵から切り抜いた絵を使う（docs/KAYKIT.md の 14 章）
+ */
+export function createPortraitRenderer(
+  lookOf: (name: string) => PuppetLook,
+  makePuppet: (look: PuppetLook) => Puppet = createPuppet,
+  pictureOf: (name: string) => string | undefined = () => undefined,
+): PortraitRenderer {
   const canvas = document.createElement('canvas');
   canvas.width = PIXELS;
   canvas.height = PIXELS;
   canvas.className = 'portrait-canvas';
+  const picture = document.createElement('img');
+  picture.className = 'portrait-picture';
+  picture.alt = '';
+  picture.hidden = true;
   let renderer: THREE.WebGLRenderer | undefined;
   const scene = new THREE.Scene();
   // 灯のような暖かい光を斜め前から当て、反対側は濃紺の空の光で淡く起こす（顔の丸の中で、やわらかい陰影が出るように）
@@ -64,6 +77,7 @@ export function createPortraitRenderer(lookOf: (name: string) => PuppetLook, mak
 
   return {
     canvas,
+    picture,
     get current() {
       return current;
     },
@@ -72,6 +86,13 @@ export function createPortraitRenderer(lookOf: (name: string) => PuppetLook, mak
       current = name;
       for (const p of puppets.values()) scene.remove(p.group);
       if (name === null) return;
+      const url = pictureOf(name);
+      picture.hidden = url === undefined;
+      canvas.hidden = url !== undefined;
+      if (url !== undefined) {
+        if (picture.getAttribute('src') !== url) picture.src = url;
+        return;
+      }
       const puppet = puppetOf(name);
       scene.add(puppet.group);
       // 人形の大きさから、胸から上が収まるようにカメラを置く（背の高さが違っても同じ写り方になる）
@@ -91,6 +112,8 @@ export function createPortraitRenderer(lookOf: (name: string) => PuppetLook, mak
       }
     },
     clear() {
+      picture.hidden = true;
+      canvas.hidden = false;
       for (const p of puppets.values()) scene.remove(p.group);
       puppets.clear();
       current = null;

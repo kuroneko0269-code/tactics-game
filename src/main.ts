@@ -168,12 +168,31 @@ function main(): void {
    * （題名の画面の表示を遅くしないため。動きの仕組みは three.js の大きな部分なので、最初のファイルに入れない）
    */
   let kaykit: typeof import('./render/kaykit') | undefined;
+  /** 顔の絵の URL（public/portraits/） */
+  const portraitUrl = (id: string) => `${import.meta.env.BASE_URL}portraits/${id}.webp`;
+  /** 読み込めた顔の絵 */
+  const loadedPictures = new Set<string>();
   const loadKaykit = async () => {
     const m = await import('./render/kaykit');
     // 開発中だけ: URL に &kkshade=plain と付けると、素材そのままの陰影で描く（見え方を比べる写真のため。docs/KAYKIT.md）
     const shade = import.meta.env.DEV ? new URLSearchParams(location.search).get('kkshade') : null;
     if (shade === 'toon' || shade === 'plain') m.setKayKitShading(shade);
-    if (await m.loadKayKit()) kaykit = m;
+    // 顔の絵（場面4の4人。発注者の立ち絵から切り抜いた絵）も、この時に読み込む。読めなかった絵は、人形を写した顔のまま
+    const pictures = [...new Set(Object.values(LOOKS).flatMap((l) => (l.kaykit && l.picture ? [l.picture] : [])))];
+    const [ok] = await Promise.all([
+      m.loadKayKit(),
+      ...pictures.map(async (id) => {
+        const img = new Image();
+        img.src = portraitUrl(id);
+        try {
+          await img.decode();
+          loadedPictures.add(id);
+        } catch {
+          // 読めなかった絵は使わない
+        }
+      }),
+    ]);
+    if (ok) kaykit = m;
   };
   /** KayKit の人形を試す場面（序章の場面4）を見せている間 */
   let kaykitScene = false;
@@ -862,7 +881,11 @@ function main(): void {
     return (id ? LOOKS[currentSite?.looks?.[id] ?? id] : undefined) ?? DEFAULT_LOOK;
   };
   /** 顔の枠（話者の人形を別のカメラで写す）と、マップ上の話者の印 */
-  const portrait = createPortraitRenderer(speakerLook, makePuppet);
+  const portrait = createPortraitRenderer(speakerLook, makePuppet, (name) => {
+    // 顔の絵は、KayKit の人形を見せている間（序章の場面4）だけ。人形と同じ人物に見えるように
+    const look = speakerLook(name);
+    return kaykitOn() && look.kaykit && look.picture && loadedPictures.has(look.picture) ? portraitUrl(look.picture) : undefined;
+  });
   const speakerMark = createSpeakerMark(stage.scene);
   /** 言葉にしない声の、頭上の小さな印 */
   const voiceMarks = createVoiceMarks(stage.scene);

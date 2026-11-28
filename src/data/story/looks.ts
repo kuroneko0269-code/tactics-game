@@ -78,6 +78,11 @@ export interface LookDefinition {
    * 今は序章の場面4の4人だけ
    */
   readonly kaykit?: KayKitLook;
+  /**
+   * 顔の絵（台詞の枠の顔の丸）。public/portraits/<picture>.webp（発注者の立ち絵から scripts/portraits-prepare.py で切り抜く）。
+   * KayKit の人形を見せている場面（序章の場面4）でだけ、人形を写した顔の代わりに使う
+   */
+  readonly picture?: string;
 }
 
 /** KayKit の土台の体（素材の5人のうち、服の形が違う3人の体。docs/KAYKIT.md） */
@@ -124,6 +129,8 @@ export interface KayKitLook {
   readonly pants?: number;
   /** 靴の色 */
   readonly boots?: number;
+  /** 素材の金具の区画の色（帯の金具・長衣の袖口。省くと鉄の色） */
+  readonly metal?: number;
   /** 髪の形と色（束のある形。short 短い・tied 後ろで結ぶ・bun まとめ髪・cropped 刈り込み）。ひげの頭では、ひげも同じ色 */
   readonly hair: {
     /** 作者が頭と一体で作った髪のどれを使うか（knight 短い・rogue 中くらいの長さ・mage 長い） */
@@ -146,8 +153,8 @@ export interface KayKitLook {
   readonly cloak?: { readonly color: number; readonly length: 'long' | 'knee' | 'short'; readonly hoodDown?: boolean; readonly edge?: boolean; readonly front?: boolean };
   /** 肩掛けの色 */
   readonly mantle?: number;
-  /** 前掛け（bib で胸当てつき） */
-  readonly apron?: { readonly color: number; readonly bib?: boolean };
+  /** 前掛け（bib で胸当てつき・straps で胸当ての肩紐・length で丈（knee 膝の下・ankle 足首の上。省くと腿まで）・tie で前の結び目と垂れた端） */
+  readonly apron?: { readonly color: number; readonly bib?: boolean; readonly straps?: boolean; readonly length?: 'knee' | 'ankle'; readonly tie?: boolean };
   /** 差し色（結い紐・襟巻き・首の布。1色まで） */
   readonly accent?: number;
   /** 2つ目の差し色（外套の細い縁・胸の印・髪飾りの金具） */
@@ -156,8 +163,20 @@ export interface KayKitLook {
   readonly neckerchief?: boolean;
   /** 胸か肩の丸い印（色は accentB） */
   readonly emblem?: 'chest' | 'shoulder';
-  /** スカート（腰から膝の上まで。脚の動きに付いてくる） */
-  readonly skirt?: { readonly color: number };
+  /** スカート（腰から膝の上まで。脚の動きに付いてくる。length: 'ankle' で足首まで） */
+  readonly skirt?: { readonly color: number; readonly length?: 'knee' | 'ankle' };
+  /** 肩の短い外套（肘までの、前の開いたケープ。edge で裾と前の開きに細い縁（accentB）） */
+  readonly capelet?: { readonly color: number; readonly edge?: boolean };
+  /** 右の肩から左の腰へ斜めに掛けた革帯（革の色）と、胸の金具（真鍮） */
+  readonly baldric?: boolean;
+  /** 左の腰に下げた、鞘に入った剣（鞘は革の暗い色、柄と鍔は真鍮） */
+  readonly scabbard?: boolean;
+  /** 脚の筒（膝の下から足首まで。boots 長靴の筒（cuff で上を折り返す）・wraps 巻き布（帯を重ねた形）） */
+  readonly shins?: { readonly color: number; readonly kind: 'boots' | 'wraps'; readonly cuff?: boolean };
+  /** 袖のない胴着（前の開いた、腰までの上着） */
+  readonly vest?: number;
+  /** 腰に巻いた布の帯（前で結んで、端を垂らす。差し色の区画を使う） */
+  readonly sash?: number;
   /** 袖をまくる（rogue の体だけ。肘から先を肌にし、肘にまくった袖の帯を見せる） */
   readonly sleeves?: 'rolled';
   /** 手の色（rogue の体だけ。省くと革の手袋。素手の時は、肌の色に油の汚れを混ぜた色にする） */
@@ -244,21 +263,22 @@ const TOUMA_KAYKIT: KayKitLook = {
   base: 'rogue',
   // 顔は髪と同じ rogue の頭（knight の頭は rogue の髪より頭頂が高く、髪から肌が透けるため）
   head: 'rogue',
-  skin: 0xbd9e88,
+  // 色（2026-11-28 人形の工房 その3）: 発注者の立ち絵の画素から拾った色（scripts/portraits-colors.py）。夕食と夜の光で絵に近く見えるように整えた値
+  skin: 0xecd0bb,
   // 衣装（2026-11-22 人形の工房で決定。案 T3「濃紺と白と革」）: 濃紺の膝丈の外套の内側に、明るい灰の上着を見せ（暗い場面でも人の形が分かるように）、
   // 帯・手袋・長靴は飴色の革。外套の襟・前の開き・裾に塔の白の細い縁、左胸に門の輪をかたどった丸い印
-  cloth: 0x8c8a84,
-  cloth2: 0x77756f,
-  trim: 0x9a978f,
-  leather: 0x7a4e2c,
-  pants: 0x3a3634,
-  boots: 0x5a3820,
+  cloth: 0xb3afad,
+  cloth2: 0x9c9896,
+  trim: 0xa8a4a0,
+  leather: 0x5e493c,
+  pants: 0x4d4847,
+  boots: 0x52433c,
   // 黒の短髪（2026-11-22 人形の工房で決定。案 A1）: 作者の中くらいの長さの髪（rogue）を短くし、分け目をユナと反対に。
   // ヘルメットに見えないように、縁の高さを向きごとに変え（もみあげを残し、耳の上を短く、えり足を少し長く）、面に生え際から毛先へ向かう太い溝を3本刻む。
   // 垂れた前髪の1房は、うつむくと目元にかかる。毛先は立てずに寝かせ、横と後ろの裾だけ少し跳ねる（物語の担当の決定）
   hair: {
     kit: 'rogue',
-    color: 0x2a2224,
+    color: 0x2e2c30,
     shape: {
       mirror: true,
       fringe: 0.88,
@@ -293,10 +313,16 @@ const TOUMA_KAYKIT: KayKitLook = {
   headWidth: 0.92,
   torso: 0.8,
   limbs: 0.8,
-  cloak: { color: 0x2f3a55, length: 'knee', hoodDown: true, edge: true, front: true },
+  // 立ち絵に合わせる（その3）: 膝の下までの濃紺の外套（前の開き・裾・襟に白の縁）、肩の短い外套（肘まで。白の縁と、左胸の門の輪の印）、
+  // 右の肩から左の腰への革帯、左の腰の剣、折り返しのある長靴。下ろした頭巾は絵に無いので外した
+  cloak: { color: 0x444a5e, length: 'knee', edge: true, front: true },
+  capelet: { color: 0x444a5e, edge: true },
+  baldric: true,
+  scabbard: true,
+  shins: { color: 0x5e4636, kind: 'boots', cuff: true },
   // 襟は外套と同じ濃紺（差し色は縁の白に任せる）
-  accent: 0x2f3a55,
-  accentB: 0xe2ded2,
+  accent: 0x444a5e,
+  accentB: 0xd8d6d0,
   emblem: 'chest',
 };
 
@@ -319,6 +345,7 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
   // ---- 隊（操作する仲間） ----
   /** トウマ: 二十歳前後、中背の細身、黒の短髪、時守の濃紺の外套。革の肩当てと手袋、長靴、腰の剣。下ろした頭巾。差し色は襟の鈍い青緑 */
   touma: {
+    picture: 'touma',
     body: NAVY,
     accent: 0x5c7f80,
     hair: 0x1b1a1e,
@@ -446,6 +473,7 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
   // ---- 操作しない人物 ----
   /** ユナ: 十六歳、小柄、黒髪の二つ結びのおさげ、油の染みた生成りの作業着。袖をまくり、革の前掛けと腰の工具。差し色は結い紐の赤茶 */
   yuna: {
+    picture: 'yuna',
     body: 0xc9bb9b,
     accent: 0x9a4a32,
     hair: 0x18151a,
@@ -470,14 +498,14 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
       // 体つき（2026-11-23 人形の工房 その2 で決定。細く見せる案 A）: 胴と腕・脚を細く（背と頭は今のまま）
       torso: 0.8,
       limbs: 0.8,
-      skin: 0xc8a993,
+      skin: 0xf2d4c0,
       // 生成りの作業着（2026-11-22 人形の工房で決定。案 Y1「生成りと錆色」）: 明るい生成りの上着、明るさの違う茶のズボン（全身が1色の塊に見えないように）、
       // 焦げ茶の革の前掛け。差し色は錆色1色（首の布・結い紐）。袖をまくり、素手。服と手に油染み。腰に工具
-      cloth: 0xe2d6ba,
-      cloth2: 0xcbbb96,
-      leather: 0x5a3e2c,
-      pants: 0x86664a,
-      boots: 0x3e2c22,
+      cloth: 0xd2bea6,
+      cloth2: 0xb39b86,
+      leather: 0x674c3c,
+      pants: 0x634d40,
+      boots: 0x604a3d,
       sleeves: 'rolled',
       hands: 0xbc9c84,
       stains: true,
@@ -487,7 +515,7 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
       // 前髪は少し短く（観客の検査: 夕食の画で、前髪が片目にかかって眠そう・無表情に見えた）
       hair: {
         kit: 'rogue',
-        color: 0x1e1a1e,
+        color: 0x2c2829,
         shape: { fringe: 0.8 },
         extras: ['twinTails', 'pin'],
         tails: {
@@ -503,8 +531,9 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
           chest: true,
         },
       },
-      apron: { color: 0x4e3426 },
-      accent: 0xb0532e,
+      // 立ち絵に合わせる（その3）: 胸当てと肩紐のある、膝の下までの革の前掛け
+      apron: { color: 0x59473e, bib: true, straps: true, length: 'knee' },
+      accent: 0xa8563c,
       accentB: 0xc09a50,
       neckerchief: true,
       // 少し大きい目とまつ毛（可愛さは残す）。輪郭は丸すぎないように（丸い輪郭はやめ、ほんの少し細く）
@@ -519,6 +548,7 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
   hald: { body: NAVY, accent: 0x9aa0a8, hair: 0x6a5c4e, hairStyle: 'cropped', width: 1.16, scale: 1.04, outfit: 'coat', pauldrons: IRON, gloves: LEATHER_DARK, boots: LEATHER_DARK },
   /** トウマ（ユナの灯を受け取った後）: 腰に真鍮の灯 */
   toumaLamp: {
+    picture: 'touma',
     body: NAVY,
     accent: 0x5c7f80,
     hair: 0x1b1a1e,
@@ -553,6 +583,7 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
   gareth: { body: 0x8a4038, accent: 0x8f7a4c, hair: 0xa8905a, hairStyle: 'short', hat: 'helm', scale: 1.12, width: 1.15, weapon: 'sword', pauldrons: IRON, cloak: 0x6a3a32, gloves: LEATHER },
   /** 母: 落ち着いた臙脂の長い服に、生成りの前掛けと毛織の肩掛け。髪は後ろでまとめる。差し色は襟の茜 */
   mother: {
+    picture: 'mother',
     body: 0x6b4a42,
     accent: 0x8a5040,
     hair: 0x3a2a22,
@@ -568,24 +599,29 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
       base: 'mage',
       head: 'mage',
       height: 0.97,
-      skin: 0xc2a18a,
-      cloth: 0x6b4a42,
-      cloth2: 0x5a3e38,
-      trim: 0x8a5040,
-      leather: 0x4a3530,
-      pants: 0x4a3530,
-      boots: 0x3e2e26,
-      hair: { kit: 'mage', color: 0x3a2a22, extras: ['bun'] },
+      // 色と形（2026-11-28 人形の工房 その3）: 発注者の立ち絵に合わせる。灰青の着物（足首までの裾）に、足首の上までの生成りの前掛け（胸当てと前の結び目）。
+      // 髪は灰の混じった茶で、後ろの低いまとめ髪。肩掛けは絵に無いので外した
+      skin: 0xf6d7c1,
+      cloth: 0x4e4c58,
+      cloth2: 0x43414c,
+      trim: 0xb8a898,
+      leather: 0x4a3f3a,
+      pants: 0x45444a,
+      boots: 0x66544a,
+      // 長衣の袖口（素材では金具の色）を着物の色に
+      metal: 0x43414c,
+      hair: { kit: 'mage', color: 0x6e5e58, extras: ['bun'] },
       // 体つき（2026-11-23 人形の工房 その2 で決定）: トウマ・ユナと同じく、胴と腕・脚を細く
       torso: 0.8,
       limbs: 0.8,
       face: { brows: 'thin' },
-      mantle: 0x6a604e,
-      apron: { color: 0xbdb091, bib: true },
+      skirt: { color: 0x4e4c58, length: 'ankle' },
+      apron: { color: 0xceb8a4, bib: true, length: 'ankle', tie: true },
     },
   },
   /** 父: がっしりした体に、苔色の上着と革の帯。袖をまくり、短い髪と短く刈ったひげ。差し色は首の黄土の布 */
   father: {
+    picture: 'father',
     body: 0x515a3e,
     accent: 0x8a7040,
     hair: 0x2e261e,
@@ -600,25 +636,29 @@ export const LOOKS: Readonly<Record<string, LookDefinition>> = {
     belt: LEATHER,
     pouch: true,
     kaykit: {
-      base: 'barbarian',
+      // 立ち絵に合わせる（2026-11-28 人形の工房 その3）: 袖をまくった生成りのシャツに、茶の胴着、腰に巻いた灰の布の帯（前で結んで垂らす）、
+      // 灰の混じった髪とひげ、脚の巻き布。土台の体は、シャツと袖をまくった腕のある rogue にした（barbarian の体は、毛皮の縁と太い帯と斜めの革帯が絵に無いため）
+      base: 'rogue',
       head: 'barbarian',
-      height: 1.03,
-      width: 1.06,
-      skin: 0xb5937c,
-      // 観客の検査: 後ろ姿のトウマと見分けられるよう、トウマより明るい苔色・茶の髪にした
-      cloth: 0x6e7a4c,
-      cloth2: 0x5a6440,
-      trim: 0x9a8a6e,
-      leather: LEATHER,
-      pants: 0x4a3e30,
-      boots: LEATHER_DARK,
-      hair: { kit: 'knight', color: 0x5a4430 },
-      // 体つき（2026-11-23 人形の工房 その2 で決定）: 胴と腕・脚を細く（がっしりした体の土台なので、細くしても父らしい幅は残る）。
-      // 背と肩幅の倍率は体だけに掛け、頭を少しだけ小さく（およそ 0.95 倍）
+      height: 1.06,
+      width: 1.14,
+      skin: 0xe4bda3,
+      cloth: 0xc8ad98,
+      cloth2: 0xb09682,
+      trim: 0xb09682,
+      leather: 0x5e493c,
+      pants: 0x4b403b,
+      boots: 0x6e5a4e,
+      sleeves: 'rolled',
+      hands: 0xd8ae96,
+      hair: { kit: 'knight', color: 0x74645e },
+      vest: 0x6e5448,
+      sash: 0x46423f,
+      shins: { color: 0x5e4c44, kind: 'wraps' },
+      // 体つき（2026-11-23 人形の工房 その2 で決定）: 胴と腕・脚を細く。背と肩幅の倍率は体だけに掛ける
       bodyOnly: true,
-      torso: 0.8,
-      limbs: 0.8,
-      accent: 0x8a7040,
+      torso: 0.84,
+      limbs: 0.84,
     },
   },
   /** ミオ: 十四歳、小柄、肩までの黒髪、薬草の緑 */

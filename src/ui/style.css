@@ -3024,11 +3024,15 @@ body.in-dialogue #hud {
   pointer-events: none;
 }
 
-.dialogue-face[hidden] {
+.dialogue-face[hidden],
+.portrait-canvas[hidden],
+.portrait-picture[hidden] {
   display: none;
 }
 
-.portrait-canvas {
+.portrait-canvas,
+.portrait-picture {
+  object-fit: cover;
   display: block;
   width: 100%;
   height: 100%;

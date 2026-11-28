@@ -34,6 +34,17 @@ const shoot = async (url, name, sel = '#out', dpr = 1) => {
   }
   await page.close();
 };
+if ('compare' in args) {
+  // 絵と比べる（その3）: 人物ごとに、立ち絵と人形（正面・斜め前・後ろ）を並べた写真と、決まった4人の並び（スマホの大きさ）と白黒の版。
+  // --blind=yuna,father,... で、名前の代わりに番号を付けた並び（目隠しの当てっこ用）も撮る
+  const whos = (args.who ?? 'touma,yuna,father,mother').split(',').filter(Boolean);
+  await Promise.all(whos.map((who) => shoot(`who=${who}&round=${args.round}&kind=compare`, `compare-${who}-${args.round}.jpg`)));
+  await shoot(`who=&round=${args.round}&kind=lineup&set=${whos.join(',')}`, `lineup-${args.round}.jpg`, '#out', 2);
+  if (args.blind) await shoot(`who=&round=${args.round}&kind=lineup&blind=${args.blind}`, `blind-${args.round}.jpg`, '#out', 2);
+  await browser.close();
+  await server.close();
+  process.exit(0);
+}
 if ('trio' in args) {
   // 3つの向き（正面・斜め前・後ろ）の全身を人物ごとに1枚と、決まった人物との並び（スマホの大きさ）と、その白黒の版
   const whos = (args.who ?? '').split(',').filter(Boolean);

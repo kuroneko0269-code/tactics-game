@@ -40,14 +40,20 @@ export const PART_CELLS = {
   skin: [0, 0],
   // 素材の体が使っていない区画（どの体・頭も使っていないことを確かめた）: 素手・油染み・工具の木の柄・工具の鉄
   hands: [4, 1],
-  stain: [5, 1],
-  wood: [6, 1],
-  metal: [1, 2],
+  stain: [5, 1, 'l'],
+  // 鞘（革の暗い色）
+  sheath: [5, 1, 'r'],
+  wood: [6, 1, 'l'],
+  // 脚の筒（長靴・巻き布）
+  shin: [6, 1, 'r'],
+  metal: [1, 2, 'l'],
+  // 真鍮（剣の柄・帯の金具）
+  brass: [1, 2, 'r'],
 } as const satisfies Record<string, readonly [number, number] | readonly [number, number, 'l' | 'r']>;
 export type PartCell = keyof typeof PART_CELLS;
 
 /** 骨の番号（KayKit の5人で共通の骨の順番） */
-export const BONE = { hips: 1, spine: 2, chest: 3, upperarmL: 4, upperarmR: 9, head: 14, upperlegL: 15, upperlegR: 19 } as const;
+export const BONE = { hips: 1, spine: 2, chest: 3, upperarmL: 4, upperarmR: 9, head: 14, upperlegL: 15, lowerlegL: 16, upperlegR: 19, lowerlegR: 20 } as const;
 
 /** 1つの部品: 形と、付く骨（2つまで。重さは高さで決める） */
 export interface PartPiece {
@@ -282,6 +288,19 @@ export function emblemParts(look: KayKitLook): PartPiece[] {
   dot.rotateX(Math.PI / 2);
   const g = [ring, dot];
   if (look.emblem === 'chest') {
+    // 肩の短い外套がある時は、その上（左胸）に
+    if (look.capelet) {
+      const yy = b.shoulder - 0.16;
+      // 外套の面（上の半径 0.3・下の半径 0.64・高さ 0.44・前後 0.9 倍）の上の、左前 0.5 ラジアンの所
+      const r = 0.3 + (0.64 - 0.3) * ((b.shoulder + 0.1 - yy) / 0.44) + 0.012;
+      const a = 0.5;
+      for (const x of g) {
+        x.rotateX(-0.62);
+        x.rotateY(a * 0.85);
+        x.translate(Math.sin(a) * r, yy, Math.cos(a) * r * 0.9 - 0.01);
+      }
+      return g.map((x) => finish(x, 'accentB', { a: BONE.chest }, false));
+    }
     // 外套の前の身頃がある時は、その上（左胸）に
     const onCoat = look.cloak?.front === true;
     for (const x of g) {
@@ -312,6 +331,11 @@ export function mantleParts(look: KayKitLook): PartPiece[] {
   return [finish(bothSides(g), 'mantle', { a: BONE.chest }, false)];
 }
 
+/** スカートの裾の広がり（腰の幅からの増え） */
+function skirtFlare(look: KayKitLook): number {
+  return look.skirt?.length === 'ankle' ? 0.2 : 0.15;
+}
+
 /**
  * スカート（腰から膝の上まで、裾が広がる）。上の縁は腰の骨に、裾は左右の腿の骨にも付けて、歩く・座る時に脚に付いてくるようにする
  */
@@ -319,8 +343,8 @@ export function skirtParts(look: KayKitLook): PartPiece[] {
   if (!look.skirt) return [];
   const b = BODY_SIZE[look.base];
   const top = 0.8;
-  const bottom = 0.34;
-  const g = new THREE.CylinderGeometry(b.halfW - 0.02, b.halfW + 0.15, top - bottom, 16, 3, true);
+  const bottom = look.skirt.length === 'ankle' ? 0.07 : 0.34;
+  const g = new THREE.CylinderGeometry(b.halfW - 0.02, b.halfW + skirtFlare(look), top - bottom, 16, look.skirt.length === 'ankle' ? 6 : 3, true);
   g.scale(1, 1, 0.92);
   // 裾に、ゆるい波（布のひだ）を付ける
   const p = g.attributes.position!;
@@ -348,28 +372,93 @@ export function skirtParts(look: KayKitLook): PartPiece[] {
   return [piece];
 }
 
-/** 前掛け（bib で胸当てつき）と、腰の紐 */
+/** 前掛け（bib で胸当てつき）と、腰の紐。丈（length）・胸当ての肩紐（straps）・前の結び目（tie） */
 export function apronParts(look: KayKitLook): PartPiece[] {
   const a = look.apron;
   if (!a) return [];
   const b = BODY_SIZE[look.base];
-  // スカートの上に掛ける時は、スカートより外へ、短めに
+  // スカートの上に掛ける時は、スカートより外へ
   const over = look.skirt !== undefined;
   const r = b.front + (over ? 0.08 : 0.06);
   const top = 0.74;
-  const bottom = over ? 0.45 : Math.max(0.3, b.hem - 0.04);
-  const skirt = new THREE.CylinderGeometry(r, r + (over ? 0.12 : 0.08), top - bottom, 10, 2, true, -0.85, 1.7);
-  skirt.translate(0, (top + bottom) / 2, 0.0);
-  const pieces: PartPiece[] = [finish(bothSides(skirt), 'apron', { a: BONE.hips }, false)];
+  const bottom = a.length === 'ankle' ? 0.1 : a.length === 'knee' ? 0.22 : over ? 0.45 : Math.max(0.3, b.hem - 0.04);
+  // 裾の広がり: スカートの上では、スカートの裾より外へ出す（スカートの真ん中は体の前後の真ん中）
+  const flare = over ? Math.max(0.12, (skirtFlare(look) + b.halfW - r) * ((top - bottom) / (0.8 - (look.skirt?.length === 'ankle' ? 0.07 : 0.34))) + 0.05) : a.length ? 0.12 : 0.08;
+  const skirt = new THREE.CylinderGeometry(r, r + flare, top - bottom, 16, a.length ? 4 : 2, true, -0.85, 1.7);
+  skirt.translate(0, (top + bottom) / 2, over ? (b.front + b.back) / 2 * 0.5 : 0.0);
+  const legs = a.length !== undefined;
+  const pieces: PartPiece[] = [];
+  const front = finish(bothSides(skirt), 'apron', { a: BONE.hips }, false);
+  if (legs) {
+    // 膝の下まである前掛けは、裾ほど左右の腿の骨へ重さを移す（歩く時に脚に付いてくる）
+    const pos = front.geometry.attributes.position!;
+    const si = front.geometry.attributes.skinIndex!;
+    const sw = front.geometry.attributes.skinWeight!;
+    for (let i = 0; i < pos.count; i++) {
+      const down = Math.min(1, Math.max(0, (top - 0.1 - pos.getY(i)) / (top - 0.1 - bottom)));
+      const leg = down * 0.7;
+      const l = Math.min(1, Math.max(0, 0.5 + pos.getX(i) / 0.3));
+      si.setXYZW(i, BONE.hips, BONE.upperlegL, BONE.upperlegR, 0);
+      sw.setXYZW(i, 1 - leg, leg * l, leg * (1 - l), 0);
+    }
+  }
+  pieces.push(front);
   const band = new THREE.CylinderGeometry(r - 0.01, r - 0.01, 0.06, 14, 1, true);
   band.translate(0, top + 0.01, 0);
   pieces.push(finish(bothSides(band), 'apron', { a: BONE.hips }, false));
   if (a.bib) {
-    const bib = new THREE.CylinderGeometry(r - 0.03, r - 0.01, 0.28, 8, 1, true, -0.38, 0.76);
-    bib.translate(0, top + 0.15, 0);
+    const bh = a.straps ? 0.36 : 0.28;
+    const bib = new THREE.CylinderGeometry(r - 0.03, r - 0.01, bh, 8, 1, true, -0.38, 0.76);
+    bib.translate(0, top + bh / 2 + 0.01, 0);
     pieces.push(finish(bothSides(bib), 'apron', { a: BONE.chest }, false));
+    if (a.straps) {
+      // 胸当ての上の角から、肩を越えて背へ回る細い紐
+      for (const sx of [-1, 1]) {
+        const pts = [
+          new THREE.Vector3(sx * 0.13, top + bh, r - 0.02),
+          new THREE.Vector3(sx * 0.16, b.shoulder - 0.04, b.front - 0.04),
+          new THREE.Vector3(sx * 0.19, b.shoulder + 0.0, 0),
+          new THREE.Vector3(sx * 0.15, b.shoulder - 0.08, b.back + 0.02),
+          new THREE.Vector3(sx * 0.08, top + 0.12, b.back - 0.01),
+        ];
+        pieces.push(finish(tubeAlong(pts, 0.018, 0.5), 'apron', { a: BONE.chest }, false));
+      }
+    }
+  }
+  if (a.tie) {
+    // 前の結び目と、膝の上まで垂れた2本の端（腰の紐と同じ布）
+    const knot = roundedShell([0.03, top + 0.01, r + 0.02], [0.07, 0.045, 0.035], 0.6, 10, 8);
+    pieces.push(finish(knot, 'apron', { a: BONE.hips }, false));
+    for (const [dx, len, tilt] of [
+      [-0.02, 0.34, 0.08],
+      [0.07, 0.28, -0.1],
+    ] as const) {
+      const tail = new THREE.BoxGeometry(0.06, len, 0.012);
+      tail.translate(0, -len / 2, 0);
+      tail.rotateZ(tilt);
+      tail.translate(0.03 + dx, top - 0.02, r + 0.035);
+      pieces.push(finish(tail, 'apron', { a: BONE.hips }, false));
+    }
   }
   return pieces;
+}
+
+/** 点の列に沿った、断面の丸い細い管（紐・帯） */
+function tubeAlong(points: readonly THREE.Vector3[], radius: number, flat = 1): THREE.BufferGeometry {
+  const curve = new THREE.CatmullRomCurve3([...points]);
+  const g = new THREE.TubeGeometry(curve, Math.max(8, points.length * 5), radius, 6, false);
+  if (flat !== 1) {
+    // 断面を平たくする（帯のように）。曲線の向きに関わらず、体の外向き（前後）を薄くする
+    const p = g.attributes.position!;
+    const c = new THREE.Vector3();
+    for (let i = 0; i < p.count; i++) {
+      const t = Math.min(1, Math.floor(i / 7) / Math.max(1, Math.max(8, points.length * 5)));
+      curve.getPoint(t, c);
+      const dz = p.getZ(i) - c.z;
+      p.setZ(i, c.z + dz * flat);
+    }
+  }
+  return g;
 }
 
 /** 首の布（差し色。外套のない人物の差し色を見せる所） */
@@ -388,7 +477,7 @@ export function scarfParts(look: KayKitLook): PartPiece[] {
     tip.translate(0.03, b.shoulder - 0.11, b.front - 0.08);
     return [ring, knot, tip].map((g) => finish(g, 'accent', { a: BONE.chest }, false));
   }
-  if (look.accent === undefined || look.cloak || (look.hair.extras?.length ?? 0) > 0) return [];
+  if (look.accent === undefined || look.cloak || look.sash !== undefined || (look.hair.extras?.length ?? 0) > 0) return [];
   const b = BODY_SIZE[look.base];
   const g = new THREE.TorusGeometry(0.25, 0.06, 5, 12);
   g.rotateX(Math.PI / 2);
@@ -443,8 +532,203 @@ export function pauldronParts(look: KayKitLook): PartPiece[] {
   });
 }
 
+
+/** 肩の短い外套（肘まで。前の開いたケープ）と、裾と前の開きの細い縁 */
+export function capeletParts(look: KayKitLook): PartPiece[] {
+  const c = look.capelet;
+  if (!c) return [];
+  const b = BODY_SIZE[look.base];
+  const topY = b.shoulder + 0.1;
+  const h = 0.44;
+  const rTop = 0.3;
+  const rBottom = 0.64;
+  // 前の真ん中を開ける（gap ラジアン）
+  const gap = 0.26;
+  const shape = (r0: number, r1: number, hh: number, start: number, len: number, segs = 20) => {
+    const g = new THREE.CylinderGeometry(r0, r1, hh, segs, 3, true, start, len);
+    g.scale(1, 1, 0.9);
+    return g;
+  };
+  const cape = shape(rTop, rBottom, h, gap / 2, Math.PI * 2 - gap);
+  cape.translate(0, topY - h / 2, -0.01);
+  const pieces = [finish(bothSides(cape), 'mantle', { a: BONE.chest }, false)];
+  if (c.edge) {
+    // 裾の縁（外套の裾の外側に沿う細い帯）と、前の開きの縦の縁
+    const t = 0.045;
+    const k = t / h;
+    const hem = shape(rBottom - (rBottom - rTop) * k + 0.008, rBottom + 0.008, t, gap / 2, Math.PI * 2 - gap);
+    hem.translate(0, topY - h + t / 2, -0.01);
+    pieces.push(finish(bothSides(hem), 'accentB', { a: BONE.chest }, false));
+    for (const at of [gap / 2, Math.PI * 2 - gap / 2 - 0.07]) {
+      const v = shape(rTop + 0.008, rBottom + 0.008, h, at, 0.07, 2);
+      v.translate(0, topY - h / 2, -0.01);
+      pieces.push(finish(bothSides(v), 'accentB', { a: BONE.chest }, false));
+    }
+  }
+  return pieces;
+}
+
+/** 右の肩から左の腰へ斜めに掛けた革帯と、胸の金具 */
+export function baldricParts(look: KayKitLook): PartPiece[] {
+  if (!look.baldric) return [];
+  const b = BODY_SIZE[look.base];
+  const pts = [
+    new THREE.Vector3(-0.2, b.shoulder + 0.08, 0.05),
+    new THREE.Vector3(-0.16, b.shoulder - 0.02, b.front - 0.02),
+    new THREE.Vector3(0.0, b.shoulder - 0.24, b.front + 0.025),
+    new THREE.Vector3(0.2, 0.86, b.front + 0.015),
+    new THREE.Vector3(0.32, 0.74, b.front - 0.06),
+  ];
+  const strap = tubeAlong(pts, 0.036, 0.35);
+  const piece = finish(strap, 'sheath', { a: BONE.chest, b: BONE.hips, topY: 1.0, lowY: 0.74 }, false);
+  // 胸の金具（四角い輪）
+  const buckle = new THREE.TorusGeometry(0.03, 0.009, 4, 4);
+  buckle.rotateZ(Math.PI / 4);
+  buckle.rotateZ(0.65);
+  buckle.translate(-0.07, b.shoulder - 0.16, b.front + 0.045);
+  return [piece, finish(buckle, 'brass', { a: BONE.chest }, false)];
+}
+
+/** 左の腰に下げた、鞘に入った剣（柄は前上へ、鞘の先は後ろ下へ） */
+export function scabbardParts(look: KayKitLook): PartPiece[] {
+  if (!look.scabbard) return [];
+  const b = BODY_SIZE[look.base];
+  const hip = { a: BONE.hips };
+  const x = b.halfW + 0.03;
+  const top = new THREE.Vector3(x - 0.02, 0.76, 0.16);
+  const tip = new THREE.Vector3(x + 0.06, 0.34, -0.2);
+  const dir = tip.clone().sub(top);
+  const len = dir.length();
+  const along = (g: THREE.BufferGeometry, from: THREE.Vector3, d: THREE.Vector3) => {
+    g.translate(0, -0.5 * 1, 0);
+    g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, -1, 0), d.clone().normalize()));
+    g.translate(from.x, from.y, from.z);
+    return g;
+  };
+  const sheath = new THREE.CylinderGeometry(0.034, 0.026, 1, 8);
+  sheath.scale(1, len, 0.7);
+  sheath.translate(0, 0, 0);
+  const sh = along(sheath, top, dir);
+  const tipCap = new THREE.SphereGeometry(0.03, 8, 6);
+  tipCap.translate(tip.x, tip.y, tip.z);
+  // 柄: 鞘の口から前上へ
+  const up = dir.clone().normalize().multiplyScalar(-1);
+  const grip = new THREE.CylinderGeometry(0.02, 0.02, 1, 8);
+  grip.scale(1, 0.17, 1);
+  const gStart = top.clone().add(up.clone().multiplyScalar(0.03));
+  const gr = new THREE.CylinderGeometry(0.02, 0.02, 0.17, 8);
+  gr.translate(0, 0.085, 0);
+  gr.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), up));
+  gr.translate(gStart.x, gStart.y, gStart.z);
+  const guard = new THREE.BoxGeometry(0.17, 0.028, 0.04);
+  guard.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), up));
+  guard.translate(gStart.x, gStart.y, gStart.z);
+  const pommelAt = gStart.clone().add(up.clone().multiplyScalar(0.19));
+  const pommel = new THREE.SphereGeometry(0.032, 10, 8);
+  pommel.translate(pommelAt.x, pommelAt.y, pommelAt.z);
+  return [finish(sh, 'sheath', hip, false), finish(tipCap, 'brass', hip, false), finish(gr, 'sheath', hip, false), finish(guard, 'brass', hip, false), finish(pommel, 'brass', hip, false)];
+}
+
+/** 脚の1本（骨を付けた時の姿勢での、膝と足首の位置） */
+export interface LegAxis {
+  readonly bone: number;
+  readonly knee: THREE.Vector3;
+  readonly ankle: THREE.Vector3;
+}
+
+/** 脚の筒（膝の下から足首まで）。長靴の筒（上を折り返す）か、帯を重ねた巻き布 */
+export function shinParts(look: KayKitLook, legs: readonly LegAxis[]): PartPiece[] {
+  const s = look.shins;
+  if (!s) return [];
+  const pieces: PartPiece[] = [];
+  for (const leg of legs) {
+    const y0 = leg.ankle.y + 0.07;
+    const y1 = leg.knee.y - (s.kind === 'boots' ? 0.02 : 0.05);
+    const h = y1 - y0;
+    const r = s.kind === 'boots' ? 0.13 : 0.125;
+    const tube = new THREE.CylinderGeometry(r + (s.kind === 'boots' ? 0.012 : 0), r - 0.01, h, 12, 2, true);
+    tube.translate(leg.ankle.x, y0 + h / 2, leg.ankle.z + 0.005);
+    pieces.push(finish(bothSides(tube, 0.008), 'shin', { a: leg.bone }, false));
+    if (s.kind === 'boots' && s.cuff) {
+      const cuff = new THREE.CylinderGeometry(r + 0.04, r + 0.03, 0.08, 12, 1, true);
+      cuff.translate(leg.ankle.x, y1 - 0.03, leg.ankle.z + 0.005);
+      pieces.push(finish(bothSides(cuff, 0.008), 'shin', { a: leg.bone }, false));
+    }
+    if (s.kind === 'wraps') {
+      // 巻き布の帯（少し斜めの輪を重ねる）
+      for (let i = 0; i < 4; i++) {
+        const ring = new THREE.TorusGeometry(r + 0.006, 0.016, 4, 14);
+        ring.rotateX(Math.PI / 2 + (i % 2 ? 0.22 : -0.22));
+        ring.translate(leg.ankle.x, y0 + 0.04 + (h - 0.06) * (i / 3), leg.ankle.z + 0.005);
+        pieces.push(finish(ring, 'shin', { a: leg.bone }, false));
+      }
+    }
+  }
+  return pieces;
+}
+
+/** 袖のない胴着（前の開いた、腰までの上着。背と左右の前身頃。脇は腕を通す所として開ける） */
+export function vestParts(look: KayKitLook): PartPiece[] {
+  if (look.vest === undefined) return [];
+  const b = BODY_SIZE[look.base];
+  const top = b.shoulder + 0.03;
+  const bottom = 0.5;
+  const h = top - bottom;
+  const pieces: PartPiece[] = [];
+  for (const [start, len] of [
+    [Math.PI - 1.3, 2.6],
+    [0.42, 0.85],
+    [Math.PI * 2 - 1.27, 0.85],
+  ] as const) {
+    const g = new THREE.CylinderGeometry(b.halfW - 0.04, b.halfW + 0.05, h, 10, 4, true, start, len);
+    g.scale(1, 1, 0.94);
+    g.translate(0, bottom + h / 2, (b.front + b.back) / 2);
+    pieces.push(finish(bothSides(g), 'cloak', { a: BONE.chest, b: BONE.hips, topY: 0.95, lowY: bottom }, false));
+  }
+  return pieces;
+}
+
+/** 腰に巻いた布の帯（前で結んで、端を垂らす） */
+export function sashParts(look: KayKitLook): PartPiece[] {
+  if (look.sash === undefined) return [];
+  const b = BODY_SIZE[look.base];
+  const y = 0.76;
+  const band = new THREE.CylinderGeometry(b.halfW + 0.035, b.halfW + 0.045, 0.14, 16, 1, true);
+  band.scale(1, 1, 0.95);
+  band.translate(0, y, (b.front + b.back) / 2);
+  const hip = { a: BONE.hips };
+  const knot = roundedShell([-0.1, y, b.front + 0.05], [0.08, 0.06, 0.05], 0.6, 10, 8);
+  const pieces = [finish(bothSides(band), 'accent', hip, false), finish(knot, 'accent', hip, false)];
+  for (const [dx, len, tilt] of [
+    [-0.14, 0.4, 0.12],
+    [-0.04, 0.32, -0.06],
+  ] as const) {
+    const tail = new THREE.BoxGeometry(0.085, len, 0.016);
+    tail.translate(0, -len / 2, 0);
+    tail.rotateZ(tilt);
+    tail.translate(dx, y - 0.03, b.front + 0.06);
+    pieces.push(finish(tail, 'accent', hip, false));
+  }
+  return pieces;
+}
+
 /** 人物の自作の部品をすべて */
 export function customParts(look: KayKitLook): PartPiece[] {
   // 髪は src/render/kaykitHair.ts（頭巾をかぶる時は作らない）
-  return [...headwearParts(look), ...cloakParts(look), ...emblemParts(look), ...mantleParts(look), ...skirtParts(look), ...apronParts(look), ...scarfParts(look), ...toolParts(look), ...pauldronParts(look)];
+  return [
+    ...headwearParts(look),
+    ...cloakParts(look),
+    ...capeletParts(look),
+    ...emblemParts(look),
+    ...mantleParts(look),
+    ...vestParts(look),
+    ...skirtParts(look),
+    ...apronParts(look),
+    ...sashParts(look),
+    ...baldricParts(look),
+    ...scabbardParts(look),
+    ...scarfParts(look),
+    ...toolParts(look),
+    ...pauldronParts(look),
+  ];
 }

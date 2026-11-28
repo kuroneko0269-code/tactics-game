@@ -39,12 +39,90 @@
       const lineup = kind === 'lineup';
       const list = lineup
         ? [
-            ...DECIDED.map((id) => ({ id, name: names[id], sub: '決定', v: {} })),
+            ...(q.get('blind') ? q.get('blind').split(',').map((id, i) => ({ id, name: `${i + 1}`, sub: '', v: {} })) : (q.get('set') ? q.get('set').split(',') : DECIDED).map((id) => ({ id, name: names[id], sub: '決定', v: {} }))),
             ...who.split(',').filter(Boolean).flatMap((id) => VARIANTS[id][round].map((v) => ({ id, name: names[id], sub: v.name.split(' ')[0], v }))),
           ]
         : VARIANTS[who][round];
       if (lineup) {
         await renderLineup();
+      }
+      if (kind === 'compare') await renderCompare();
+
+      /**
+       * 絵と比べる（人形の工房 その3）: 左に立ち絵（art/characters/<人物>.png）、右に人形の正面・斜め前・後ろ。
+       * 人形は、絵の人物と同じ高さに映るように、正射影のカメラで頭から足までを合わせる
+       */
+      async function renderCompare() {
+        const H = 760, PAD = 24, HEAD = 40;
+        const img = new Image();
+        img.src = `/art/characters/${who}.png`;
+        await img.decode();
+        // 絵の人物の範囲（暗い地より明るい所）
+        const probe = document.createElement('canvas');
+        probe.width = img.width;
+        probe.height = img.height;
+        const pc = probe.getContext('2d');
+        pc.drawImage(img, 0, 0);
+        const px = pc.getImageData(0, 0, img.width, img.height).data;
+        let x0 = img.width, x1 = 0, y0 = img.height, y1 = 0;
+        for (let y = 0; y < img.height; y += 2)
+          for (let x = 0; x < img.width; x += 2) {
+            const i = (y * img.width + x) * 4;
+            if (px[i] + px[i + 1] + px[i + 2] > 150) {
+              x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+            }
+          }
+        // 光のにじみを少し除いた、人物の高さ（にじみはおよそ 30 画素）
+        y0 += 30; y1 -= 20;
+        const k = (H - 2 * PAD) / (y1 - y0);
+        const DW = Math.round((x1 - x0) * k) + 2 * PAD;
+        const PW = 400;
+        const views = [['正面', 0], ['斜め前', 0.9], ['後ろ', Math.PI]];
+        const W = DW + views.length * PW;
+        const out = document.getElementById('out');
+        out.width = W; out.height = H + HEAD;
+        const ctx = out.getContext('2d');
+        ctx.fillStyle = '#16161a';
+        ctx.fillRect(0, 0, W, H + HEAD);
+        ctx.drawImage(img, x0, y0 - PAD / k, x1 - x0, (y1 - y0) + 2 * PAD / k, PAD, HEAD, DW - 2 * PAD, H);
+        ctx.fillStyle = '#e8e2d0';
+        ctx.font = 'bold 22px sans-serif';
+        ctx.fillText(`${names[who]}　絵`, 10, 28);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+        renderer.setPixelRatio(1);
+        renderer.setSize(PW, H);
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x16161a);
+        const hemi = new THREE.HemisphereLight(0xe8ecff, 0x6a5a4a, 1.6);
+        const sun = new THREE.DirectionalLight(0xfff0dc, 2.2);
+        sun.position.set(1.2, 2.5, 4);
+        scene.add(hemi, sun);
+        await loadKayKit();
+        for (const [i, [label, yaw]] of views.entries()) {
+          const p = createKayKitPuppet(lookOf(who, VARIANTS[who]?.[round]?.[0] ?? {}));
+          scene.add(p.group);
+          p.setYaw(yaw);
+          for (let t = 0; t < 1.2; t += 1 / 30) p.update(t);
+          p.group.updateMatrixWorld(true);
+          const box = new THREE.Box3().setFromObject(p.group);
+          const h = box.max.y - box.min.y;
+          const half = (h * H) / (H - 2 * PAD) / 2;
+          const cam = new THREE.OrthographicCamera(-half * PW / H, half * PW / H, half, -half, 0.01, 50);
+          const cy = (box.max.y + box.min.y) / 2;
+          cam.position.set(0, cy, 10);
+          cam.lookAt(0, cy, 0);
+          renderer.render(scene, cam);
+          const x = DW + i * PW;
+          ctx.drawImage(renderer.domElement, x, HEAD, PW, H);
+          ctx.fillStyle = '#e8e2d0';
+          ctx.font = 'bold 18px sans-serif';
+          ctx.fillText(`人形　${label}`, x + 10, 28);
+          scene.remove(p.group);
+        }
+        document.title = `${names[who]} 絵と比べる`;
+        window.done = true;
+        throw new Error('lineup done');
       }
 
       async function renderLineup() {

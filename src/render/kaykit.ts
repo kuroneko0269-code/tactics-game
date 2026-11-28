@@ -4,7 +4,7 @@ import type { Direction } from '../core/geometry';
 import type { KayKitBase, KayKitHairShape, KayKitHead, KayKitLook, LookDefinition, LookItemSlot } from '../data/story/looks';
 import { GESTURES } from '../data/story/stageDefs';
 import { FORELOCK_ROOT, hairParts } from './kaykitHair';
-import { BONE, customParts, finish, PART_CELLS, type PartCell, type PartPiece } from './kaykitParts';
+import { BONE, customParts, finish, PART_CELLS, shinParts, type PartCell, type PartPiece } from './kaykitParts';
 import { buildModel } from './props';
 import { YAW_OF, type Puppet, type PuppetPose } from './puppet';
 
@@ -158,7 +158,7 @@ function roleColors(look: KayKitLook): Record<Role, number> {
     trim: look.trim ?? 0xb8ab8c,
     leather: look.leather ?? 0x5e4430,
     leatherDark: darker(look.leather ?? 0x5e4430, 0.7),
-    metal: 0x6f7272,
+    metal: look.metal ?? 0x6f7272,
     pants: look.pants ?? 0x3e342c,
     boots: look.boots ?? 0x3a2a20,
     accent2: look.accent ?? look.cloth,
@@ -187,11 +187,12 @@ function paletteTexture(look: KayKitLook): THREE.Texture {
   const map = { ...ROLE_MAP[look.base], ...ROLE_MAP.head };
   const partColor: Record<PartCell, number> = {
     hair: look.hair.color,
-    cloak: look.cloak?.color ?? look.cloth,
+    // 胴着は外套の区画を使う（外套と胴着を両方着る人物はいない）
+    cloak: look.cloak?.color ?? look.vest ?? look.cloth,
     apron: look.apron?.color ?? look.cloth,
-    mantle: look.mantle ?? look.cloth,
+    mantle: look.mantle ?? look.capelet?.color ?? look.cloth,
     headwear: look.headwear?.color ?? look.cloth,
-    accent: look.accent ?? look.cloth,
+    accent: look.sash ?? look.accent ?? look.cloth,
     accentB: look.accentB ?? 0xd8d4c8,
     // 下ろした頭巾は外套より明るく（外套と髪の境目を見せる）
     cloakInner: new THREE.Color(look.cloak?.color ?? look.cloth).multiplyScalar(1.45).getHex(),
@@ -209,6 +210,9 @@ function paletteTexture(look: KayKitLook): THREE.Texture {
     stain: look.pauldrons === 'leather' && !look.stains ? (look.leather ?? 0x5e4430) : new THREE.Color(look.cloth).lerp(new THREE.Color(0x3a3028), 0.32).getHex(),
     wood: 0x7a5a3a,
     metal: 0x6f7272,
+    brass: 0xb08a48,
+    sheath: new THREE.Color(look.leather ?? 0x5e4430).multiplyScalar(0.75).getHex(),
+    shin: look.shins?.color ?? look.boots ?? 0x3a2a20,
     shine: 0xf4eee2,
     // 白目は真っ白にしない（夜の灯の場面で、白目だけが光って浮かないように。肌の明るさに近い生成り）
     sclera: 0xcfc4ae,
@@ -1102,7 +1106,14 @@ export function createKayKitPuppet(look: LookDefinition): Puppet {
     (g.attributes.outline as THREE.BufferAttribute).array.fill(0);
     pieces.push(g);
   }
-  for (const p of [...hairPieces, ...customParts(k)]) {
+  // 脚の筒（長靴・巻き布）は、骨を付けた時の膝と足首の位置に合わせて作る
+  const bindAt = (name: string) => new THREE.Vector3().setFromMatrixPosition(A.boneInverses[A.boneNames.indexOf(sanitized(name))]!.clone().invert());
+  const legs = (['l', 'r'] as const).map((side) => ({
+    bone: side === 'l' ? BONE.lowerlegL : BONE.lowerlegR,
+    knee: bindAt(`lowerleg.${side}`),
+    ankle: bindAt(`foot.${side}`),
+  }));
+  for (const p of [...hairPieces, ...customParts(k), ...shinParts(k, legs)]) {
     const g = normalized(p.geometry, null);
     if (p.noOutline) (g.attributes.outline as THREE.BufferAttribute).array.fill(0);
     if (p.forelock && forelockBone) {
