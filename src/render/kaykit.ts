@@ -906,6 +906,72 @@ function flatRibbon(points: readonly THREE.Vector3[], width: number, taper = 0.8
   return g;
 }
 
+/**
+ * ひげを短く刈る（ひげの頭 barbarian。人形の工房 その3）: 素材のひげ（髪の区画 1,0 の、目より下の点）を、肌の面から少しだけ浮いた所まで寄せ、
+ * あごの下へ垂れた所を上げる。ひげは頭と一体の形なので、外さずに点を動かす
+ */
+function trimBeard(g: THREE.BufferGeometry): void {
+  const p = g.attributes.position!;
+  const uv = g.attributes.uv!;
+  const idx = g.index!.array;
+  // 肌の面（区画 0,0 の前向きの面）
+  const skin: [THREE.Vector3, THREE.Vector3, THREE.Vector3][] = [];
+  for (let t = 0; t < idx.length; t += 3) {
+    if (cellOf(uv.getX(idx[t]!), uv.getY(idx[t]!)) !== '0,0') continue;
+    const a = new THREE.Vector3().fromBufferAttribute(p, idx[t]!);
+    const b = new THREE.Vector3().fromBufferAttribute(p, idx[t + 1]!);
+    const c = new THREE.Vector3().fromBufferAttribute(p, idx[t + 2]!);
+    if (Math.max(a.z, b.z, c.z) < 0.05) continue;
+    skin.push([a, b, c]);
+  }
+  const CHIN = 1.26;
+  for (let i = 0; i < p.count; i++) {
+    if (cellOf(uv.getX(i), uv.getY(i)) !== '1,0') continue;
+    let y = p.getY(i);
+    if (y > 1.58) continue;
+    let x = p.getX(i);
+    let z = p.getZ(i);
+    if (y < CHIN) y = CHIN - (CHIN - y) * 0.18;
+    if (Math.abs(x) > 0.46) x = Math.sign(x) * (0.46 + (Math.abs(x) - 0.46) * 0.3);
+    const sz = surfaceZ(skin, x * 0.97, Math.max(y, 1.23));
+    if (sz !== undefined) {
+      if (z > sz) z = sz + Math.max(0.014, (z - sz) * 0.14);
+    } else z *= 0.85;
+    p.setXYZ(i, x, y, z);
+  }
+}
+
+/** あごに沿った薄いひげ（ひげの無い頭に描く。人形の工房 その3）: 頬からあごへの帯・あごの先・口の上 */
+function paintedBeardParts(surf: FaceSurface): PartPiece[] {
+  const jaw = flatStroke(
+    [
+      [-0.41, 1.58],
+      [-0.38, 1.43],
+      [-0.28, 1.31],
+      [-0.13, 1.25],
+      [0, 1.235],
+      [0.13, 1.25],
+      [0.28, 1.31],
+      [0.38, 1.43],
+      [0.41, 1.58],
+    ],
+    0.085,
+    0,
+  );
+  const chin = flatDisc(0, 1.3, 0.12, 0.075);
+  const lip = flatStroke(
+    [
+      [-0.15, 1.395],
+      [-0.05, 1.42],
+      [0.05, 1.42],
+      [0.15, 1.395],
+    ],
+    0.04,
+    0,
+  );
+  return [jaw, chin, lip].map((g) => finish(conform(g, surf, 0.006), 'hair', { a: BONE.head }, true));
+}
+
 /** 頬の赤み: 頬の面に沿わせた薄い楕円 */
 function blushParts(surf: FaceSurface): PartPiece[] {
   return [1, -1].map((sign) => finish(conform(flatDisc(sign * 0.27, 1.5, 0.062, 0.038), surf, 0.004), 'blush', { a: BONE.head }, true));
@@ -1082,7 +1148,10 @@ export function createKayKitPuppet(look: LookDefinition): Puppet {
   // 髪: 作者が頭と一体で作った髪（色の区画 1,0）を、kit の頭から取り出して使う（顔の頭の髪は外す。形を変える時は hair.shape）。
   // Rogue の頭の耳飾り（3,0）は外す。Mage の頭の後ろの結い目（1,1）は髪の色にする。barbarian の頭はひげ（1,0）を残し、眉の塊だけを外す
   dropCells(head, ['3,0']);
-  if (headName === 'barbarian') dropBrowBlocks(head);
+  if (headName === 'barbarian') {
+    dropBrowBlocks(head);
+    if (k.beard === 'trim') trimBeard(head);
+  }
   else dropCells(head, ['1,0', '1,1']);
   const shell = normalized(A.heads[k.hair.kit].geometry, boneMapOf(A.heads[k.hair.kit]));
   hairTieAsHair(shell);
@@ -1099,7 +1168,7 @@ export function createKayKitPuppet(look: LookDefinition): Puppet {
   pieces.push(head);
   const surf = faceSurface(head);
   const large = face.eyes === 'large';
-  const faceParts = [...eyeParts(surf, face.eyes ?? 'adult'), ...browParts(surf, face.brows ?? 'normal', large, face.browLift), ...(face.blush ? blushParts(surf) : [])];
+  const faceParts = [...eyeParts(surf, face.eyes ?? 'adult'), ...browParts(surf, face.brows ?? 'normal', large, face.browLift), ...(face.blush ? blushParts(surf) : []), ...(k.beard === 'paint' ? paintedBeardParts(surf) : [])];
   for (const f of faceParts) {
     const g = normalized(f.geometry, null);
     // 顔に描いた目と眉にも、輪郭線を付けない

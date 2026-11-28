@@ -201,6 +201,7 @@
         ? [
             ['正面', 0],
             ['斜め前', 0.7],
+            ['横', Math.PI / 2],
             ['後ろ', Math.PI],
           ]
         : small
@@ -216,7 +217,7 @@
             ['後ろ', Math.PI],
             [who === 'touma' ? 'うつむく（見下ろし）' : '見下ろし（ゲームの角度）', 0.35, 'down'],
           ];
-      const COLS = small ? 2 : 3;
+      const COLS = small ? 2 : trio ? 4 : 3;
       const ROWS = Math.ceil(views.length / COLS);
       const HEAD = 44;
       const GAP = 16;
@@ -292,6 +293,10 @@
             const e = THREE.MathUtils.degToRad(24);
             camera.position.set(0, 0.66 + Math.sin(e) * 1.75, Math.cos(e) * 1.75);
             camera.lookAt(0, 0.66, 0);
+          } else if (trio && q.get('frame') === 'head') {
+            // 胸から上（髪とひげを比べる時）
+            camera.position.set(0, 0.8, 2.1);
+            camera.lookAt(0, 0.68, 0);
           } else if (trio) {
             camera.position.set(0, 0.66, 3.8);
             camera.lookAt(0, 0.55, 0);

@@ -379,6 +379,27 @@ function bun(): THREE.BufferGeometry {
   return blob([0, 1.42, -0.6], [0.2, 0.17, 0.15]);
 }
 
+/** うなじの大きなまとめ髪（母）: 後ろの低い所に、左へ少し寄せた大きな塊と、その上に重ねた小さな塊（巻いた形） */
+function bunLarge(): THREE.BufferGeometry[] {
+  return [blob([0.1, 1.42, -0.5], [0.26, 0.21, 0.19], [0, 0.3, 0.15]), blob([0.2, 1.5, -0.42], [0.15, 0.13, 0.13], [0, 0.4, -0.2])];
+}
+
+/** 額の横のほつれ毛（母）: 右のこめかみから頬の横へ垂れる、小さく細い房1つ */
+function strand(): THREE.BufferGeometry {
+  return smoothTube(
+    [
+      [-0.34, 1.94, 0.4],
+      [-0.41, 1.82, 0.41],
+      [-0.44, 1.7, 0.38],
+      [-0.42, 1.61, 0.34],
+    ],
+    (u) => 0.068 * (1 - u * 0.6),
+    0.45,
+    14,
+    12,
+  );
+}
+
 /** 人物の髪に足す塊（fit は頭を縮める値。頭と胸にまたがる房の形を合わせるため） */
 export function hairParts(look: KayKitLook, fit: HeadFit): PartPiece[] {
   if (look.headwear?.kind === 'hood') return [];
@@ -411,6 +432,8 @@ export function hairParts(look: KayKitLook, fit: HeadFit): PartPiece[] {
     for (const x of g.lens) out.push(finish(x, 'metal', head, true));
   }
   if (extras.includes('bun')) out.push(finish(bun(), 'hair', head, true));
+  if (extras.includes('bunLarge')) for (const g of bunLarge()) out.push(finish(g, 'hair', head, true));
+  if (extras.includes('strand')) out.push(finish(strand(), 'hair', head, true));
   if (extras.includes('forelock')) out.push({ ...finish(forelock(), 'hair', head, true), forelock: true });
   if (extras.includes('flicks')) for (const g of flicks()) out.push(finish(g, 'hair', head, true));
   if (extras.includes('flareUp')) for (const g of flareUp()) out.push(finish(g, 'hair', head, true));

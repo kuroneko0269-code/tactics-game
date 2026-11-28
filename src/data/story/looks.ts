@@ -139,9 +139,10 @@ export interface KayKitLook {
     /**
      * 自作で足す、なめらかな大きな塊（bun 後ろのまとめ・twinTails 二つ結びのおさげ・ponytail 後ろで1つに結んだ房・forelock 垂れた前髪の1房（うつむくと垂れる）・
      * flicks 寝かせた毛先（耳の後ろと後ろ頭の裾の、毛先だけ少し跳ねる平たい房）・flareUp 跳ねた短い髪（見比べ用の仮の頭だけ）・
+     * bunLarge うなじの大きなまとめ髪（横と後ろから見える大きさ。少し左へ寄せる）・strand 額の横のほつれ毛（右のこめかみから頬へ垂れる小さな房）・
      * pin 前髪の横の丸い金具の髪留め・bows 結び目の小さなリボン・flower 耳の上の小さな花の髪飾り・goggles 頭に上げた作業用の眼鏡（帯は前掛けの色、枠は accentB））
      */
-    readonly extras?: readonly ('bun' | 'twinTails' | 'ponytail' | 'forelock' | 'flicks' | 'flareUp' | 'pin' | 'bows' | 'flower' | 'goggles')[];
+    readonly extras?: readonly ('bun' | 'bunLarge' | 'strand' | 'twinTails' | 'ponytail' | 'forelock' | 'flicks' | 'flareUp' | 'pin' | 'bows' | 'flower' | 'goggles')[];
     /** 作者の髪の形を変える（長さ・量・前髪・分け目・立たせる） */
     readonly shape?: KayKitHairShape;
     /** 二つ結びの房の形（twinTails の時。省くと胸の前へ下ろす元の形） */
@@ -161,6 +162,11 @@ export interface KayKitLook {
   readonly accentB?: number;
   /** 首に巻いた小さな三角の布（差し色。前で結ぶ） */
   readonly neckerchief?: boolean;
+  /**
+   * ひげ（ひげの頭 barbarian の時）: trim で素材のひげを顔に沿わせて短く刈る。
+   * paint でひげの無い頭（head は knight など）のあごに沿って、薄いひげを顔の面に描く
+   */
+  readonly beard?: 'trim' | 'paint';
   /** 胸か肩の丸い印（色は accentB） */
   readonly emblem?: 'chest' | 'shoulder';
   /** スカート（腰から膝の上まで。脚の動きに付いてくる。length: 'ankle' で足首まで） */

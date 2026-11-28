@@ -49,7 +49,8 @@ if ('trio' in args) {
   // 3つの向き（正面・斜め前・後ろ）の全身を人物ごとに1枚と、決まった人物との並び（スマホの大きさ）と、その白黒の版
   const whos = (args.who ?? '').split(',').filter(Boolean);
   await Promise.all(whos.map((who) => shoot(`who=${who}&round=${args.round}&kind=trio`, `${who}-${args.round}.jpg`)));
-  await shoot(`who=${whos.join(',')}&round=${args.round}&kind=lineup`, `lineup-${args.round}.jpg`, '#out', 2);
+  if (args.frame) await Promise.all(whos.map((who) => shoot(`who=${who}&round=${args.round}&kind=trio&frame=${args.frame}`, `${who}-${args.round}-${args.frame}.jpg`)));
+  await shoot(`who=${whos.join(',')}&round=${args.round}&kind=lineup${args.set ? `&set=${args.set}` : ''}`, `lineup-${args.round}.jpg`, '#out', 2);
   await browser.close();
   await server.close();
   process.exit(0);

@@ -512,3 +512,25 @@ VARIANTS.yelma[7][2].note = '灰の外套・下ろした頭巾・ゆるくまと
 VARIANTS.hald[7][0].note = '膝までの濃紺の外套・銀の縁と留め具';
 VARIANTS.hald[7][1].note = '長衣の体・灰の肩掛け・銀の留め具';
 VARIANTS.hald[7][2].note = '鉄の肩当て・背に丸い盾・銀の留め具';
+
+// ---- 人形の工房 その3（立ち絵に合わせる）。往復2: 母の髪・父のひげ・ユナのおさげ ----
+const MOTHER_HAIR = { kit: 'mage', color: 0x6e5e58 };
+const YUNA_TAILS2 = { tie: [0.5, 1.47, -0.1], path: [[0.4, 1.3, -0.04], [0.45, 1.2, -0.01], [0.47, 1.1, 0.0]], root: 0.074, bulge: 0.35, taper: 0.7, chest: true };
+VARIANTS.mother.w2 = [
+  { name: '前', note: '往復1の形', look: {} },
+  { name: 'A まとめ髪', note: '後ろの髪を短くし、うなじに大きなまとめ髪', look: { hair: { ...MOTHER_HAIR, shape: { length: 0.5 }, extras: ['bunLarge'] } } },
+  { name: 'B ほつれ毛', note: 'A に、額の横のほつれ毛を1つ', look: { hair: { ...MOTHER_HAIR, shape: { length: 0.5 }, extras: ['bunLarge', 'strand'] } } },
+];
+VARIANTS.father.w2 = [
+  { name: '前', note: '往復1の形', look: {} },
+  { name: 'A 刈る', note: '素材のひげを顔に沿わせて短く', look: { beard: 'trim' } },
+  { name: 'B 描く', note: 'ひげの無い頭に、あごに沿った薄いひげ', look: { head: 'knight', beard: 'paint' } },
+];
+VARIANTS.yuna.w2 = [
+  { name: '前', note: '往復1の形', look: {} },
+  { name: '後', note: '房を太く、肩の外側へ', look: { hair: { tails: YUNA_TAILS2 } } },
+];
+// スマホの大きさの並び用（直した後だけ。母は B、父は A）
+VARIANTS.mother.w2s = [{ ...VARIANTS.mother.w2[2], name: '後（B）' }, { ...VARIANTS.mother.w2[1], name: '後（A）' }];
+VARIANTS.father.w2s = [{ ...VARIANTS.father.w2[1], name: '後（A）' }, { ...VARIANTS.father.w2[2], name: '後（B）' }];
+VARIANTS.yuna.w2s = [{ ...VARIANTS.yuna.w2[1], name: '後' }];
